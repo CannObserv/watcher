@@ -162,6 +162,15 @@ class TestTheCheck:
         assert rc == 1
         assert WHEEL in err
 
+    def test_a_lock_that_names_no_wheelhouse_file_fails_closed(self, checkout, capsys):
+        """A lock spelling the source some new way reads as nothing to hold:
+        that must stop the start, not pass it with every row unchecked."""
+        (checkout.root / "uv.lock").write_text(lock(source="/abs/.wheelhouse"))
+        rc, out, err = run(capsys)
+        assert rc == 1
+        assert "no wheelhouse file" in err
+        assert not out
+
     def test_an_unreadable_lock_fails_closed(self, checkout, capsys):
         (checkout.root / "uv.lock").unlink()
         rc, _, err = run(capsys)

@@ -15,11 +15,12 @@ network call and imports only the standard library (no ``--with`` to resolve),
 so a boot that starts before the network cannot trip it. The sync before it is
 the fail-open, online half: it refetches a file that misses its pin.
 
-``scripts/sync_wheelhouse.py`` imports ``locked_files``, ``pins`` and
-``sha256`` from here, so the two read the lock and the table one way.
+``scripts/sync_wheelhouse.py`` imports ``TABLE``, ``pins`` and ``sha256``
+from here, so the two read the lock and the table one way.
 
 Exit codes: ``0`` every locked file matches its pin · ``1`` anything else
-(a missing file, a missing or malformed pin, a mismatch, an unreadable lock).
+(a missing file, a missing or malformed pin, a mismatch, an unreadable lock
+or one that names no wheelhouse file).
 Output is plain text, one line, like the sync's (#247).
 """
 
@@ -60,6 +61,12 @@ def pins(project: Path) -> dict[str, str]:
     pyproject = tomllib.loads((project / "pyproject.toml").read_text())
     table = pyproject.get("tool", {}).get("watcher", {}).get(TABLE, {})
     names = locked_files(lock)
+    # Fail closed on nothing to hold: a lock that spells the source some new way
+    # would otherwise pass the check with every row unchecked.
+    if not names:
+        raise ValueError(
+            f"uv.lock names no wheelhouse file (a source of {' or '.join(WHEELHOUSE_SOURCES)})"
+        )
     missing = [name for name in names if name not in table]
     if missing:
         raise ValueError(
@@ -102,7 +109,7 @@ def check() -> int:
         return 1
 
     print(
-        f"wheelhouse pins hold: {', '.join(pinned) or 'no locked files'} match"
+        f"wheelhouse pins hold: {', '.join(pinned)} match"
         f" pyproject.toml's [tool.watcher.{TABLE}] -> {wheelhouse}"
     )
     return 0

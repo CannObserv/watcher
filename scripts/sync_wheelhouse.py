@@ -24,11 +24,12 @@ way the identity needs only ``roles/storage.objectViewer`` on the bucket.
 
 Exit codes: ``0`` success (including a no-op re-run) · ``1`` failure (auth,
 network, a missing bucket, a locked file with no pin or one the bucket does not
-list, or a download that is not the pinned file). CI runs it into an empty
-wheelhouse in every job, so a download that misses its pin fails CI. The
-systemd unit runs it as a non-fatal ``ExecStartPre`` (``-`` prefix): a
-transient failure is surfaced to the journal and the start goes on, to
-``scripts/check_wheelhouse.py``, the fail-closed offline step after it, which
+list, an object named outside the wheelhouse, or a download that is not the
+pinned file; every refusal is named, and the files after one still sync). CI
+runs it into an empty wheelhouse in every job, so a download that misses its
+pin fails CI. The systemd unit runs it as a non-fatal ``ExecStartPre`` (``-``
+prefix): a transient failure is surfaced to the journal and the start goes on,
+to ``scripts/check_wheelhouse.py``, the fail-closed offline step after it, which
 stops the start if a locked file is missing or misses its pin.
 """
 
@@ -58,12 +59,22 @@ def sync() -> int:
     try:
         pinned = pins(PROJECT)
         unlisted = set(pinned)
+        # Every refusal is collected and the loop goes on, so one refused file
+        # does not leave the files after it unsynced; the run fails at the end.
+        refused = []
+        root = dest.resolve()
         client = storage.Client()
         for blob in client.list_blobs(BUCKET, prefix=PREFIX):
             name = blob.name.removeprefix(PREFIX)
             if not name:  # the prefix "directory" placeholder object, if any
                 continue
             target = dest / name
+            # The bucket names the path it writes: one outside the wheelhouse
+            # (`../pyproject.toml`, an absolute name) is held to no pin and could
+            # rewrite the table the unit's check reads.
+            if root not in target.resolve().parents:
+                refused.append(f"{name} names a path outside {dest}")
+                continue
             digest = pinned.get(name)
             unlisted.discard(name)
             # A locked file is skipped only when it is the pinned one. Any other
@@ -89,10 +100,8 @@ def sync() -> int:
                 # Refused before it replaces anything: a planted copy stays as
                 # found, for whoever reads why, and the unit's check refuses it.
                 if digest is not None and (got := sha256(tmp)) != digest:
-                    raise ValueError(
-                        f"{name} downloads with sha256 {got}, not the {digest}"
-                        f" pyproject.toml's [tool.watcher.{TABLE}] pins"
-                    )
+                    refused.append(f"{name} downloads with sha256 {got}, not the pinned {digest}")
+                    continue
                 os.replace(tmp, target)
             finally:
                 Path(tmp).unlink(missing_ok=True)
@@ -100,9 +109,11 @@ def sync() -> int:
         # A locked file the loop never reached was held to nothing: a copy here
         # under that name would pass to uv unchecked.
         if unlisted:
-            raise ValueError(
+            refused.append(
                 f"uv.lock names {', '.join(sorted(unlisted))}, which the bucket does not list"
             )
+        if refused:
+            raise ValueError(f"{'; '.join(refused)} (pyproject.toml's [tool.watcher.{TABLE}])")
     except Exception as exc:  # broad by design: auth/network/bucket failures degrade identically
         print(f"error: could not sync gs://{BUCKET}/{PREFIX}: {exc}", file=sys.stderr)
         return 1

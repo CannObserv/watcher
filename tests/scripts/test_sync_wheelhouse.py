@@ -200,3 +200,30 @@ class TestAFileTheLockDoesNotName:
         assert rc == 0, err
         assert OTHER not in host.downloads
         assert (host.wheelhouse / OTHER).read_bytes() == b"OTHER"
+
+
+class TestAnObjectName:
+    @pytest.mark.parametrize("name", ["../pyproject.toml", "sub/../../uv.lock"])
+    def test_one_that_escapes_the_wheelhouse_fails_the_sync_and_writes_nothing(
+        self, host, capsys, name
+    ):
+        """A spoofed bucket names the file it writes: one outside the wheelhouse
+        would be held to no pin, and could rewrite the table the check reads."""
+        before = (host.project / "pyproject.toml").read_text()
+        host.bucket.objects[f"wheels/{name}"] = b"planted"
+        rc, err = host.sync(capsys)
+        assert rc == 1
+        assert "outside" in err
+        assert (host.project / "pyproject.toml").read_text() == before
+        assert "planted" not in (host.project / "uv.lock").read_text()
+
+
+class TestARefusal:
+    def test_the_sync_goes_on_and_names_every_refused_file(self, host, capsys):
+        """One refused download must not leave the files after it unsynced."""
+        host.bucket.objects[f"wheels/{WHEEL}"] = b"the WHEEL"
+        host.bucket.objects[f"wheels/{SDIST}"] = b"the SDIST"
+        rc, err = host.sync(capsys)
+        assert rc == 1
+        assert WHEEL in err and SDIST in err
+        assert (host.wheelhouse / OTHER).read_bytes() == GOOD[OTHER]

@@ -32,13 +32,23 @@ ExecStartPre=/bin/bash -c 'echo BUILD_ID=$(git rev-parse --short HEAD) > /run/wa
 
 # Refresh the cannobserv wheelhouse before `uv run` resolves co-core (#220).
 # Non-fatal (- prefix): a transient GCS failure is logged but does not block a
-# restart when the wheelhouse is already populated; only a genuinely missing
-# wheel surfaces later as a hard uv resolution error. Reads
+# restart when the wheelhouse is already populated; the check below holds what
+# is there. A locked file that misses its pin is fetched again here, and a
+# download that misses it too is refused, not put in place (#393). Reads
 # GOOGLE_APPLICATION_CREDENTIALS from the EnvironmentFile above.
 # Its output is plain text, not the app's JSON (#247): it runs before `uv sync`
 # under --no-project, so it cannot import build_json_formatter(). See AGENTS.md
 # → Logging.
 ExecStartPre=-/usr/local/bin/uv run --no-project --with 'google-cloud-storage>=2,<4' python /home/exedev/watcher/scripts/sync_wheelhouse.py
+
+# Hold each wheelhouse file uv.lock names to its pin before `uv run` installs
+# from it (#393). Fail CLOSED (no - prefix): a locked file that is missing or
+# misses its [tool.watcher.wheelhouse-sha256] digest stops the start. Offline and
+# stdlib-only (no --with to resolve), so a boot that starts before the network
+# cannot trip it. After the sync, so it hashes what `uv run` will install: with
+# the network up the sync has already refetched a file that missed its pin, and
+# Restart=on-failure retries until one does. One plain-text line, like the sync.
+ExecStartPre=/usr/local/bin/uv run --no-project python /home/exedev/watcher/scripts/check_wheelhouse.py
 
 # Load BUILD_ID, then the service's own configuration.
 #

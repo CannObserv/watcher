@@ -151,7 +151,7 @@ partner's preferences override both"); the other two rows are overridden outrigh
 | Upstream (v7.0.1) | Here |
 |---|---|
 | Description: use before *any* creative work, including "modifying behavior" | An explicit ask, or a feature with no design yet. An issue body or coordinator brief is already the approved design |
-| Design doc in `docs/superpowers/specs/` | `docs/plans/YYYY-MM-DD-<topic>-design.md`, committed as `#<n> docs:` |
+| Design doc in `docs/superpowers/specs/` | `docs/plans/YYYY-MM-DD-<topic>-design.md`, committed as `#<n> docs:` on the issue's branch |
 | HARD-GATE: after approval, "invoke superpowers:writing-plans and no other skill" | A project's approved doc → GitHub issue → `using-git-worktrees`; `writing-plans` optional. There is no `superpowers:` namespace here — `writing-plans` is the gregoryfoster skill |
 
 Upstream sizes work as *a small change* (short doc, no builder check) or *a project* (full doc

@@ -20,6 +20,9 @@ The calls this repo makes, and nothing it does not:
   sha256, and a dump's name against the bucket's clock.)
 - ``Blob.download_to_file`` — ``NotFound`` for an absent object. Into a handle,
   not a filename: the restore opens it ``O_EXCL`` at 0600 (#296 CR 3).
+- ``Blob.download_to_filename`` — the same, into a path the caller names: the
+  wheelhouse sync's temp file (#393). The real one also deletes that file on
+  ``NotFound`` or ``DataCorruption``; the sync unlinks its temp file either way.
 """
 
 from __future__ import annotations
@@ -69,6 +72,11 @@ class FakeBlob:
         if self.name not in self._bucket.objects:
             raise NotFound("no such object")
         file_obj.write(self._bucket.objects[self.name])
+
+    def download_to_filename(self, filename: str, timeout: float | None = None) -> None:
+        if self.name not in self._bucket.objects:
+            raise NotFound("no such object")
+        Path(filename).write_bytes(self._bucket.objects[self.name])
 
 
 class FakeBucket:

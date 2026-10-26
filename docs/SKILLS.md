@@ -160,8 +160,9 @@ goes straight to TDD.
 
 ### The visual companion on this VM
 
-The vendored guide's (`visual-companion.md`) defaults do not reach the user here, and each of these alone leaves the
-tab unreachable:
+The vendored guide, `visual-companion.md`, is written for a local machine. Four things differ
+here; the first fails the launch, the next two leave the tab unreachable, the last leaks the key
+or opens nothing:
 
 1. **Script path.** The guide writes `bash scripts/start-server.sh`; from the repo root that is
    watcher's own `scripts/` — the cwd trap of

@@ -53,10 +53,12 @@ above scopes to the *application's* records. `deploy/watcher.service` runs the
 wheelhouse sync as a non-fatal `ExecStartPre`, so journald also gets a plain-text
 line on every service start (`wheelhouse in sync: N downloaded, M already present
 -> …`, or `error: could not sync gs://…` on the failure path — the one that
-appears exactly when something is already wrong). That is by design, not drift:
-the step runs under `uv run --no-project` *before* `uv sync`, cannot import the
+appears exactly when something is already wrong). The fail-closed digest check
+after it (#393) writes one more: `wheelhouse pins hold: … match …`, or `error:
+wheelhouse check failed: …` when it stops the start. That is by design, not drift:
+both steps run under `uv run --no-project` *before* `uv sync`, cannot import the
 project, and so cannot share `build_json_formatter()`; emitting JSON would mean a
-second hand-maintained copy of the key schema. The unit's other two `ExecStartPre`
+second hand-maintained copy of the key schema. The unit's other `ExecStartPre`
 lines are silent on success but plain-text on failure the same way (`git rev-parse`
 writes `fatal: not a git repository` to stderr; only stdout is redirected to the
 build-id file). A log pipeline that `json.loads` every journald `MESSAGE` must

@@ -372,7 +372,7 @@ def test_a_failing_wheelhouse_check_stops_the_launch(tmp_path: Path) -> None:
     assert calls == [f"uv {CHECK_ARGV}"]
     assert "error: wheelhouse check failed: stub.whl is missing" in result.stderr
     assert "scripts/sync_wheelhouse.py" in result.stderr
-    assert "port" not in result.stdout
+    assert result.stdout == ""
 
 
 def test_bus_url_is_cleared_unless_dev_bus_is_explicit() -> None:

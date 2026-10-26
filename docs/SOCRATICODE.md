@@ -292,7 +292,7 @@ SessionStart hooks' install and audit runbook stays in [SKILLS.md](SKILLS.md).
   code that replaced it. The plans stay searchable as the `design-and-plans`
   context artifact.
 
-**An exclusion applies on the next incremental update — no rebuild.** On the pinned
+**An exclusion applies on the next incremental update — no rebuild.** On
 1.14.0, `updateProjectIndex` deletes the chunks of every hashed file the scan no longer
 returns. Measured 2026-09-24: the session's file watcher took the `docs/plans/` edit
 from 3,857 to 2,490 chunks, and the query above lost every plan hit, with no

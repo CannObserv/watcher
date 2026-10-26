@@ -32,7 +32,7 @@ the old build back, and at 0 a spiking session still competes with watcher for
 reclaim. None substitutes for another.
 
 **1. Don't install a server at any launch — pin both.** Two things launch
-SocratiCode here, each pinned on its own, both at **1.14.0**:
+SocratiCode here, each pinned on its own, both at **1.16.1** (#395):
 
 - **The driver** — `mcp-driver.mjs`, which `.claude/hooks/socraticode-health.sh`
   runs from SessionStart once per UTC day, and `index`, `status`, `verify` —
@@ -44,8 +44,9 @@ SocratiCode here, each pinned on its own, both at **1.14.0**:
   `@latest` and are not live). The variable must be in Claude Code's
   environment **at exec**: `claudeCode.environmentVariables` in
   `~/.vscode-server/data/Machine/settings.json` sets
-  `SOCRATICODE_SPEC=socraticode@1.14.0` (#322). `.claude/settings.json`'s `env`
-  block carries the same value; alone, it did not pin the session here — below.
+  `SOCRATICODE_SPEC=socraticode@1.16.1` (#322, #395). `.claude/settings.json`'s
+  `env` block carries the same value; alone, it did not pin the session here —
+  below.
 
 `--prefer-online` revalidates against the registry on *every* launch, so a
 floating spec installs on any day the package moved. An exact one resolves from
@@ -95,6 +96,8 @@ systemd-run --user --scope -p MemoryHigh=1200M -p MemoryMax=1536M \
 # 3. SOCRATICODE_SPEC in .claude/settings.json: socraticode@<version>
 # 4. The same value in ~/.vscode-server/data/Machine/settings.json, then
 #    restart the session (verified here by closing the window and reconnecting)
+# Then `git grep` the old literal: bump the lines that state the current pin,
+# keep the dated measurements.
 
 # Says which path the driver takes, without launching a server:
 node skills-vendor/gregoryfoster-skills/skills/init-socraticode/scripts/mcp-driver.mjs resolve
@@ -102,7 +105,7 @@ node skills-vendor/gregoryfoster-skills/skills/init-socraticode/scripts/mcp-driv
 
 **Verify the process, never a report.** Only the launched argv is evidence:
 `ps -eo args | grep 'npm exec socraticode'` must read `npm exec
-socraticode@1.14.0`. `preflight.sh --check`, the daily health hook and `claude
+socraticode@1.16.1`. `preflight.sh --check`, the daily health hook and `claude
 mcp list` run from a session's shell all take the version from
 `SOCRATICODE_SPEC` in their own environment — which the settings block puts
 there whether or not the launch saw it. Observed 2026-09-24: preflight printed

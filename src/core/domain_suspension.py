@@ -10,9 +10,8 @@ cannot drift.
 Deliberately not in ``src.core.domains``: that module imports
 ``src.core.fetch_policy``, and with it the bus client and a publisher. The
 break-glass exists to work when Archiver is down, so its import path reaches
-the database and nothing else (#262). Until F1 (#374) a suspended host is also
-published ``revoked`` on ``content.fetch-policy`` — ``Domain.is_suspended``
-decides both — but by the periodic tick, never from here.
+the database and nothing else (#262). Since F1 (#374) Watcher publishes nothing
+on ``content.fetch-policy``, so a suspension acts on Watcher's scheduling alone.
 """
 
 from typing import NamedTuple
@@ -32,8 +31,8 @@ class DomainNotFound(LookupError):
 class DomainArchived(ValueError):
     """The domain is archived; ``is_active`` is not toggled under an archive.
 
-    Archiving makes ``Domain.is_suspended`` true — the host publishes ``revoked``
-    — but back-fills no ``domain_suspended``, so the items already on it are
+    Archiving makes ``Domain.is_suspended`` true but back-fills no
+    ``domain_suspended``, so the items already on it are
     still scheduled. To stop them: restore, then deactivate.
     """
 

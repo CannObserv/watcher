@@ -331,6 +331,15 @@ def run_live(
     return result, calls
 
 
+def test_check_argv_is_the_units_command() -> None:
+    """#401: one form of the check is in use. The unit runs it by absolute path;
+    the script runs it from REPO_ROOT, so only the path prefix may differ."""
+    unit = (SCRIPT.parents[1] / "deploy" / "watcher.service").read_text()
+    pre = [line for line in unit.splitlines() if line.startswith("ExecStartPre=")]
+    want = CHECK_ARGV.replace("scripts/", "/home/exedev/watcher/scripts/")
+    assert f"ExecStartPre=/usr/local/bin/uv {want}" in pre
+
+
 def test_dry_run_reports_the_wheelhouse_check() -> None:
     """#401: the dry run says the check will run, with the rest of the resolution.
 

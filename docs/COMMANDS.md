@@ -397,7 +397,7 @@ gcloud iam service-accounts add-iam-policy-binding \
 **The lock audit is not CI's gate (#397).** `.github/workflows/audit.yml`'s one
 job, `uv audit (report-only)`, runs `scripts/audit_lock.sh` weekly, on demand, and
 on a lock-touching push or PR. It always exits 0 — a finding is a warning and the
-job summary — so it never decides a merge; the gate is `ci.yml`'s five jobs. No
+job summary — so it never decides a merge; the gate is `ci.yml`'s jobs. No
 secret, no WIF, no wheelhouse: `uv audit --frozen` reads `uv.lock` alone. What to
 do with a finding: `docs/DEPENDENCIES.md` → *Advisory floors*.
 

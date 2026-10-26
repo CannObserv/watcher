@@ -13,7 +13,7 @@ below is one a later edit could quietly undo:
   push; only Dependabot opens PRs, and those move action pins. The filter is the
   files that change what the audit reads, plus the audit's own two.
 * **No secret, no OIDC token, no wheelhouse.** ``uv audit --frozen`` reads the
-  lock alone (0 in 84 from a bare ``git archive``, #397), so the job needs none
+  lock alone (measured from a bare ``git archive``, #397), so the job needs none
   of ``ci.yml``'s WIF steps, and ``contents: read`` is all it holds.
 * **No cache.** ``--frozen`` downloads no package.
 * **ci.yml's runner.** The job needs only the uv binary; one runner policy per

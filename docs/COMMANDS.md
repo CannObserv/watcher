@@ -105,6 +105,13 @@ lacks a `_test`/`_dev` suffix. The same rule is enforced in-app by
 `src/core/db_safety.py`; only `deploy/watcher.service` opts into prod via
 `WATCHER_ALLOW_PRODUCTION_DB=1` (in the unit, never an env file).
 
+Before its first `uv run` the script runs the unit's wheelhouse check (#401,
+[DEPENDENCIES.md](DEPENDENCIES.md) → *Content check*) and refuses to start on
+a miss, naming the sync that fixes it. From the deploy checkout every `uv run`
+syncs `watcher.service`'s own `.venv`, so an unchecked launch could install an
+unverified co-core into production. No bypass knob, as in the unit. A fresh
+worktree has no wheel files, so it fails here first: run the sync.
+
 No migration creates procrastinate's tables, so the script applies them too
 (#341): always after the `TEST_DATABASE_URL` branch's public-schema reset, and
 on a persistent `WATCHER_DEV_DATABASE_URL` only when `procrastinate_jobs` is
@@ -265,7 +272,9 @@ uv run procrastinate --app=src.workers.app worker
 
 ## Backup, restore and job history (#296)
 
-Operator entry points in `src/ops/`, each with its runbook:
+Operator entry points in `src/ops/`, each with its runbook. A `uv run` below syncs
+the service's `.venv` without the wheelhouse check (#401,
+[DEPENDENCIES.md](DEPENDENCIES.md) → *Accepted limit*); `.venv/bin/python` doesn't sync:
 
 ```bash
 # The backup's read-only database role — once per cluster, before its first run

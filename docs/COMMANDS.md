@@ -306,9 +306,10 @@ WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.export_for_archiver --out
 # Database only — no bus, no Archiver. Audited `source: "cli"`; exit 0 on a change
 # or a no-op (it says which), 1 for an unknown or archived host, 2 if it could not run
 # (config, usage, database). The service acts on it from its next tick; since F1
-# (#374) nothing downstream sees it:
-WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.suspend_domain HOST
-WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.suspend_domain HOST --resume
+# (#374) nothing downstream sees it. The venv's interpreter, so a break-glass run
+# never syncs the service's venv (#401), the form suggested for archiver#372's runbook:
+WATCHER_ALLOW_PRODUCTION_DB=1 .venv/bin/python -m src.ops.suspend_domain HOST
+WATCHER_ALLOW_PRODUCTION_DB=1 .venv/bin/python -m src.ops.suspend_domain HOST --resume
 
 # The patching gate (#382; docs/DEPLOYMENT.md → OS patching): Procrastinate jobs
 # in `doing`, read-only, stdout the count alone; 1 database, 2 config or usage.

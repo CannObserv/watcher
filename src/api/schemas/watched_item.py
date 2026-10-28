@@ -70,9 +70,10 @@ class WatchedItemCreate(BaseModel):
         The same rule, via the same helper, as the Domain boundary (#205 /
         `DomainPatch._cadence`) — #254 CR-16/19 verified the direction against
         cannobserv#324: delegation has exactly one spelling (`None`/omit), never
-        an empty document, and this is the only place that can hold the line —
-        `schedule_tick` resolves every item in one task, so an unparseable
-        stored interval stops scheduling for the whole system, not one row.
+        an empty document. It was load-bearing while `schedule_tick` read this
+        column: one unparseable stored interval stopped scheduling for the whole
+        system. Since F2 (#375) the column is inert and the rule only keeps the
+        stored value well-formed until #377/#378 delete the writer.
         """
         return validate_optional_schedule_config(v)
 

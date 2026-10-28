@@ -423,7 +423,9 @@ class TestCadenceFieldsAdvertiseInert:
     """#375 CR 1: the API stores these cadences but nothing schedules on them, and
     the contract says so the way the dashboard hints do."""
 
-    @pytest.mark.parametrize("model", ["WatchedItemCreate", "WatchedItemPatch", "DomainPatch"])
+    @pytest.mark.parametrize(
+        "model", ["WatchedItemCreate", "WatchedItemPatch", "WatchedItemResponse", "DomainPatch"]
+    )
     def test_default_schedule_config_is_described_inert(self, model):
         props = app.openapi()["components"]["schemas"][model]["properties"]
         assert "Inert since F2 (#375)" in props["default_schedule_config"].get("description", "")

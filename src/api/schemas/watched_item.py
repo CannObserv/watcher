@@ -148,7 +148,7 @@ class WatchedItemResponse(BaseModel):
     last_full_fetch_at: datetime | None = None
     last_changed_at: datetime | None
     health_status: WatchHealthStatus
-    default_schedule_config: dict | None
+    default_schedule_config: dict | None = Field(description=_INERT_ITEM_CADENCE)
     content_media_type: str | None
     default_tags: list[str] | None
     effective_url: str

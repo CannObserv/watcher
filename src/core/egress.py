@@ -22,7 +22,7 @@ every destination actually contacted rather than only the first one requested.
 :func:`_containing` and the literals-are-not-resolved rule are copied from
 ``src/worker/egress.py`` in CannObserv/replicator (issue #95, decision in their
 #89), which closed the equivalent hole on the ``content.fetch`` path; the
-embedded-IPv4 check (:func:`_embedded`, #402) is theirs too, from #156 at
+embedded-IPv4 check (:func:`_embedded`, #402) is theirs too, from their #156 at
 ``6efad10``, its code verbatim and its docstring in watcher's terms. It is not
 importable — ``co-core`` carries no address predicate — so it is copied, and
 this comment names the source so the two can be diffed. Two independent

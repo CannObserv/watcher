@@ -417,3 +417,13 @@ class TestIssue251ULIDValidation:
 def test_response_has_last_full_fetch_at():
     """#269: when bytes last arrived, beside the two freshness stamps."""
     assert "last_full_fetch_at" in WatchedItemResponse.model_fields
+
+
+class TestCadenceFieldsAdvertiseInert:
+    """#375 CR 1: the API stores these cadences but nothing schedules on them, and
+    the contract says so the way the dashboard hints do."""
+
+    @pytest.mark.parametrize("model", ["WatchedItemCreate", "WatchedItemPatch", "DomainPatch"])
+    def test_default_schedule_config_is_described_inert(self, model):
+        props = app.openapi()["components"]["schemas"][model]["properties"]
+        assert "Inert since F2 (#375)" in props["default_schedule_config"].get("description", "")

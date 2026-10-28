@@ -1,14 +1,20 @@
-"""Unit tests for the definitive schedule-display helper (#206).
+"""Unit tests for the definitive schedule-display helper (#206, #375).
 
 ``resolve_schedule_display`` is the single source of truth for the resolved
-interval text, its inheritance source, whether a temporal profile is currently
-overriding it, and the next-check datetime — used by the list view, the detail
-page, and the domain-detail table so display is consistent with each other and
-with ``schedule_tick``.
+interval text, where it came from, and the next-check datetime — used by the
+list view, the detail page, and the domain-detail table so display is
+consistent with each other and with ``schedule_tick``.
+
+Since F2 (#375) there are two sources, ``registry`` and ``default``: the item
+and domain tiers, the throttle floor and the temporal-profile override no
+longer move the cadence, so the display does not report them either.
 """
 
+from dataclasses import fields
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+
+import pytest
 
 from src.core.scheduling.schedule import ScheduleDisplay, resolve_schedule_display
 
@@ -27,106 +33,82 @@ def _wi(item=None, domain=None, last_checked_at=None, announced=None, floor=None
 
 
 class TestSource:
-    """interval_text + source across the 3-tier chain (no profile)."""
-
-    def test_explicit_item_interval_is_source_item(self):
-        d = resolve_schedule_display(_wi(item={"interval": "6h"}), now=NOW)
-        assert d.interval_text == "6h"
-        assert d.source == "item"
-        assert d.marker is None
-
-    def test_domain_inherited_is_source_domain(self):
-        d = resolve_schedule_display(_wi(item=None, domain={"interval": "7d"}), now=NOW)
-        assert d.interval_text == "7d"
-        assert d.source == "domain"
-        assert d.marker == "domain"
+    def test_announced_interval_is_source_registry(self):
+        d = resolve_schedule_display(_wi(announced={"interval": "15m"}), now=NOW)
+        assert d.interval_text == "15m"
+        assert d.source == "registry"
+        assert d.marker == "registry"
 
     def test_system_default_is_source_default(self):
-        d = resolve_schedule_display(_wi(item=None, domain=None), now=NOW)
+        d = resolve_schedule_display(_wi(), now=NOW)
         assert d.interval_text == "1d"
         assert d.source == "default"
         assert d.marker == "default"
 
-    def test_empty_item_config_shows_braces_source_item(self):
-        # A non-None intervalless item config wins at its tier; show the literal
-        # rather than a blank beside an inherited tag (#202 CR).
-        d = resolve_schedule_display(_wi(item={}, domain={"interval": "7d"}), now=NOW)
+    def test_announced_empty_config_shows_braces(self):
+        # An intervalless config shows the literal rather than a blank beside
+        # the marker (#202 CR).
+        d = resolve_schedule_display(_wi(announced={}), now=NOW)
         assert d.interval_text == "{ }"
-        assert d.source == "item"
-        assert d.marker is None
+        assert d.source == "registry"
 
-    def test_empty_domain_config_shows_braces_source_domain(self):
-        # CR finding 2: a stray intervalless domain config shows the literal beside
-        # the marker, symmetric with the item tier (not a blank "· domain").
-        d = resolve_schedule_display(_wi(item=None, domain={}), now=NOW)
-        assert d.interval_text == "{ }"
-        assert d.source == "domain"
-        assert d.marker == "domain"
+
+class TestInertTiersAreNotReported:
+    """#375: a value left in an inert column must not show as the cadence."""
+
+    def test_an_item_interval_shows_the_system_default(self):
+        d = resolve_schedule_display(_wi(item={"interval": "6h"}), now=NOW)
+        assert d.interval_text == "1d"
+        assert d.source == "default"
+        assert d.marker == "default"
+
+    def test_a_domain_interval_shows_the_system_default(self):
+        d = resolve_schedule_display(_wi(domain={"interval": "7d"}), now=NOW)
+        assert d.interval_text == "1d"
+        assert d.marker == "default"
+
+    def test_a_floor_does_not_show_or_mark(self):
+        d = resolve_schedule_display(_wi(announced={"interval": "15m"}, floor="1d"), now=NOW)
+        assert d.interval_text == "15m"
+        assert d.marker == "registry"
+
+    def test_the_display_carries_no_profile_or_throttle_fields(self):
+        assert {f.name for f in fields(ScheduleDisplay)} == {
+            "interval_text",
+            "source",
+            "next_check",
+        }
+
+    def test_profiles_are_no_longer_accepted(self):
+        with pytest.raises(TypeError):
+            resolve_schedule_display(_wi(), now=NOW, profiles=[])  # type: ignore[call-arg]
 
 
 class TestNextCheck:
     def test_none_when_never_checked(self):
-        d = resolve_schedule_display(_wi(item=None, last_checked_at=None), now=NOW)
+        d = resolve_schedule_display(_wi(last_checked_at=None), now=NOW)
         assert d.next_check is None
 
-    def test_resolved_interval_drives_next_check(self):
+    def test_system_default_drives_next_check(self):
         last = NOW - timedelta(hours=3)
-        d = resolve_schedule_display(_wi(item=None, last_checked_at=last), now=NOW)
-        # Inherited system default 1d → last + 1d.
+        d = resolve_schedule_display(_wi(last_checked_at=last), now=NOW)
         assert d.next_check == last + timedelta(days=1)
 
-    def test_domain_interval_drives_next_check(self):
-        last = NOW - timedelta(days=1)
+    def test_announced_interval_drives_next_check(self):
+        last = NOW - timedelta(hours=3)
         d = resolve_schedule_display(
-            _wi(item=None, domain={"interval": "7d"}, last_checked_at=last), now=NOW
+            _wi(announced={"interval": "6h"}, last_checked_at=last), now=NOW
         )
-        assert d.next_check == last + timedelta(days=7)
+        assert d.next_check == last + timedelta(hours=6)
 
-
-class TestProfileAware:
-    """A currently-active profile overrides the base cadence in the display so the
-    UI matches what ``schedule_tick`` actually does (#204 CR finding 2)."""
-
-    def _event_profile(self, interval, days_before=30):
-        return {
-            "profile_type": "event",
-            "reference_date": "2026-06-25",  # 5 days after NOW
-            "rules": [{"days_before": days_before, "interval": interval}],
-            "is_active": True,
-        }
-
-    def test_active_profile_overrides_interval_text(self):
-        last = NOW - timedelta(minutes=30)  # not yet overdue at the 1h profile cadence
-        d = resolve_schedule_display(
-            _wi(item={"interval": "1d"}, last_checked_at=last),
-            now=NOW,
-            profiles=[self._event_profile("1h")],
-        )
-        assert d.profile_active is True
-        assert d.interval_text == "1h"  # profile cadence, not the base 1d
-        # next_check honors the profile too (1h cadence, not the base 1d).
-        assert d.next_check == last + timedelta(hours=1)
-
-    def test_inactive_window_profile_leaves_base_cadence(self):
-        # reference_date already passed → profile no longer shortens anything.
-        past_profile = {
-            "profile_type": "event",
-            "reference_date": "2026-06-19",  # yesterday relative to NOW
-            "rules": [{"days_before": 30, "interval": "1h"}],
-            "is_active": True,
-        }
-        d = resolve_schedule_display(_wi(item={"interval": "1d"}), now=NOW, profiles=[past_profile])
-        assert d.profile_active is False
-        assert d.interval_text == "1d"
-        assert d.source == "item"
-
-    def test_no_profiles_means_not_active(self):
-        d = resolve_schedule_display(_wi(item={"interval": "1d"}), now=NOW)
-        assert d.profile_active is False
+    def test_an_item_interval_does_not_drive_next_check(self):
+        last = NOW - timedelta(hours=3)
+        d = resolve_schedule_display(_wi(item={"interval": "1h"}, last_checked_at=last), now=NOW)
+        assert d.next_check == last + timedelta(days=1)
 
 
 def test_returns_frozen_dataclass():
-    d = resolve_schedule_display(_wi(item={"interval": "6h"}), now=NOW)
+    d = resolve_schedule_display(_wi(announced={"interval": "6h"}), now=NOW)
     assert isinstance(d, ScheduleDisplay)
     try:
         d.interval_text = "1d"  # type: ignore[misc]
@@ -134,70 +116,3 @@ def test_returns_frozen_dataclass():
         pass
     else:
         raise AssertionError("ScheduleDisplay should be frozen")
-
-
-class TestRegistryTier:
-    """#254: the announced cadence is a distinct tier and must say so.
-
-    Showing "· domain" (or nothing, as an item interval would) for a cadence the
-    operator cannot change from here is the kind of quiet lie that sends someone
-    editing a field that no longer wins.
-    """
-
-    def test_announced_interval_is_source_registry(self):
-        d = resolve_schedule_display(_wi(announced={"interval": "15m"}), now=NOW)
-        assert d.interval_text == "15m"
-        assert d.source == "registry"
-        assert d.marker == "registry"
-
-    def test_announced_outranks_an_item_interval(self):
-        d = resolve_schedule_display(
-            _wi(announced={"interval": "15m"}, item={"interval": "6h"}), now=NOW
-        )
-        assert d.interval_text == "15m"
-        assert d.source == "registry"
-
-    def test_no_announcement_leaves_the_local_chain_untouched(self):
-        d = resolve_schedule_display(_wi(item={"interval": "6h"}), now=NOW)
-        assert d.source == "item"
-        assert d.marker is None
-
-
-class TestThrottleVisibility:
-    """A throttle used to be visible because it wrote the item config. It writes a
-    floor now, so the display has to carry it or the slow-down is unexplainable."""
-
-    def test_floored_item_shows_the_floor_and_marks_it(self):
-        d = resolve_schedule_display(_wi(item={"interval": "15m"}, floor="1d"), now=NOW)
-        assert d.interval_text == "1d"
-        assert d.throttled is True
-        assert d.marker == "throttled"
-
-    def test_floor_that_does_not_bind_is_not_reported(self):
-        d = resolve_schedule_display(_wi(domain={"interval": "7d"}, floor="1d"), now=NOW)
-        assert d.interval_text == "7d"
-        assert d.throttled is False
-        assert d.marker == "domain"
-
-    def test_a_throttled_announced_item_still_shows_the_throttle(self):
-        """The floor outranks the registry marker: it is what is in force."""
-        d = resolve_schedule_display(_wi(announced={"interval": "15m"}, floor="1d"), now=NOW)
-        assert d.interval_text == "1d"
-        assert d.source == "registry"
-        assert d.marker == "throttled"
-
-    def test_an_active_profile_still_wins_the_marker(self):
-        d = resolve_schedule_display(
-            _wi(announced={"interval": "6h"}, floor="1d"),
-            now=NOW,
-            profiles=[
-                {
-                    "profile_type": "event",
-                    "reference_date": "2026-06-25",
-                    "rules": [{"days_before": 30, "interval": "1h"}],
-                    "is_active": True,
-                }
-            ],
-        )
-        assert d.profile_active is True
-        assert d.marker == "profile"

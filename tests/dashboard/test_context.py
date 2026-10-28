@@ -9,10 +9,9 @@ from ulid import ULID
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.domain import Domain
-from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watched_item import WatchedItem
+from src.dashboard import context as dashboard_context
 from src.dashboard.context import (
-    get_active_profiles_by_item,
     get_audit_entries_count,
     get_dashboard_stats,
     get_distinct_audit_event_types,
@@ -819,57 +818,15 @@ class TestGetWatchedItemDetail:
 
 
 @pytest.mark.integration
-class TestGetActiveProfilesByItem:
-    """#206 CR-5: the batch loader feeding resolve_schedule_display(profiles=…)."""
+class TestProfileBatchLoaderIsGone:
+    """#375: nothing resolves a profile any more, so the list views no longer
+    batch-load them. ``get_watched_item_profiles`` stays for the detail page's
+    read-only profile card until #380."""
 
-    async def _add_profile(self, db_session, wi_id, *, interval="1h", is_active=True):
-        db_session.add(
-            TemporalProfile(
-                watched_item_id=wi_id,
-                profile_type=ProfileType.EVENT,
-                reference_date=datetime.now(UTC).date(),
-                rules=[{"days_before": 30, "interval": interval}],
-                post_action=PostAction.DEACTIVATE,
-                is_active=is_active,
-            )
-        )
-
-    async def test_empty_ids_returns_empty_map(self, db_session):
-        assert await get_active_profiles_by_item(db_session, []) == {}
-
-    async def test_keys_by_item_id_as_resolution_dicts(self, db_session):
-        wi = await make_watched_item(db_session, name="HasProfile", primary_url="https://a.com")
-        await self._add_profile(db_session, wi.id, interval="1h")
-        await db_session.flush()
-
-        result = await get_active_profiles_by_item(db_session, [wi.id])
-
-        assert set(result) == {str(wi.id)}
-        (profile_dict,) = result[str(wi.id)]
-        assert profile_dict["rules"] == [{"days_before": 30, "interval": "1h"}]
-        assert profile_dict["is_active"] is True  # resolution-dict shape
-
-    async def test_inactive_profiles_excluded(self, db_session):
-        wi = await make_watched_item(
-            db_session, name="InactiveProfile", primary_url="https://b.com"
-        )
-        await self._add_profile(db_session, wi.id, is_active=False)
-        await db_session.flush()
-
-        result = await get_active_profiles_by_item(db_session, [wi.id])
-
-        assert result == {}  # is_active filter mirrors schedule_tick
-
-    async def test_item_without_profile_absent_from_map(self, db_session):
-        wi = await make_watched_item(db_session, name="NoProfile", primary_url="https://c.com")
-        await db_session.flush()
-
-        result = await get_active_profiles_by_item(db_session, [wi.id])
-
-        assert str(wi.id) not in result
+    def test_removed(self):
+        assert not hasattr(dashboard_context, "get_active_profiles_by_item")
 
 
-@pytest.mark.integration
 class TestGetAuditEntriesCount:
     """Pager totals for the audit-log / recent-activity table (#215)."""
 

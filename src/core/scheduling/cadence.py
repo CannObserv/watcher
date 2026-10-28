@@ -1,7 +1,13 @@
-"""Cadence engine — interval parsing, temporal-profile resolution, next-check computation."""
+"""Cadence engine — interval parsing, validation, next-check computation.
+
+Temporal-profile evaluation (``resolve_effective_interval``, the per-type
+resolvers, ``evaluate_post_actions``) and ``format_interval``, which rendered a
+profile cadence, were removed in F2 (#375): Archiver evaluates profiles and
+announces the resulting interval (CannObserv/archiver#364, #365).
+"""
 
 import re
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 DEFAULT_INTERVAL = timedelta(days=1)
 INTERVAL_PATTERN = re.compile(r"^(\d+)([smhd])$")
@@ -21,22 +27,6 @@ def parse_interval(value: str | None) -> timedelta:
     amount = int(match.group(1))
     unit = INTERVAL_UNITS[match.group(2)]
     return timedelta(**{unit: amount})
-
-
-def format_interval(delta: timedelta) -> str:
-    """Render a timedelta as the largest interval unit that divides it evenly.
-
-    Inverse of :func:`parse_interval` (#206): used to display a profile-resolved
-    cadence (a timedelta) back as a '30s'/'15m'/'6h'/'1d' string. A non-positive
-    delta renders ``"0s"``.
-    """
-    total = int(delta.total_seconds())
-    if total <= 0:
-        return "0s"
-    for unit_seconds, suffix in ((86400, "d"), (3600, "h"), (60, "m"), (1, "s")):
-        if total % unit_seconds == 0:
-            return f"{total // unit_seconds}{suffix}"
-    return f"{total}s"
 
 
 def validate_optional_schedule_config(config: dict | None) -> dict | None:
@@ -63,115 +53,18 @@ def validate_optional_schedule_config(config: dict | None) -> dict | None:
     return config
 
 
-def _to_date(value: str | date) -> date:
-    """Coerce string or date to date object."""
-    if isinstance(value, date):
-        return value
-    return date.fromisoformat(value)
-
-
-def _resolve_date_profile(profile: dict, today: date) -> timedelta | None:
-    """Resolve event/deadline profile to interval. None if past or no rule matches."""
-    ref = _to_date(profile["reference_date"])
-    if today > ref:
-        return None  # Past the event/deadline date
-    # On the reference date itself (days_until=0), profile still applies —
-    # the event is happening today, so intensive checking is appropriate.
-    days_until = (ref - today).days
-    # Find tightest matching rule (smallest days_before that still covers days_until)
-    best_rule = None
-    for rule in profile["rules"]:
-        if days_until <= rule["days_before"]:
-            if best_rule is None or rule["days_before"] < best_rule["days_before"]:
-                best_rule = rule
-    if best_rule is None:
-        return None
-    return parse_interval(best_rule["interval"])
-
-
-def _resolve_seasonal_profile(profile: dict, today: date) -> timedelta | None:
-    """Resolve seasonal profile to interval. None if outside date range."""
-    start = _to_date(profile["date_range_start"])
-    end = _to_date(profile["date_range_end"])
-    if not (start <= today <= end):
-        return None
-    rules = profile.get("rules", [])
-    if not rules:
-        return None
-    return parse_interval(rules[0]["interval"])
-
-
-def _resolve_single_profile(profile: dict, today: date) -> timedelta | None:
-    """Dispatch to type-specific resolver."""
-    ptype = profile.get("profile_type")
-    if ptype in ("event", "deadline"):
-        return _resolve_date_profile(profile, today)
-    if ptype == "seasonal":
-        return _resolve_seasonal_profile(profile, today)
-    return None
-
-
-def resolve_effective_interval(
-    profiles: list[dict],
-    today: date | None = None,
-) -> timedelta | None:
-    """Evaluate temporal profiles, return shortest applicable interval or None."""
-    today = today or date.today()
-    shortest = None
-    for profile in profiles:
-        if not profile.get("is_active", True):
-            continue
-        interval = _resolve_single_profile(profile, today)
-        if interval is not None:
-            if shortest is None or interval < shortest:
-                shortest = interval
-    return shortest
-
-
 def compute_next_check(
     schedule_config: dict,
     last_checked_at: datetime | None,
     now: datetime | None = None,
-    profiles: list[dict] | None = None,
-    profile_interval: timedelta | None = None,
 ) -> datetime:
-    """Compute when a watch should next be checked.
-
-    The active-profile override may be supplied pre-resolved via
-    ``profile_interval`` (so a caller that already ran ``resolve_effective_interval``
-    — e.g. ``resolve_schedule_display`` — need not recompute it); otherwise it is
-    derived from ``profiles`` when given. Pass one or the other, not both.
-    """
+    """Compute when a watch should next be checked: ``last_checked_at`` plus the
+    config's interval, clamped to ``now`` when overdue or never checked."""
     now = now or datetime.now(UTC)
-    if profile_interval is None and profiles:
-        profile_interval = resolve_effective_interval(profiles, today=now.date())
-    interval = profile_interval or parse_interval(schedule_config.get("interval"))
+    interval = parse_interval(schedule_config.get("interval"))
     if last_checked_at is None:
         return now
     next_due = last_checked_at + interval
     if next_due <= now:
         return now
     return next_due
-
-
-def evaluate_post_actions(
-    profiles: list[dict],
-    today: date | None = None,
-) -> list[dict]:
-    """Return post-event actions for profiles whose date has passed."""
-    today = today or date.today()
-    actions = []
-    for profile in profiles:
-        if not profile.get("is_active", True):
-            continue
-        ptype = profile.get("profile_type")
-        past = False
-        if ptype in ("event", "deadline"):
-            ref = _to_date(profile["reference_date"])
-            past = today > ref
-        elif ptype == "seasonal":
-            end = _to_date(profile["date_range_end"])
-            past = today > end
-        if past and "post_action" in profile:
-            actions.append({"action": profile["post_action"], "profile": profile})
-    return actions

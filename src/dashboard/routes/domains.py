@@ -36,7 +36,6 @@ from src.core.scheduling.cadence import (
 from src.core.scheduling.resolution import SYSTEM_DEFAULT_SCHEDULE_CONFIG
 from src.dashboard.context import (
     build_schedule_map,
-    get_active_profiles_by_item,
     get_domain_watched_items,
     get_domains_total_count,
     get_domains_with_watched_item_counts,
@@ -269,14 +268,13 @@ async def domain_toggle_active(
             session, name, search=q, sort=sort, order=order, status=status
         )
         now = datetime.now(UTC)
-        profiles_by_wi = await get_active_profiles_by_item(session, [wi.id for wi in watched_items])
         return templates.TemplateResponse(
             request,
             "partials/domain_toggle_oob.html",
             {
                 "domain": domain,
                 "watched_items": watched_items,
-                "schedule_map": build_schedule_map(watched_items, now, profiles_by_wi),
+                "schedule_map": build_schedule_map(watched_items, now),
                 "q": q or "",
                 "sort": sort,
                 "order": order,
@@ -495,7 +493,6 @@ async def _render_domain_detail(
         )
     ).one()
     now = datetime.now(UTC)
-    profiles_by_wi = await get_active_profiles_by_item(session, [wi.id for wi in watched_items])
     field_contexts = {
         fname: _field_context(request, domain, fname, mode="view") for fname in DOMAIN_FIELD_META
     }
@@ -503,7 +500,7 @@ async def _render_domain_detail(
         "active_page": "domains",
         "domain": domain,
         "watched_items": watched_items,
-        "schedule_map": build_schedule_map(watched_items, now, profiles_by_wi),
+        "schedule_map": build_schedule_map(watched_items, now),
         "all_watched_items_count": all_watched_items_count,
         "live_watched_items_count": live_watched_items_count,
         "q": q or "",
@@ -528,10 +525,13 @@ async def domain_default_schedule_config_update(
 ):
     """Set or clear a domain's default check cadence and back-fill its items (#205).
 
-    A blank ``interval`` clears the cadence (items fall back to the system
-    default). A non-blank value is stored as ``{"interval": <value>}`` after
-    validation; a malformed interval re-renders the detail page with an error
-    flash (status 400). Re-denormalizes onto every WatchedItem on the domain.
+    Inert since F2 (#375): the value is stored and back-filled but schedules
+    nothing — Archiver announces each item's cadence. Kept until #377/#378.
+
+    A blank ``interval`` clears the cadence. A non-blank value is stored as
+    ``{"interval": <value>}`` after validation; a malformed interval re-renders
+    the detail page with an error flash (status 400). Re-denormalizes onto every
+    WatchedItem on the domain.
     """
     result = await session.execute(select(Domain).where(Domain.name == name))
     domain = result.scalar_one_or_none()
@@ -758,14 +758,13 @@ async def partial_domain_watched_items(
         session, name, search=q, sort=sort, order=order, status=status
     )
     now = datetime.now(UTC)
-    profiles_by_wi = await get_active_profiles_by_item(session, [wi.id for wi in watched_items])
     return templates.TemplateResponse(
         request,
         "partials/domain_watched_items_table.html",
         {
             "domain": domain,
             "watched_items": watched_items,
-            "schedule_map": build_schedule_map(watched_items, now, profiles_by_wi),
+            "schedule_map": build_schedule_map(watched_items, now),
             "q": q or "",
             "sort": sort,
             "order": order,

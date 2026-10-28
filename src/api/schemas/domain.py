@@ -13,10 +13,15 @@ class DomainPatch(BaseModel):
 
     min_interval: float | None = Field(None, ge=0)
     notes: str | None = None
-    # Operator's desired check cadence for items on the domain (#205); the Domain
-    # tier of schedule resolution. Distinct from min_interval, the politeness floor
-    # published to Replicator (#245).
-    default_schedule_config: dict | None = None
+    # Operator's desired check cadence for items on the domain (#205); was the
+    # Domain tier of schedule resolution, inert since F2 (#375). Distinct from
+    # min_interval, the politeness floor published to Replicator (#245).
+    default_schedule_config: dict | None = Field(
+        None,
+        description="Inert since F2 (#375): stored and copied onto the domain's items, "
+        "but nothing schedules on it. Archiver resolves the domain default and announces "
+        "each item's interval.",
+    )
 
     @field_validator("default_schedule_config")
     @classmethod

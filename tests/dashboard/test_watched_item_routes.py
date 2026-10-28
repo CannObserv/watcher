@@ -161,53 +161,60 @@ class TestListPage:
         response = await client.get("/watched-items")
         assert b"data-next-check" in response.content
 
-    async def test_explicit_interval_has_no_default_marker(self, client, db_session):
-        """#204: an explicit interval renders the value with no '· default' marker —
-        the inherited marker is reserved for items that fall back to a default."""
-
-        item_id = ULID()
+    async def test_an_item_interval_shows_the_system_default(self, client, db_session):
+        """#375: the item tier is inert, so a stored 6h shows the 1d the scheduler
+        runs, marked '· default' — not the 6h it used to win with."""
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item_id,
+            archiver_info_item_id=ULID(),
             name="ExplicitInterval",
             default_schedule_config={"interval": "6h"},
         )
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
-        response = await client.get("/watched-items")
-        body = response.content.decode()
-        assert ">6h<" in body  # value rendered in the Interval cell span
-        assert "· default" not in body  # no inherited marker for an explicit interval
+        body = (await client.get("/watched-items")).content.decode()
+        assert ">1d <span" in body
+        assert "· default" in body
+        assert ">6h<" not in body
 
-    async def test_domain_inherited_interval_shows_domain_marker(self, client, db_session):
-        """#205: an item inheriting its domain's cadence shows '7d · domain', not '· default'."""
-        item_id = ULID()
+    async def test_a_domain_interval_shows_the_system_default(self, client, db_session):
+        """#375: the domain tier is inert too — no '· domain' marker survives."""
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item_id,
+            archiver_info_item_id=ULID(),
             name="InheritDomain",
-            default_schedule_config=None,
             domain_default_schedule_config={"interval": "7d"},
         )
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
         body = (await client.get("/watched-items")).content.decode()
-        assert ">7d <span" in body
-        assert "· domain" in body
-        assert "· default" not in body
+        assert ">1d <span" in body
+        assert "· domain" not in body
 
-    async def test_active_profile_shows_profile_cadence(self, client, db_session):
-        """#206 (the #204 CR finding-2 fix): a list item whose temporal profile is
-        currently active shows the profile cadence + '· profile', matching
-        schedule_tick — not the base 1d the UI used to display."""
-        item_id = ULID()
+    async def test_an_announced_interval_shows_the_registry_marker(self, client, db_session):
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item_id,
+            archiver_info_item_id=ULID(),
+            name="Announced",
+            announced_schedule_config={"interval": "15m"},
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        body = (await client.get("/watched-items")).content.decode()
+        assert ">15m <span" in body
+        assert "· registry" in body
+
+    async def test_an_active_profile_no_longer_shows_its_cadence(self, client, db_session):
+        """#375: Archiver evaluates profiles; an in-window one left in the table
+        must not show a cadence the scheduler no longer runs."""
+        wi = WatchedItem(
+            archiver_info_source_id=str(ULID()),
+            archiver_info_item_id=ULID(),
             name="ProfileRamp",
-            default_schedule_config={"interval": "1d"},
+            announced_schedule_config={"interval": "1d"},
             last_checked_at=datetime.now(UTC) - timedelta(minutes=5),
         )
         db_session.add(wi)
@@ -223,8 +230,8 @@ class TestListPage:
         )
         await db_session.commit()
         body = (await client.get("/watched-items")).content.decode()
-        assert ">1h <span" in body  # profile cadence in the Interval cell
-        assert "· profile" in body
+        assert ">1d <span" in body
+        assert "· profile" not in body
 
     async def test_status_column_consolidated(self, client, db_session):
         """One labeled Status column holds the toggle + badge; no separate Actions column (#190)."""
@@ -368,7 +375,8 @@ class TestDetailPage:
         assert b"badge-active" in body
 
     async def test_temporal_profile_panel_renders(self, client, db_session):
-        """#191 CR-5: the WatchedItem detail surfaces its 1:1 temporal profile."""
+        """#191 CR-5: the detail page still shows a stored profile, read-only and
+        marked inert since F2 (#375) — the row is kept until #380."""
 
         item_id = ULID()
         wi = WatchedItem(
@@ -392,9 +400,14 @@ class TestDetailPage:
         body = response.content
         assert b"Temporal Profile" in body
         assert b"2026-07-01" in body
+        assert b"Inert since F2 (#375)" in body
+        # CR 5: a stored active flag is shown, but not with the live (green) badge.
+        card = body.split(b"Temporal Profile", 1)[1].split(b"</section>", 1)[0]
+        assert b"badge-active" not in card
+        assert b">active<" in card
 
     async def test_temporal_profile_panel_empty_state(self, client, db_session):
-        """No profile → the panel shows the default-interval hint."""
+        """No profile → the empty state, which no longer points at the removed API."""
 
         item_id = ULID()
         wi = WatchedItem(
@@ -407,6 +420,7 @@ class TestDetailPage:
         await db_session.commit()
         response = await client.get(f"/watched-items/{wi.id}")
         assert b"No temporal profile" in response.content
+        assert b"Manage via the API" not in response.content
 
     async def test_domain_suspended_banner_renders(self, client, db_session):
         """Domain Inactive alert shows when watched_item.domain_suspended=True."""
@@ -603,19 +617,18 @@ class TestDetailPage:
         assert b"1d" in body  # SYSTEM_DEFAULT_SCHEDULE_CONFIG interval
         assert "· default".encode() in body
 
-    async def test_detail_interval_empty_config_shows_braces_not_marker(self, client, db_session):
-        """#202 CR: an explicit empty schedule config shows '{ }', not a blank '· default'."""
-        wi = await _make_wi(db_session, name="EmptyConfig", default_schedule_config={})
+    async def test_detail_interval_empty_config_shows_braces_not_default(self, client, db_session):
+        """#202 CR: an explicit empty announced config shows '{ }', not a blank
+        '· default' (the item tier that used to carry this case is inert, #375)."""
+        wi = await _make_wi(db_session, name="EmptyConfig", announced_schedule_config={})
         body = (await client.get(f"/watched-items/{wi.id}")).content
         assert b"{ }" in body
         assert "· default".encode() not in body
 
-    async def test_detail_interval_shows_active_profile_cadence(self, client, db_session):
-        """#206 (the #204 CR finding-2 fix): an item whose temporal profile is
-        currently active shows the profile cadence + '· profile' on the detail
-        interval row, matching what schedule_tick actually does — not the base 1d."""
+    async def test_detail_interval_ignores_an_active_profile(self, client, db_session):
+        """#375: an in-window profile no longer shows as '· profile'."""
         wi = await _make_wi(
-            db_session, name="ProfileDetail", default_schedule_config={"interval": "1d"}
+            db_session, name="ProfileDetail", announced_schedule_config={"interval": "1d"}
         )
         db_session.add(
             TemporalProfile(
@@ -628,20 +641,25 @@ class TestDetailPage:
         )
         await db_session.commit()
         body = (await client.get(f"/watched-items/{wi.id}")).content
-        assert "· profile".encode() in body
+        assert "· profile".encode() not in body
+        assert "· registry".encode() in body
 
-    async def test_detail_interval_shows_domain_marker(self, client, db_session):
-        """#205: detail shows '7d · domain' for an item inheriting its domain cadence."""
+    async def test_detail_interval_ignores_a_domain_interval(self, client, db_session):
+        """#375: detail shows '1d · default', not '7d · domain'."""
         wi = await _make_wi(
             db_session,
             name="InheritDomainDetail",
-            default_schedule_config=None,
             domain_default_schedule_config={"interval": "7d"},
         )
         body = (await client.get(f"/watched-items/{wi.id}")).content
-        assert b"7d" in body
-        assert "· domain".encode() in body
-        assert "· default".encode() not in body
+        assert "· domain".encode() not in body
+        assert "· default".encode() in body
+
+    async def test_detail_interval_field_is_marked_inert(self, client, db_session):
+        """The item-interval writer stays until #377/#378; its hint says it moves nothing."""
+        wi = await _make_wi(db_session, name="InertHint")
+        body = (await client.get(f"/watched-items/{wi.id}")).content
+        assert b"Inert since F2 (#375)" in body
 
     async def test_detail_url_row_has_edit_affordance(self, client, db_session):
         """#202: URL row exposes an inline Edit button (no 'Change URL' details)."""
@@ -1163,15 +1181,13 @@ class TestFieldRoutes:
             for a in audits
         )
 
-    async def test_interval_field_partial_shows_active_profile_cadence(self, client, db_session):
-        """#206 CR-1: the inline interval field partial honors an active profile
-        (· profile), matching the full detail page — not the base cadence."""
-        item_id = ULID()
+    async def test_interval_field_partial_ignores_an_active_profile(self, client, db_session):
+        """#375: the inline partial matches the detail page — no '· profile'."""
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item_id,
+            archiver_info_item_id=ULID(),
             name="FieldProfile",
-            default_schedule_config={"interval": "1d"},
+            announced_schedule_config={"interval": "1d"},
         )
         db_session.add(wi)
         await db_session.flush()
@@ -1190,7 +1206,7 @@ class TestFieldRoutes:
             headers={"HX-Request": "true"},
         )
         assert response.status_code == 200
-        assert "· profile".encode() in response.content
+        assert "· profile".encode() not in response.content
 
     async def test_post_interval_updates_jsonb(self, client, db_session):
         item_id = ULID()
@@ -1268,24 +1284,30 @@ class TestListScheduleMaps:
         assert sd.interval_text == "1d"  # SYSTEM_DEFAULT_SCHEDULE_CONFIG
         assert sd.marker == "default"  # source label (#205)
 
-    def test_resolves_domain_default(self):
-        """#205: an item inheriting a domain cadence is marked '· domain', not '· default'."""
+    def test_a_domain_default_resolves_to_the_system_default(self):
+        """#375: the domain tier is inert."""
         wi = self._wi(item=None, domain={"interval": "7d"})
         sd = build_schedule_map([wi], self.NOW)[str(wi.id)]
-        assert sd.interval_text == "7d"
-        assert sd.marker == "domain"
+        assert sd.interval_text == "1d"
+        assert sd.marker == "default"
 
-    def test_explicit_not_inherited(self):
+    def test_an_item_default_resolves_to_the_system_default(self):
+        """#375: the item tier is inert."""
         wi = self._wi(item={"interval": "6h"}, domain=None)
         sd = build_schedule_map([wi], self.NOW)[str(wi.id)]
+        assert sd.interval_text == "1d"
+        assert sd.marker == "default"
+
+    def test_announced_is_marked_registry(self):
+        wi = self._wi(announced={"interval": "6h"})
+        sd = build_schedule_map([wi], self.NOW)[str(wi.id)]
         assert sd.interval_text == "6h"
-        assert sd.marker is None
+        assert sd.marker == "registry"
 
     def test_empty_config_shows_braces(self):
-        wi = self._wi(item={}, domain=None)
+        wi = self._wi(announced={})
         sd = build_schedule_map([wi], self.NOW)[str(wi.id)]
         assert sd.interval_text == "{ }"
-        assert sd.marker is None
 
     def test_next_check_resolves_inherited_default(self):
         last = self.NOW - timedelta(hours=3)
@@ -1298,26 +1320,11 @@ class TestListScheduleMaps:
         wi = self._wi(item=None, domain=None, last_checked_at=None)
         assert build_schedule_map([wi], self.NOW)[str(wi.id)].next_check is None
 
-    def test_active_profile_overrides_interval_and_next_check(self):
-        """#206: a currently-active profile drives the displayed interval + next-check,
-        matching schedule_tick (the #204 CR finding-2 gap)."""
-        last = self.NOW - timedelta(minutes=10)
-        wi = self._wi(item={"interval": "1d"}, domain=None, last_checked_at=last)
-        profiles = {
-            str(wi.id): [
-                {
-                    "profile_type": "event",
-                    "reference_date": "2026-06-24",  # 5 days out from NOW
-                    "rules": [{"days_before": 30, "interval": "1h"}],
-                    "is_active": True,
-                }
-            ]
-        }
-        sd = build_schedule_map([wi], self.NOW, profiles)[str(wi.id)]
-        assert sd.profile_active is True
-        assert sd.interval_text == "1h"  # profile cadence, not base 1d
-        assert sd.marker == "profile"
-        assert sd.next_check == last + timedelta(hours=1)
+    def test_profiles_are_no_longer_accepted(self):
+        """#375: the map takes no per-item profiles — nothing overrides the chain."""
+        wi = self._wi()
+        with pytest.raises(TypeError):
+            build_schedule_map([wi], self.NOW, {})  # type: ignore[call-arg]
 
 
 class TestTagsEditor:

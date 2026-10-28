@@ -4,7 +4,10 @@ How the `info.registry` announcements Archiver publishes become WatchedItems: wh
 
 ## Registry reconciliation (#254)
 
-`info.registry` announcements are the authority on cadence and active state.
+`info.registry` announcements are the authority on cadence and active state. Since
+F2 (#375) the announced interval is the only cadence Watcher reads — announced, else
+the system default ([WATCHED-ITEMS.md](WATCHED-ITEMS.md) → *Fields and schedule
+resolution*).
 `src/workers/registry_reconcile.py` makes `watched_items` match them; the stream
 mechanics (groupless tail, replay from `0-0`, no DLQ, `generation` ordering) are in
 [BUS.md](BUS.md).
@@ -55,7 +58,7 @@ matters with it.
 `health_status_code`, `error_since`, `last_checked_at`,
 `last_observed_at`, `last_changed_at`, `last_reviewed_at`, `last_error_notified_at`,
 `domain_suspended`, `archived_at`,
-`throttle_floor_interval`, `default_schedule_config`, `content_media_type`,
+`throttle_floor_interval` and `default_schedule_config` (both inert since F2, #375), `content_media_type`,
 `default_tags`, `description`, `name`, notification config, audit rows, fetch-command
 history. Pinned by `TestLocalColumnsSurvive` — "we did not write it" is a weaker
 guarantee than "a test fails if someone does".
@@ -90,27 +93,28 @@ until Archiver re-arms it — one click, not a round-trip: Archiver's watch-acti
 route writes and announces unconditionally, so pressing resume there propagates
 even when it already considers the item active. Watcher-local fields (name, description, tags, item
 cadence, media type) stay editable everywhere. What remains legitimately Watcher's is
-*mechanism* — local backoff, `domain_suspended` as the host-level break-glass, and
-the throttle floor. `archived_at` is never touched, so an `active: true` against an
+*mechanism* — local backoff and `domain_suspended` as the host-level break-glass
+(the throttle floor was one until F2, #375). `archived_at` is never touched, so an `active: true` against an
 archived row reconciles the row's contents but no-ops on scheduling (`schedule_tick`
 gates on `archived_at IS NULL` too) rather than resurrecting it.
 
 **Two cadence absences, one answer.** `watch_spec` is required on a live
 announcement since cannobserv#324, so delegation is spelled exactly one way:
 `{"schema_version": 1}` with no `interval`, meaning *apply your own default* — for
-this repo the per-domain tier. An `interval` that does not parse resolves the same
+this repo the system default since F2 (#375); before it, the per-domain tier. An `interval` that does not parse resolves the same
 way and **must not stop scheduling**; co-core deliberately does not validate the
 document's contents, because raising at decode on a no-DLQ stream would drop the
 message and leave the key stale.
 
 **The announced cadence does not live in `default_schedule_config`.** That column
-has an operator writing to it, so reconciling into it would let the hourly snapshot
-revert every operator edit — and it is what archiver#150 imports out of Watcher. The
-`reduce_frequency` throttle moved to a floor for the same reason in the other
-direction: as a tier it would be outranked by the announced cadence and silently
-cleared on the next announcement.
+had an operator writing to it, so reconciling into it would have let the hourly
+snapshot revert every operator edit — and it is what archiver#150 and the #373
+export import out of Watcher. The `reduce_frequency` throttle moved to a floor for
+the same reason in the other direction: as a tier it would have been outranked by
+the announced cadence and silently cleared on the next announcement. Since F2
+(#375) neither column is read; both are kept until #380.
 
-**The floor is releasable, and only by an operator.** Writing an explicit item
+**The floor was releasable, and only by an operator (inert since F2, #375).** Writing an explicit item
 cadence — `PATCH /api/v1/watched-items/{id}` with `default_schedule_config`, or the
 dashboard's inline interval field — clears `throttle_floor_interval`. Both go through
 `set_item_schedule_config` (`src/core/watched_items.py`), the single owner of that
@@ -119,7 +123,8 @@ uses. Without that the escape hatch would be gone: before the
 split, editing the interval *was* how a throttle was undone, and a floor nothing
 clears means one temporal profile firing caps an item at 1d forever while the
 operator's edits appear to do nothing. Reconciliation deliberately does not clear it;
-the registry has no opinion on mechanism.
+the registry has no opinion on mechanism. Since F2 nothing writes the floor and the
+resolver ignores it; the writer still clears it until #377/#378 delete both surfaces.
 
 **A registry-owned WatchedItem cannot be deleted here.** `DELETE
 /api/v1/watched-items/{id}` 409s once `applied_generation` is set, naming Archiver as
@@ -162,6 +167,7 @@ reference (#293); the local `pending_archiver_sync` outbox + drain worker
 guarantees delivery during broker outages. Notifications dispatch inline from the pipeline **once per
 WatchedItem** on change detection (`notifications_dispatched ≤ 1`), with
 `change_revision_id` in WatchEvent metadata. `schedule_tick` skips items that
-are paused (`is_active=false`), archived, or `domain_suspended`, and applies the
-temporal profile's post-actions (deactivate / archive / reduce_frequency) to the
-WatchedItem itself.
+are paused (`is_active=false`), archived, or `domain_suspended`. Until F2 (#375)
+it also applied the temporal profile's post-actions (deactivate / archive /
+reduce_frequency) to the WatchedItem itself; Archiver runs them now
+(CannObserv/archiver#365).

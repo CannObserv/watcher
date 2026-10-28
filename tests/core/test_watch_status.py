@@ -9,9 +9,9 @@ consumer cannot check for us:
 * ``applied_active`` is what the scheduler actually gates on — the conjunction
   of ``is_active``, un-archived, and un-suspended — never a bare echo of the
   announcement;
-* ``applied_interval`` is the concrete resolved cadence **after** the throttle
-  floor, so a cadence-only divergence (unparseable spec, floor, delegation) is
-  visible to Archiver's drift detector even though ``applied_active`` never
+* ``applied_interval`` is the concrete resolved cadence (announced, else the
+  system default since #375), so a cadence-only divergence (unparseable spec,
+  delegation) is visible to Archiver's drift detector even though ``applied_active`` never
   moves;
 * ``applied_generation`` publishes ``0`` for a never-reconciled row — the
   sentinel collapses "never reconciled" and "reconciled at generation 0" (a
@@ -257,31 +257,30 @@ class TestAppliedInterval:
         )
         assert events[0].applied_interval == "15m"
 
-    def test_fallback_reports_the_concrete_local_cadence(self):
-        # Delegation / unparseable both land announced_schedule_config = NULL;
-        # the wire carries the interval actually in force, so Archiver's
-        # drift detector sees applied != announced and next_due derives true.
+    def test_an_item_default_without_an_announcement_reports_the_system_default(self):
+        # #375: delegation / unparseable land announced_schedule_config = NULL,
+        # and the chain is announced-else-default, so the item tier no longer
+        # shows here: the wire carries the 1d the scheduler actually runs.
         events = build_status_events(
             [
                 _item(
                     announced_schedule_config=None,
                     default_schedule_config={"interval": "6h"},
+                    domain_default_schedule_config={"interval": "7d"},
                 )
             ],
             [],
             now=NOW,
         )
-        assert events[0].applied_interval == "6h"
+        assert events[0].applied_interval == "1d"
 
     def test_system_default_is_still_a_concrete_interval(self):
         events = build_status_events([_item(announced_schedule_config=None)], [], now=NOW)
         assert events[0].applied_interval == "1d"
 
-    def test_throttle_floor_overrides_a_faster_announced_interval(self):
-        # The floor is the one divergence the announced tier cannot see:
-        # max(resolved, floor) is what the scheduler runs, so it is what
-        # publishes — deriving next_due from the announced 15m would render
-        # the item permanently overdue.
+    def test_a_set_floor_no_longer_overrides_the_announced_interval(self):
+        # #375: the floor was the reduce_frequency post-action's output and
+        # binds nothing now, so applied_interval equals the announcement.
         events = build_status_events(
             [
                 _item(
@@ -292,7 +291,7 @@ class TestAppliedInterval:
             [],
             now=NOW,
         )
-        assert events[0].applied_interval == "1d"
+        assert events[0].applied_interval == "15m"
 
     def test_explicit_empty_config_reports_none(self):
         events = build_status_events([_item(announced_schedule_config={})], [], now=NOW)
@@ -586,18 +585,3 @@ class TestStreamRetention:
         await publish_status_events(object(), events)
         assert len(captured) == 400
         assert all(e.maxlen == 400 * RETAINED_FULL_SETS for e in captured)
-
-
-class TestBuilderHardeningWithFloor:
-    def test_corrupt_interval_under_a_floor_publishes_the_floor(self):
-        # CR-7: parse_interval raises TypeError (not ValueError) on a non-str
-        # interval; before the resolution catch was broadened this killed the
-        # whole batch. With it, the floor wins — also the truthful cadence.
-        item = _item(
-            announced_schedule_config={"interval": 123},
-            throttle_floor_interval="1d",
-        )
-        events = build_status_events([item], [], now=NOW)
-        assert len(events) == 1
-        assert events[0].applied_interval == "1d"
-        assert events[0].applied_generation == 7

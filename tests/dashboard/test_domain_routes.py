@@ -256,19 +256,20 @@ class TestDomainDefaultScheduleConfigDashboard:
         assert b"7d" in body
         assert "· default".encode() not in body
 
+    async def test_detail_cadence_is_marked_inert(self, client, db_session):
+        """#375: the domain cadence writer stays until #377/#378; its hint says it
+        schedules nothing, as F1 marked Min Interval."""
+        db_session.add(Domain(name="cad-inert.com", default_schedule_config={"interval": "7d"}))
+        await db_session.flush()
+        body = (await client.get("/domains/cad-inert.com")).content
+        assert b"Inert since F2 (#375)" in body
+
     async def test_detail_cadence_ordered_below_status(self, client, db_session):
         """#208: 'Default Interval' sits 2nd — above 'Min Interval'."""
         db_session.add(Domain(name="cad-order.com"))
         await db_session.flush()
         body = (await client.get("/domains/cad-order.com")).content.decode()
         assert body.index("Default Interval") < body.index("Min Interval")
-
-    async def test_detail_cadence_hint_text(self, client, db_session):
-        """#208: shortened help text."""
-        db_session.add(Domain(name="cad-hint.com"))
-        await db_session.flush()
-        body = (await client.get("/domains/cad-hint.com")).content
-        assert b"Default check cadence inherited by watched items on this domain" in body
 
     async def test_cadence_field_edit_partial(self, client, db_session):
         """#208: the edit partial exposes a live input with the suggestive placeholder."""
@@ -439,10 +440,9 @@ class TestDomainWatchedItemsTableDomainInactiveBadge:
         assert b"Health" in response.content
         assert b"Interval" in response.content
 
-    async def test_table_interval_shows_inherited_domain_cadence(self, client, db_session):
-        """#206: an item with no own interval shows the resolved domain cadence +
-        '· domain' in the Interval column (routed through resolve_schedule_display),
-        not a raw blank em dash like the pre-helper template rendered."""
+    async def test_table_interval_ignores_the_domain_cadence(self, client, db_session):
+        """#375: the domain tier is inert, so the table shows the 1d the scheduler
+        runs with '· default', not the domain's 7d with '· domain'."""
         db_session.add(Domain(name="inh-tbl.com", default_schedule_config={"interval": "7d"}))
         await make_watched_item(
             db_session,
@@ -453,8 +453,8 @@ class TestDomainWatchedItemsTableDomainInactiveBadge:
             domain_default_schedule_config={"interval": "7d"},
         )
         body = (await client.get("/partials/domain-watched-items/inh-tbl.com")).content
-        assert b"7d" in body
-        assert "· domain".encode() in body
+        assert "· domain".encode() not in body
+        assert "· default".encode() in body
 
     async def test_table_has_next_check_column(self, client, db_session):
         """#206: the domain table renders a Next Check column from the helper (parity

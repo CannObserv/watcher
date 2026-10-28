@@ -23,9 +23,11 @@ class DomainResolution(NamedTuple):
     """Domain facts denormalized onto a WatchedItem at create/PATCH time (#196, #205).
 
     ``suspended`` gates scheduling (domain archived or inactive);
-    ``default_schedule_config`` is the domain's cadence tier, copied to
-    ``WatchedItem.domain_default_schedule_config`` so the resolver needs no live
-    Domain join. Both are re-evaluated together on every create/PATCH path.
+    ``default_schedule_config`` is the domain's cadence, copied to
+    ``WatchedItem.domain_default_schedule_config``. It was the resolver's Domain
+    tier and is inert since F2 (#375); the copy is still maintained until
+    #377/#378 delete the writers. Both are re-evaluated together on every
+    create/PATCH path.
     """
 
     suspended: bool
@@ -51,7 +53,7 @@ async def ensure_domain_and_resolve_suspension(
     Idempotent and ``IntegrityError``-safe (mirrors the create-time upsert).
     Returns a :class:`DomainResolution`: ``suspended`` is True when the domain
     exists and is archived or inactive; ``default_schedule_config`` is the
-    domain's cadence tier (#205). Callers copy both onto the WatchedItem so the
+    domain's cadence (#205; inert since #375). Callers copy both onto the WatchedItem so the
     scheduler needs no live Domain join. A freshly-created domain (or an
     empty/None ``domain_name``) resolves to ``(False, None)``.
     """
@@ -89,8 +91,10 @@ async def backfill_domain_schedule_config(
 
     Mirrors the ``domain_suspended`` back-fill (``set_domain_active``): the
     denormalized ``WatchedItem.domain_default_schedule_config`` is kept in sync
-    when an operator edits the domain cadence, so the resolver never needs a live
-    Domain join. One bounded UPDATE on a rare operator action. Does not commit.
+    when an operator edits the domain cadence. Inert since F2 (#375) — the
+    resolver no longer reads the copy — and kept until #377/#378 delete the
+    domain cadence writers. One bounded UPDATE on a rare operator action. Does
+    not commit.
     """
     await session.execute(
         update(WatchedItem)

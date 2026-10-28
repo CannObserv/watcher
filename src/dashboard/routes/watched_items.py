@@ -27,7 +27,6 @@ from src.core.domains import (
     ensure_domain_and_resolve_suspension,
 )
 from src.core.models.audit_log import EventType, audit
-from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 from src.core.scheduling.schedule import resolve_schedule_display
 from src.core.watched_items import (
@@ -41,7 +40,6 @@ from src.core.watched_items import (
 from src.dashboard.context import (
     WATCHED_ITEM_EVENT_CHOICES,
     build_schedule_map,
-    get_active_profiles_by_item,
     get_domain_default_templates,
     get_global_default_templates,
     get_watched_item_detail,
@@ -70,20 +68,15 @@ def _format_content_type(wi: WatchedItem) -> str:
     return wi.content_media_type or ""
 
 
-def _interval_display(
-    wi: WatchedItem, value: str, *, profiles: list[dict] | None = None
-) -> tuple[str, str | None]:
+def _interval_display(wi: WatchedItem, value: str) -> tuple[str, str | None]:
     """View-mode display for the interval field; returns ``(display, marker)``.
 
-    Thin adapter over ``resolve_schedule_display`` (#206). ``marker`` is the source
-    word rendered after a "·" — ``None`` for an explicit item interval (no marker),
-    ``"domain"``/``"default"`` for an inherited tier (#205), or ``"profile"`` when a
-    temporal profile is currently overriding the base cadence. Pass ``profiles`` to
-    honor the profile override; omit for a base-cadence-only view. ``value`` is
-    accepted for the field-meta ``display`` contract but the resolution is
-    authoritative.
+    Thin adapter over ``resolve_schedule_display`` (#206). Shows the cadence the
+    scheduler runs, marked ``registry`` or ``default`` — not ``value``, the item
+    default edit mode binds, which is inert since F2 (#375). ``value`` is
+    accepted for the field-meta ``display`` contract only.
     """
-    d = resolve_schedule_display(wi, now=datetime.now(UTC), profiles=profiles)
+    d = resolve_schedule_display(wi, now=datetime.now(UTC))
     return d.interval_text, d.marker
 
 
@@ -106,8 +99,8 @@ WATCHED_ITEM_FIELD_META: dict[str, dict] = {
     },
     "default_schedule_interval": {
         "label": "Interval",
-        "hint": "e.g. 30s, 15m, 6h, 1d. Leave blank to inherit the system default. "
-        "reduce_frequency post-actions may slow this independently.",
+        "hint": "Inert since F2 (#375): Archiver announces the cadence, and the value "
+        "shown is what the scheduler runs. An edit here is stored but schedules nothing.",
         "type": "text",
         "source": "schedule_interval",
         "cast": lambda v: v.strip(),
@@ -133,7 +126,6 @@ def _watched_item_field_context(
     wi: WatchedItem,
     field_name: str,
     mode: str = "view",
-    profiles: list[dict] | None = None,
 ) -> dict:
     meta = WATCHED_ITEM_FIELD_META[field_name]
     value = meta["format"](wi)
@@ -142,11 +134,8 @@ def _watched_item_field_context(
     # while edit mode still binds the explicit override. Others view == edit.
     display_fn = meta.get("display")
     # display_fn returns (view_value, marker) where marker is None or the source
-    # word ("domain"/"default"/"profile") rendered after a "·" (#205, #206).
-    # ``profiles`` lets the interval field honor an active temporal-profile override.
-    display_value, inherited = (
-        display_fn(wi, value, profiles=profiles) if display_fn else (value, None)
-    )
+    # word ("registry"/"default") rendered after a "·" (#205, #206, #375).
+    display_value, inherited = display_fn(wi, value) if display_fn else (value, None)
     return {
         "watched_item": wi,
         "field_name": field_name,
@@ -170,8 +159,8 @@ def _apply_watched_item_field_update(wi: WatchedItem, field_name: str, raw_value
         setattr(wi, field_name, typed_value)
     elif source == "schedule_interval":
         # Shared with the API PATCH (#254 CR-1): the setter validates the shape
-        # and releases any reduce_frequency throttle, so an operator editing the
-        # interval is once again the way out of a floor.
+        # and clears the floor. Both columns are inert since F2 (#375); the
+        # writer goes with this surface in #377/#378.
         set_item_schedule_interval(wi, typed_value)
 
 
@@ -205,7 +194,6 @@ async def watched_items_page(
         session, search=q, include_archived=include_archived
     )
     now = datetime.now(UTC)
-    profiles_by_wi = await get_active_profiles_by_item(session, [wi.id for wi in watched_items])
     return templates.TemplateResponse(
         request,
         "pages/watched_items.html",
@@ -213,7 +201,7 @@ async def watched_items_page(
             "request": request,
             "active_page": "watched-items",
             "watched_items": watched_items,
-            "schedule_map": build_schedule_map(watched_items, now, profiles_by_wi),
+            "schedule_map": build_schedule_map(watched_items, now),
             "include_archived": include_archived,
             "q": q or "",
             "page": page,
@@ -250,13 +238,12 @@ async def partial_watched_items_table(
         session, search=q, include_archived=include_archived
     )
     now = datetime.now(UTC)
-    profiles_by_wi = await get_active_profiles_by_item(session, [wi.id for wi in watched_items])
     return templates.TemplateResponse(
         request,
         "partials/watched_items_table.html",
         {
             "watched_items": watched_items,
-            "schedule_map": build_schedule_map(watched_items, now, profiles_by_wi),
+            "schedule_map": build_schedule_map(watched_items, now),
             "page": page,
             "page_size": page_size,
             "total_count": total_count,
@@ -266,14 +253,6 @@ async def partial_watched_items_table(
             "extra_params": _watched_item_extra_params(q, include_archived),
         },
     )
-
-
-def _active_profile_dicts(profiles: list[TemporalProfile]) -> list[dict]:
-    """Active profiles as resolution dicts — the shape resolve_schedule_display and
-    schedule_tick consume (#206). One conversion rule, shared by the detail route
-    and the inline interval field partial.
-    """
-    return [p.to_resolution_dict() for p in profiles if p.is_active]
 
 
 @router.get("/watched-items/{watched_item_id}")
@@ -311,11 +290,8 @@ async def watched_item_detail_page(
         page_size=page_size,
     )
 
-    # Resolution dicts for the active profiles drive the interval field's
-    # profile-aware display (#206) — same shape schedule_tick consumes.
-    profile_dicts = _active_profile_dicts(profiles)
     field_contexts = {
-        name: _watched_item_field_context(request, wi, name, mode="view", profiles=profile_dicts)
+        name: _watched_item_field_context(request, wi, name, mode="view")
         for name in ("name", "description", "default_schedule_interval", "content_media_type")
     }
 
@@ -652,21 +628,6 @@ async def watched_item_update_url(
     return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
 
 
-async def _interval_field_profiles(
-    session: AsyncSession, wi: WatchedItem, field_name: str
-) -> list[dict] | None:
-    """Active profile dicts for the interval field's profile-aware display (#206).
-
-    Only the interval field consults profiles, so other fields skip the query and
-    get ``None``. Keeps the inline-edit re-render consistent with the full detail
-    page (both show ``· profile`` when a profile overrides the base cadence).
-    """
-    if field_name != "default_schedule_interval":
-        return None
-    profiles = await get_watched_item_profiles(session, wi.id)
-    return _active_profile_dicts(profiles)
-
-
 @router.get("/watched-items/{watched_item_id}/field/{field_name}")
 async def watched_item_field_partial(
     request: Request,
@@ -686,8 +647,7 @@ async def watched_item_field_partial(
     if not is_htmx(request):
         return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
 
-    profiles = await _interval_field_profiles(session, wi, field_name)
-    ctx = _watched_item_field_context(request, wi, field_name, mode=mode, profiles=profiles)
+    ctx = _watched_item_field_context(request, wi, field_name, mode=mode)
     return templates.TemplateResponse(request, "partials/watched_item_field.html", ctx)
 
 
@@ -726,8 +686,7 @@ async def watched_item_field_update(
     await session.refresh(wi)
 
     if is_htmx(request):
-        profiles = await _interval_field_profiles(session, wi, field_name)
-        ctx = _watched_item_field_context(request, wi, field_name, mode="view", profiles=profiles)
+        ctx = _watched_item_field_context(request, wi, field_name, mode="view")
         return templates.TemplateResponse(request, "partials/watched_item_field.html", ctx)
     return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
 

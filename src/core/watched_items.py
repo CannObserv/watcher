@@ -18,7 +18,12 @@ from src.core.scheduling.cadence import parse_interval
 
 
 def set_item_schedule_config(watched_item: WatchedItem, config: dict | None) -> None:
-    """Set (or clear) the operator's item-tier cadence, releasing any throttle.
+    """Set (or clear) the operator's item cadence, releasing any throttle.
+
+    **Inert since F2 (#375).** Neither column moves the resolved cadence any
+    more — Archiver announces it — so this writer stores and clears values that
+    schedule nothing. It stays until #377/#378 delete both operator surfaces; the
+    columns go in #380. What follows is why it was built this way.
 
     The single owner of the item cadence write. Both operator paths go through
     it: the API's ``PATCH /api/v1/watched-items/{id}`` (whole ``schedule_config``
@@ -150,8 +155,8 @@ def set_watched_item_active(
     opinion to defer to, and until archiver#141's producer announced them they
     had no other control surface. The reconcile itself writes the column
     directly and never passes through here; it is the authority's path, and the
-    legitimate local stops remain backoff, ``domain_suspended``, and the
-    throttle floor.
+    legitimate local stops remain backoff and ``domain_suspended`` (the
+    throttle floor was one until F2, #375).
     """
     if wi.archived_at is not None:
         raise ArchivedItemActivationError(

@@ -95,8 +95,9 @@ async def upsert_domain(
         _apply_domain_updates(domain, updates)
 
     # #205: editing the domain cadence re-denormalizes it onto every WatchedItem
-    # on the domain (mirrors the domain_suspended back-fill), so the resolver
-    # never needs a live Domain join. Rare operator action; one bounded UPDATE.
+    # on the domain (mirrors the domain_suspended back-fill). Inert since F2
+    # (#375): the resolver no longer reads the copy; kept until #377/#378.
+    # Rare operator action; one bounded UPDATE.
     if "default_schedule_config" in updates:
         await backfill_domain_schedule_config(session, name, updates["default_schedule_config"])
         audit(

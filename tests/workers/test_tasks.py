@@ -9,7 +9,7 @@ it issues a ``content.fetch`` command and returns. Everything downstream of the
 fetch — pipeline, health, ``last_checked_at``, media-type seeding, check audits
 — now happens in the apply path and is covered by ``test_fetch_apply.py``. What
 remains here is the part that is still this task's: the short-circuit guards,
-plus `schedule_tick`'s due-calculation and post-actions.
+plus `schedule_tick`'s due-calculation (post-actions are gone since #375).
 """
 
 from contextlib import asynccontextmanager
@@ -21,11 +21,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import src.workers.tasks as tasks_mod
-from src.core.models.audit_log import AuditLog, EventType
+from src.core.models.audit_log import AuditLog
 from src.core.models.domain import Domain
 from src.core.models.fetch_command import FetchCommand
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
-from src.core.scheduling.resolution import resolved_schedule_config
 from src.core.validators import CONDITIONAL_GET_ENV, validator_source_key
 from src.workers.tasks import check_watched_item, schedule_tick
 from tests.conftest import make_watched_item
@@ -53,6 +52,30 @@ def _mock_session_factory(db_session: AsyncSession):
 async def _command_count(db_session) -> int:
     """How many fetch commands exist — the observable of "did it issue?"."""
     return (await db_session.execute(select(func.count()).select_from(FetchCommand))).scalar_one()
+
+
+async def _run_tick(db_session, monkeypatch, now) -> tuple[list, AsyncMock]:
+    """Run one ``schedule_tick`` at ``now``; return (deferred calls, republish mock).
+
+    ``raising=False``: since #375 ``schedule_tick`` no longer imports
+    ``defer_status_republish`` at all, and the mock must still be there to
+    prove nothing republishes.
+    """
+    monkeypatch.setattr(tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session))
+    defer_calls: list = []
+    mock_configure = MagicMock()
+    mock_configure.return_value.defer_async = AsyncMock(
+        side_effect=lambda **kw: defer_calls.append(kw)
+    )
+    monkeypatch.setattr(check_watched_item, "configure", mock_configure)
+    republish = AsyncMock()
+    monkeypatch.setattr(tasks_mod, "defer_status_republish", republish, raising=False)
+
+    with patch("src.workers.tasks.datetime") as mock_dt:
+        mock_dt.now.return_value = now
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        await schedule_tick(int(now.timestamp()))
+    return defer_calls, republish
 
 
 # ---------------------------------------------------------------------------
@@ -148,87 +171,41 @@ class TestCheckWatchedItemGuards:
 class TestScheduleTickAggregation:
     """schedule_tick enqueues per-WatchedItem based on WatchedItem.last_checked_at."""
 
+    NOW = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
+
     async def test_enqueues_when_watched_item_overdue(self, db_session, monkeypatch):
         """A WatchedItem whose last_checked_at is older than the interval is due."""
-        now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
-        # Default schedule on the WatchedItem = 1h.
+        # Announced cadence = 1h (the only tier since F2, #375).
         wi = await make_watched_item(db_session, name="A")
-        wi.default_schedule_config = {"interval": "1h"}
-        wi.last_checked_at = now - timedelta(hours=2)
+        wi.announced_schedule_config = {"interval": "1h"}
+        wi.last_checked_at = self.NOW - timedelta(hours=2)
         await db_session.commit()
 
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-
-        defer_calls: list = []
-        mock_configure = MagicMock()
-        mock_configure.return_value.defer_async = AsyncMock(
-            side_effect=lambda **kw: defer_calls.append(kw)
-        )
-        monkeypatch.setattr(check_watched_item, "configure", mock_configure)
-
-        with patch("src.workers.tasks.datetime") as mock_dt:
-            mock_dt.now.return_value = now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            await schedule_tick(int(now.timestamp()))
-
-        assert len(defer_calls) == 1
-        assert defer_calls[0]["watched_item_id"] == str(wi.id)
+        defer_calls, _ = await _run_tick(db_session, monkeypatch, self.NOW)
+        assert [c["watched_item_id"] for c in defer_calls] == [str(wi.id)]
 
     async def test_does_not_enqueue_when_watched_item_fresh(self, db_session, monkeypatch):
         """If the WatchedItem was checked recently, it is not due."""
-        now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
         wi = await make_watched_item(db_session, name="Fresh")
-        wi.default_schedule_config = {"interval": "1h"}
-        wi.last_checked_at = now - timedelta(minutes=5)
+        wi.announced_schedule_config = {"interval": "1h"}
+        wi.last_checked_at = self.NOW - timedelta(minutes=5)
         await db_session.commit()
 
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-
-        mock_configure = MagicMock()
-        mock_configure.return_value.defer_async = AsyncMock()
-        monkeypatch.setattr(check_watched_item, "configure", mock_configure)
-
-        with patch("src.workers.tasks.datetime") as mock_dt:
-            mock_dt.now.return_value = now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            await schedule_tick(int(now.timestamp()))
-
-        mock_configure.return_value.defer_async.assert_not_called()
+        defer_calls, _ = await _run_tick(db_session, monkeypatch, self.NOW)
+        assert defer_calls == []
 
     async def test_null_last_checked_at_is_due_immediately(self, db_session, monkeypatch):
         """A WatchedItem with NULL last_checked_at is always overdue."""
-        now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
         wi = await make_watched_item(db_session, name="Never")
-        wi.default_schedule_config = {"interval": "1h"}
+        wi.announced_schedule_config = {"interval": "1h"}
         # explicitly leave wi.last_checked_at as None.
         await db_session.commit()
 
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-
-        defer_calls: list = []
-        mock_configure = MagicMock()
-        mock_configure.return_value.defer_async = AsyncMock(
-            side_effect=lambda **kw: defer_calls.append(kw)
-        )
-        monkeypatch.setattr(check_watched_item, "configure", mock_configure)
-
-        with patch("src.workers.tasks.datetime") as mock_dt:
-            mock_dt.now.return_value = now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            await schedule_tick(int(now.timestamp()))
-
-        assert len(defer_calls) == 1
-        assert defer_calls[0]["watched_item_id"] == str(wi.id)
+        defer_calls, _ = await _run_tick(db_session, monkeypatch, self.NOW)
+        assert [c["watched_item_id"] for c in defer_calls] == [str(wi.id)]
 
     async def test_skips_inactive_or_archived_watched_items(self, db_session, monkeypatch):
         """is_active=False and archived_at IS NOT NULL exclude a WatchedItem."""
-        now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
         wi_inactive = await make_watched_item(
             db_session, name="Inactive WI", primary_url="https://inactive.example.com"
         )
@@ -236,23 +213,11 @@ class TestScheduleTickAggregation:
         wi_archived = await make_watched_item(
             db_session, name="Archived WI", primary_url="https://archived.example.com"
         )
-        wi_archived.archived_at = now - timedelta(days=1)
+        wi_archived.archived_at = self.NOW - timedelta(days=1)
         await db_session.commit()
 
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-
-        mock_configure = MagicMock()
-        mock_configure.return_value.defer_async = AsyncMock()
-        monkeypatch.setattr(check_watched_item, "configure", mock_configure)
-
-        with patch("src.workers.tasks.datetime") as mock_dt:
-            mock_dt.now.return_value = now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            await schedule_tick(int(now.timestamp()))
-
-        mock_configure.return_value.defer_async.assert_not_called()
+        defer_calls, _ = await _run_tick(db_session, monkeypatch, self.NOW)
+        assert defer_calls == []
 
 
 class TestScheduleTickInactiveDomain:
@@ -273,301 +238,114 @@ class TestScheduleTickInactiveDomain:
         )
         await db_session.commit()
 
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-
-        mock_configure = MagicMock()
-        mock_configure.return_value.defer_async = AsyncMock()
-        monkeypatch.setattr(check_watched_item, "configure", mock_configure)
-
-        with patch("src.workers.tasks.datetime") as mock_dt:
-            mock_dt.now.return_value = now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            await schedule_tick(int(now.timestamp()))
-
-        mock_configure.return_value.defer_async.assert_not_called()
+        defer_calls, _ = await _run_tick(db_session, monkeypatch, now)
+        assert defer_calls == []
 
 
 # ---------------------------------------------------------------------------
-# Post-actions: reduce_frequency sets the WatchedItem's throttle floor.
+# F2 (#375): the chain is announced-else-default; profiles fire nothing.
 # ---------------------------------------------------------------------------
 
 
-class TestPostActions:
-    """reduce_frequency must set the WatchedItem's throttle floor (#254)."""
+class TestScheduleTickChain:
+    """The due check reads announced, else the system default — nothing else."""
 
-    async def test_reduce_frequency_mutates_watched_item_default(self, db_session, monkeypatch):
-        """post_action=reduce_frequency slows the WatchedItem via the floor."""
-        now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
+    NOW = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
 
-        # WatchedItem starts at 1h interval.
-        wi = await make_watched_item(db_session, name="Profiled")
+    async def test_an_item_default_no_longer_makes_an_item_due(self, db_session, monkeypatch):
+        """1h item default, checked 2h ago, nothing announced → the 1d default
+        governs, so the item is not due."""
+        wi = await make_watched_item(db_session, name="ItemTier")
         wi.default_schedule_config = {"interval": "1h"}
-        wi.last_checked_at = now - timedelta(hours=25)
-
-        # Expired event profile attached to the WatchedItem — reduce_frequency.
-        profile = TemporalProfile(
-            watched_item_id=wi.id,
-            profile_type=ProfileType.EVENT,
-            reference_date=date(2026, 5, 1),  # in the past
-            rules=[{"days_before": 7, "interval": "1m"}],
-            post_action=PostAction.REDUCE_FREQUENCY,
-        )
-        db_session.add(profile)
+        wi.last_checked_at = self.NOW - timedelta(hours=2)
         await db_session.commit()
 
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
+        defer_calls, _ = await _run_tick(db_session, monkeypatch, self.NOW)
+        assert defer_calls == []
 
-        mock_configure = MagicMock()
-        mock_configure.return_value.defer_async = AsyncMock()
-        monkeypatch.setattr(check_watched_item, "configure", mock_configure)
-
-        with patch("src.workers.tasks.datetime") as mock_dt:
-            mock_dt.now.return_value = now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            await schedule_tick(int(now.timestamp()))
-
-        # The throttle lands on the FLOOR, not the item config (#254) — the item's
-        # own cadence is left exactly as the operator (or registry) set it.
-        await db_session.refresh(wi)
-        assert wi.throttle_floor_interval == "1d"
-        assert wi.default_schedule_config == {"interval": "1h"}
-
-        # The WatchedItem now resolves to the 1d interval.
-        assert resolved_schedule_config(wi).get("interval") == "1d"
-
-        # Audit log: WATCHED_ITEM_THROTTLED for the WatchedItem.
-        audit_rows = (
-            (
-                await db_session.execute(
-                    select(AuditLog).where(AuditLog.event_type == EventType.WATCHED_ITEM_THROTTLED)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assert len(audit_rows) == 1
-        assert audit_rows[0].payload["new_interval"] == "1d"
-
-    async def test_reduce_frequency_noop_when_cadence_already_slower_than_1d(
-        self, db_session, monkeypatch
-    ):
-        """#205: reduce_frequency must not *speed up* an item slower than 1d.
-
-        An item inheriting a 7d domain cadence (no own interval) must stay at 7d —
-        reduce_frequency is a no-op, the item config is left untouched (inheritance
-        preserved), and no WATCHED_ITEM_THROTTLED audit is written.
-        """
-        now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
-
-        # Inherits a 7d domain cadence — no item-level interval.
-        wi = await make_watched_item(db_session, name="SlowDomain")
-        wi.default_schedule_config = None
-        wi.domain_default_schedule_config = {"interval": "7d"}
-        wi.last_checked_at = now - timedelta(days=8)
-
-        profile = TemporalProfile(
-            watched_item_id=wi.id,
-            profile_type=ProfileType.EVENT,
-            reference_date=date(2026, 5, 1),  # past → reduce_frequency fires
-            rules=[{"days_before": 7, "interval": "1m"}],
-            post_action=PostAction.REDUCE_FREQUENCY,
-        )
-        db_session.add(profile)
+    async def test_a_domain_default_no_longer_makes_an_item_due(self, db_session, monkeypatch):
+        wi = await make_watched_item(db_session, name="DomainTier")
+        wi.domain_default_schedule_config = {"interval": "1h"}
+        wi.last_checked_at = self.NOW - timedelta(hours=2)
         await db_session.commit()
 
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-        mock_configure = MagicMock()
-        mock_configure.return_value.defer_async = AsyncMock()
-        monkeypatch.setattr(check_watched_item, "configure", mock_configure)
+        defer_calls, _ = await _run_tick(db_session, monkeypatch, self.NOW)
+        assert defer_calls == []
 
-        with patch("src.workers.tasks.datetime") as mock_dt:
-            mock_dt.now.return_value = now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            await schedule_tick(int(now.timestamp()))
-
-        await db_session.refresh(wi)
-        # No floor set, item config untouched → still inheriting the 7d domain cadence.
-        assert wi.throttle_floor_interval is None
-        assert wi.default_schedule_config is None
-        assert resolved_schedule_config(wi).get("interval") == "7d"
-
-        # No throttle audit — nothing was slowed.
-        throttle_rows = (
-            (
-                await db_session.execute(
-                    select(AuditLog).where(AuditLog.event_type == EventType.WATCHED_ITEM_THROTTLED)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assert throttle_rows == []
-
-    async def test_deactivate_post_action_deactivates_watched_item(self, db_session, monkeypatch):
-        """deactivate flips the WatchedItem is_active off."""
-        now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
-        wi = await make_watched_item(db_session, name="Will Deactivate")
-        wi.default_schedule_config = {"interval": "1d"}
-        wi.last_checked_at = now - timedelta(hours=25)
-
-        profile = TemporalProfile(
-            watched_item_id=wi.id,
-            profile_type=ProfileType.EVENT,
-            reference_date=date(2026, 5, 1),
-            rules=[{"days_before": 7, "interval": "1h"}],
-            post_action=PostAction.DEACTIVATE,
-        )
-        db_session.add(profile)
-        await db_session.commit()
-
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-
-        mock_configure = MagicMock()
-        mock_configure.return_value.defer_async = AsyncMock()
-        monkeypatch.setattr(check_watched_item, "configure", mock_configure)
-
-        with patch("src.workers.tasks.datetime") as mock_dt:
-            mock_dt.now.return_value = now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            await schedule_tick(int(now.timestamp()))
-
-        await db_session.refresh(wi)
-        assert wi.is_active is False
-        await db_session.refresh(profile)
-        assert profile.is_active is False
-
-    async def test_archive_post_action_archives_watched_item(self, db_session, monkeypatch):
-        """#191: archive post-action flips is_active=False AND stamps archived_at."""
-        now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
-        wi = await make_watched_item(db_session, name="Will Archive")
-        wi.default_schedule_config = {"interval": "1d"}
-        wi.last_checked_at = now - timedelta(hours=25)
-
-        profile = TemporalProfile(
-            watched_item_id=wi.id,
-            profile_type=ProfileType.EVENT,
-            reference_date=date(2026, 5, 1),
-            rules=[{"days_before": 7, "interval": "1h"}],
-            post_action=PostAction.ARCHIVE,
-        )
-        db_session.add(profile)
-        await db_session.commit()
-
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-
-        mock_configure = MagicMock()
-        mock_configure.return_value.defer_async = AsyncMock()
-        monkeypatch.setattr(check_watched_item, "configure", mock_configure)
-
-        with patch("src.workers.tasks.datetime") as mock_dt:
-            mock_dt.now.return_value = now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            await schedule_tick(int(now.timestamp()))
-
-        await db_session.refresh(wi)
-        assert wi.is_active is False
-        assert wi.archived_at is not None
-
-
-class TestThrottleSurvivesReconciliation:
-    """#254: the floor exists so a throttle is not silently reverted.
-
-    Before the split, ``reduce_frequency`` wrote ``default_schedule_config``. Once
-    the registry owns cadence policy that column is outranked by the announced
-    tier, so the very next announcement — or the hourly snapshot, which carries no
-    change at all — would have un-throttled the item.
-    """
-
-    async def test_floor_still_binds_under_a_faster_announced_cadence(self, db_session):
-        wi = await make_watched_item(db_session, name="Throttled")
+    async def test_a_set_floor_no_longer_slows_an_item(self, db_session, monkeypatch):
+        """15m announced under a 1d floor, checked 30m ago → due."""
+        wi = await make_watched_item(db_session, name="Floored")
         wi.announced_schedule_config = {"interval": "15m"}
         wi.throttle_floor_interval = "1d"
+        wi.last_checked_at = self.NOW - timedelta(minutes=30)
         await db_session.commit()
 
-        assert resolved_schedule_config(wi).get("interval") == "1d"
+        defer_calls, _ = await _run_tick(db_session, monkeypatch, self.NOW)
+        assert [c["watched_item_id"] for c in defer_calls] == [str(wi.id)]
 
-    async def test_a_new_announcement_does_not_clear_the_floor(self, db_session):
-        """The reconcile writes announced_schedule_config; the floor is a different
-        column, so there is no code path by which an announcement clears it."""
-        wi = await make_watched_item(db_session, name="Throttled")
-        wi.throttle_floor_interval = "1d"
-        wi.announced_schedule_config = {"interval": "6h"}
-        await db_session.commit()
-
-        # Simulate the next announcement arriving with a different cadence.
-        wi.announced_schedule_config = {"interval": "30s"}
-        await db_session.commit()
-        await db_session.refresh(wi)
-
-        assert wi.throttle_floor_interval == "1d"
-        assert resolved_schedule_config(wi).get("interval") == "1d"
-
-
-class TestThrottleFloorIsReleasable:
-    """CR-1: an automatic path must not create state an operator cannot undo.
-
-    Before the floor existed, `reduce_frequency` wrote `default_schedule_config`,
-    so editing the interval from the dashboard or the API released the throttle.
-    The floor has to keep that escape hatch or a profile firing once caps the item
-    at 1d forever.
-    """
-
-    async def test_an_explicit_item_interval_releases_the_floor(self, db_session):
-        from src.core.watched_items import set_item_schedule_interval
-
-        wi = await make_watched_item(db_session, name="Throttled")
-        wi.throttle_floor_interval = "1d"
-        await db_session.commit()
-
-        set_item_schedule_interval(wi, "30m")
-
-        assert wi.throttle_floor_interval is None
-        assert resolved_schedule_config(wi) == {"interval": "30m"}
-
-    async def test_clearing_the_item_interval_also_releases_the_floor(self, db_session):
-        """Clearing back to inherited is just as deliberate an operator act."""
-        from src.core.watched_items import set_item_schedule_interval
-
-        wi = await make_watched_item(db_session, name="Throttled")
-        wi.throttle_floor_interval = "1d"
-        wi.default_schedule_config = {"interval": "15m"}
-        await db_session.commit()
-
-        set_item_schedule_interval(wi, None)
-
-        assert wi.throttle_floor_interval is None
-        assert wi.default_schedule_config is None
-
-    async def test_an_announcement_does_not_release_the_floor(self, db_session):
-        """Only an *operator* releases it. The registry has no opinion on
-        mechanism, which is the whole reason the floor is a separate column."""
-        from src.workers.registry_reconcile import reconcile_announcement
-        from tests.workers.test_registry_reconcile import _announcement
-
-        wi = await make_watched_item(db_session, name="Throttled")
-        wi.throttle_floor_interval = "1d"
-        await db_session.commit()
-
-        await reconcile_announcement(
-            db_session,
-            _announcement(
-                wi.archiver_info_item_id,
-                generation=1,
-                watch_spec={"schema_version": 1, "interval": "15m"},
-            ),
+    async def test_an_in_window_profile_no_longer_shortens_the_cadence(
+        self, db_session, monkeypatch
+    ):
+        """A 1m event rule 2 days out, 1d announced, checked 1h ago → not due."""
+        wi = await make_watched_item(db_session, name="InWindow")
+        wi.announced_schedule_config = {"interval": "1d"}
+        wi.last_checked_at = self.NOW - timedelta(hours=1)
+        db_session.add(
+            TemporalProfile(
+                watched_item_id=wi.id,
+                profile_type=ProfileType.EVENT,
+                reference_date=date(2026, 5, 19),
+                rules=[{"days_before": 7, "interval": "1m"}],
+                post_action=PostAction.REDUCE_FREQUENCY,
+            )
         )
+        await db_session.commit()
+
+        defer_calls, _ = await _run_tick(db_session, monkeypatch, self.NOW)
+        assert defer_calls == []
+
+
+class TestPostActionsAreGone:
+    """#375: a profile whose date has passed fires nothing. Archiver runs the
+    profile boundary and its post-actions (CannObserv/archiver#365); Watcher
+    writing ``is_active`` here was the unguarded write the issue names."""
+
+    @pytest.mark.parametrize(
+        "action", [PostAction.DEACTIVATE, PostAction.ARCHIVE, PostAction.REDUCE_FREQUENCY]
+    )
+    async def test_a_passed_profile_changes_nothing(self, db_session, monkeypatch, action):
+        now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
+        wi = await make_watched_item(db_session, name=f"Passed {action.value}")
+        wi.announced_schedule_config = {"interval": "1h"}
+        wi.last_checked_at = now - timedelta(hours=2)
+        profile = TemporalProfile(
+            watched_item_id=wi.id,
+            profile_type=ProfileType.EVENT,
+            reference_date=date(2026, 5, 1),  # past → the post-action used to fire
+            rules=[{"days_before": 7, "interval": "1m"}],
+            post_action=action,
+        )
+        db_session.add(profile)
+        await db_session.commit()
+        audits_before = (
+            await db_session.execute(select(func.count()).select_from(AuditLog))
+        ).scalar_one()
+
+        defer_calls, republish = await _run_tick(db_session, monkeypatch, now)
+
         await db_session.refresh(wi)
-        assert wi.throttle_floor_interval == "1d"
+        await db_session.refresh(profile)
+        assert wi.is_active is True
+        assert wi.archived_at is None
+        assert wi.throttle_floor_interval is None
+        assert profile.is_active is True  # not consumed either: the row is Archiver's to import
+        audits_after = (
+            await db_session.execute(select(func.count()).select_from(AuditLog))
+        ).scalar_one()
+        assert audits_after == audits_before
+        republish.assert_not_awaited()
+        # And it is still scheduled at its announced cadence.
+        assert [c["watched_item_id"] for c in defer_calls] == [str(wi.id)]
 
 
 class TestForcedFullFetch:

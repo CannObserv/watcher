@@ -1,79 +1,48 @@
 """Schedule resolution for a WatchedItem.
 
-Four tiers (#205, #254): announced → WatchedItem default → Domain default →
-system default. The Domain tier is read from
-``WatchedItem.domain_default_schedule_config``, a denormalized copy maintained on
-every create/PATCH path and back-filled on domain-default edit (mirrors
-``domain_suspended``), so the resolver stays single-arg and the scheduler needs
-no live Domain join.
+**Announced, else the system default (#375, F2).** Archiver resolves profile →
+item → domain and announces a concrete ``interval`` on ``info.registry``
+(CannObserv/archiver#364), so Watcher reads one column: the announced cadence,
+or ``SYSTEM_DEFAULT_SCHEDULE_CONFIG`` when nothing is announced. The delegation
+case — ``{"schema_version": 1}`` with no ``interval``, or an unparseable one —
+leaves ``announced_schedule_config`` NULL and lands on the system default, the
+only default Watcher keeps.
 
-**Why the announced cadence gets its own column.** ``default_schedule_config``
-already has two writers — the operator, and the ``reduce_frequency`` post-action
-in ``schedule_tick`` — so reconciling the registry's ``watch_spec`` into it would
-let an hourly snapshot silently revert every throttle, and would contaminate the
-column CannObserv/archiver#150 imports *out of* Watcher. A separate column also
-gives the contract's delegation case a natural spelling: ``{"schema_version": 1}``
-with no ``interval`` means *apply your own default*, and the reconcile says that
-by leaving ``announced_schedule_config`` NULL — which lands on the per-domain
-tier, the layer cannobserv#324 deliberately kept live.
-
-**The throttle is a floor, not a tier.** ``reduce_frequency`` is protective
-mechanism rather than cadence policy — the same category as backoff, which
-CannObserv/archiver#150's break-glass ruling explicitly left on Watcher's side of
-the line. A floor composes with the announced interval instead of competing with
-it: it can only ever slow an item down, never speed one past what the registry
-asked for.
+**Before F2 there were four tiers and a floor.** The chain was announced →
+``WatchedItem.default_schedule_config`` → the Domain default (read from the
+denormalized ``WatchedItem.domain_default_schedule_config``) → system default
+(#205, #254), and the ``reduce_frequency`` post-action's
+``throttle_floor_interval`` applied over it as a floor that could only slow an
+item. The announced cadence had its own column so the hourly snapshot could not
+overwrite the operator's item default or revert a throttle. Those three columns
+and their writers are kept, inert, until the jump: the dashboard and API
+surfaces go in #377/#378, the columns in #380, and
+``src/ops/export_for_archiver.py`` still reads all of them for the pre-F3
+re-export (#376).
 """
 
-from src.core.models.watched_item import WatchedItem
-from src.core.scheduling.cadence import parse_interval
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Annotation only. ``src.core.utils`` reads the resolved cadence for
+    # ``check_interval`` and the notification renderer imports ``utils``, so a
+    # runtime model import here would pull the store side into the renderer
+    # (``tests/core/notifications/test_diff_layering.py``, #222 CR 2).
+    from src.core.models.watched_item import WatchedItem
 
 SYSTEM_DEFAULT_SCHEDULE_CONFIG: dict = {"interval": "1d"}
 
 
-def base_schedule_config(watched_item: WatchedItem) -> dict:
-    """The 4-tier chain, before the throttle floor.
+def resolved_schedule_config(watched_item: "WatchedItem") -> dict:
+    """Resolve a WatchedItem's schedule config: announced, else the system default.
 
-    At each tier ``None`` means "inherit" and falls through; a non-``None``
-    config (including an explicit ``{}``) wins at its tier — ``{}`` passes
-    through as "no interval" rather than falling to the next tier, consistent
-    across all four.
+    ``None`` means "nothing announced" and falls to the default; a non-``None``
+    config (including an explicit ``{}``) wins — ``{}`` passes through as "no
+    interval" rather than falling to the default.
+
+    **The result may alias a stored column** — the announced dict is returned by
+    reference. Callers must treat it as read-only.
     """
     if watched_item.announced_schedule_config is not None:
         return watched_item.announced_schedule_config
-    if watched_item.default_schedule_config is not None:
-        return watched_item.default_schedule_config
-    if watched_item.domain_default_schedule_config is not None:
-        return watched_item.domain_default_schedule_config
     return SYSTEM_DEFAULT_SCHEDULE_CONFIG
-
-
-def resolved_schedule_config(watched_item: WatchedItem) -> dict:
-    """Resolve a WatchedItem's schedule config: the 4-tier chain under the floor.
-
-    **The result may alias a stored column** — when no floor applies, the winning
-    tier's dict is returned by reference (long-standing behaviour, unchanged).
-    Callers must treat it as read-only; the floor branch happens to build a fresh
-    dict, but that is an implementation detail and not a guarantee to rely on.
-    """
-    config = base_schedule_config(watched_item)
-
-    floor = watched_item.throttle_floor_interval
-    if not floor:
-        return config
-
-    try:
-        resolved_is_faster = parse_interval(config.get("interval")) < parse_interval(floor)
-    except (TypeError, ValueError):
-        # The reconcile validates before storing, so an unparseable interval
-        # should be unreachable here — but this is the scheduler's hot loop
-        # (and, since #264, the watch-status full-set builder) and a raise
-        # would kill the tick for every item. TypeError is parse_interval's
-        # non-string spelling of the same corruption (#264 CR-7; the reconcile's
-        # own catch pairs them too). The floor is the safe direction: slower,
-        # never faster.
-        resolved_is_faster = True
-
-    if not resolved_is_faster:
-        return config
-    return {**config, "interval": floor}

@@ -10,14 +10,15 @@ needs on nearly every task; the detail is here.
 ## Fields and schedule resolution
 
 A `WatchedItem` owns everything: the canonical `effective_url` and `source_specs`
-used by the pipeline; `default_schedule_config`, `default_tags`;
+used by the pipeline; `default_schedule_config` (the operator's item cadence, inert since F2, #375), `default_tags`;
 `content_media_type` (#168); `domain_name` (FK → `Domain.name`, set at create time);
 `domain_suspended` (set True/False by domain deactivation/reactivation, through
 `set_domain_active` — the dashboard toggle and the `src.ops.suspend_domain`
 break-glass, #372 — it gates scheduling directly, no live Domain join); `domain_default_schedule_config`
-(denormalized copy of the parent Domain's cadence — the Domain tier of schedule
-resolution; #205); a single optional
-`TemporalProfile` (1:1, `temporal_profiles.watched_item_id`); `health_status`;
+(denormalized copy of the parent Domain's cadence — was the Domain tier of schedule
+resolution, #205; inert since F2, #375); a single optional
+`TemporalProfile` (1:1, `temporal_profiles.watched_item_id`; inert since F2 —
+Archiver evaluates profiles, and the row is kept for #380); `health_status`;
 `health_reason` / `health_status_code` (#370 — why it is in ERROR now: the latest
 failed check's `WatchHealthReason` token and, for `http_status`, the origin's
 status; written on every failure, cleared on leaving ERROR, published on
@@ -51,42 +52,54 @@ generation when the processor decides — see
 [docs/CONTENT-PIPELINE.md](CONTENT-PIPELINE.md)); and its
 notification surface (the
 item-scoped `NotificationTemplate` rows — `visibility='watched_item'`,
-`watched_item_id` set; see **Notifications** below). Schedule resolution is
-4-tier under a floor (#205, #254): `announced_schedule_config` → WatchedItem
-`default_schedule_config` → Domain default → system default, then
-`max(resolved, throttle_floor_interval)` (`resolved_schedule_config`,
-`src/core/scheduling/resolution.py`).
+`watched_item_id` set; see **Notifications** below). **Schedule resolution is announced, else the system default (#375, F2).**
+`resolved_schedule_config` (`src/core/scheduling/resolution.py`) returns
+`announced_schedule_config` when set (an explicit `{}` passes through as "no
+interval"), otherwise `SYSTEM_DEFAULT_SCHEDULE_CONFIG` (`1d`). Archiver resolves
+profile → item → domain and announces a concrete interval
+(CannObserv/archiver#364), and runs the daily profile boundary with its
+post-actions (CannObserv/archiver#365).
+
+*Before F2*, resolution was four tiers under a floor (#205, #254):
+`announced_schedule_config` → WatchedItem `default_schedule_config` → the Domain
+default (the denormalized `domain_default_schedule_config`) → system default, then
+`max(resolved, throttle_floor_interval)`. `schedule_tick` also evaluated each
+item's active `TemporalProfile` — a ramp interval inside its window, and once the
+date had passed a post-action: `deactivate` and `archive` wrote `is_active` /
+`archived_at` (without the registry guard), `reduce_frequency` set the floor to
+`1d` and audited `WATCHED_ITEM_THROTTLED`. The `/api/v1/watched-items/{id}/profiles`
+routes managed profiles. F2 deleted the tiers' reads, the floor, the profile
+evaluation, the post-actions and the routes; the columns, the `temporal_profiles`
+table and the writers stay, inert, until the jump (#377/#378 delete the surfaces,
+#380 the columns) — `src/ops/export_for_archiver.py` still reads them all.
+
 **Display** of the resolved interval + next-check goes through one helper,
-`resolve_schedule_display` (`src/core/scheduling/schedule.py`, #206): it composes the
-3-tier base with the active `TemporalProfile` override (`resolve_effective_interval`)
-and `compute_next_check`, returning a `ScheduleDisplay` (`interval_text`, `source`
-registry/item/domain/default, `profile_active`, `throttled`, `next_check`, plus a
-`marker` property → `profile`/`throttled`/`registry`/`domain`/`default`, in that
-precedence — whichever is actually in force). Every surface — list (`_build_schedule_map`), detail
-interval field, and the domain-detail table — renders from it, so the UI matches
-`schedule_tick` even when a profile is ramping (previously the UI showed the base
-cadence while the scheduler checked at the profile cadence). The profile dict shape
-is `TemporalProfile.to_resolution_dict()`, shared by the scheduler and the dashboard
-(`get_active_profiles_by_item` batch-loads them, mirroring `schedule_tick`). Both domain facts
-(`domain_suspended`, `domain_default_schedule_config`) are denormalized onto the
-WatchedItem via `ensure_domain_and_resolve_suspension` on every create/PATCH path
-and back-filled across a domain's items on domain edit
-(`backfill_domain_schedule_config`) — so the resolver, and the scheduler hot
-path, never join Domain. Cadence is validated at the API write boundary by the same helper as the Domain
-boundary (`validate_optional_schedule_config`, #205): a non-`None` config must carry a
-parseable `interval`, and `{}` is rejected — delegation has exactly one spelling,
-`None`/omit (the direction cannobserv#324 settled for the registry document). The rule
-is held at the boundary because `schedule_tick` resolves every item in one task — an
-unparseable stored interval raises out of `compute_next_check` and stops scheduling
-for the whole system, not just its own row. The resolver's `{}`-passes-through branch
-survives as defensive rendering for legacy rows.
+`resolve_schedule_display` (`src/core/scheduling/schedule.py`, #206): it composes
+`resolved_schedule_config` and `compute_next_check`, returning a `ScheduleDisplay`
+(`interval_text`, `source` `registry`/`default`, `next_check`, plus a `marker`
+property that renders the source). Every surface — list (`build_schedule_map`),
+detail interval field, and the domain-detail table — renders from it, so the UI
+matches `schedule_tick`. Before F2 it also reported the `item`/`domain` sources, a
+`throttled` flag and an active profile's override (`· profile`). Both domain facts
+(`domain_suspended`, `domain_default_schedule_config`) are still denormalized onto
+the WatchedItem via `ensure_domain_and_resolve_suspension` on every create/PATCH
+path and back-filled across a domain's items on domain edit
+(`backfill_domain_schedule_config`); only `domain_suspended` is read now.
+
+Cadence is validated at the API write boundary by the same helper as the Domain
+boundary (`validate_optional_schedule_config`, #205): a non-`None` config must carry
+a parseable `interval`, and `{}` is rejected — delegation has exactly one spelling,
+`None`/omit (the direction cannobserv#324 settled for the registry document). The
+rule was held there because `schedule_tick` resolves every item in one task, so an
+unparseable stored interval would raise out of `compute_next_check` and stop
+scheduling for the whole system. Since F2 those writes reach inert columns; the
+reconcile's own parse is what keeps the announced column safe.
 
 Per-domain cadence is `Domain.default_schedule_config`
 (a `schedule_config` interval string — operator check cadence, distinct from the
-`Domain.min_interval` rate-limiter floor), editable via `PATCH
-/api/v1/domains/{name}` and the domain detail page; the `reduce_frequency`
-post-action throttles to 1d only when the effective cadence is faster than 1d
-(never speeds a slower-than-1d item up).
+`Domain.min_interval` rate-limiter floor), still editable via `PATCH
+/api/v1/domains/{name}` and the domain detail page, and inert since F2 (#375): the
+dashboard field says so. Archiver holds the domain default it resolves from.
 
 ## Registry reconciliation (#254)
 

@@ -16,6 +16,12 @@ from src.core.media_type import resolve_dispatch_essence
 from src.core.models.watched_item import CONTENT_MEDIA_TYPE_MAX_LEN, WatchHealthStatus
 from src.core.scheduling.cadence import validate_optional_schedule_config
 
+#: OpenAPI text for the item cadence fields (#375 CR 1): stored, never scheduled.
+_INERT_ITEM_CADENCE = (
+    "Inert since F2 (#375): stored, but nothing schedules on it. Archiver announces "
+    "the cadence on info.registry; Watcher runs the announced interval, else 1d."
+)
+
 
 class WatchedItemCreate(BaseModel):
     """Create a WatchedItem via ``POST /api/v1/watched-items``.
@@ -51,7 +57,7 @@ class WatchedItemCreate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=255)
     description: str | None = None
     is_active: bool = True
-    default_schedule_config: dict | None = None
+    default_schedule_config: dict | None = Field(None, description=_INERT_ITEM_CADENCE)
     content_media_type: str | None = Field(None, max_length=CONTENT_MEDIA_TYPE_MAX_LEN)
     default_tags: list[str] | None = None
     source_specs: list[dict] = Field(..., min_length=1)
@@ -64,9 +70,10 @@ class WatchedItemCreate(BaseModel):
         The same rule, via the same helper, as the Domain boundary (#205 /
         `DomainPatch._cadence`) — #254 CR-16/19 verified the direction against
         cannobserv#324: delegation has exactly one spelling (`None`/omit), never
-        an empty document, and this is the only place that can hold the line —
-        `schedule_tick` resolves every item in one task, so an unparseable
-        stored interval stops scheduling for the whole system, not one row.
+        an empty document. It was load-bearing while `schedule_tick` read this
+        column: one unparseable stored interval stopped scheduling for the whole
+        system. Since F2 (#375) the column is inert and the rule only keeps the
+        stored value well-formed until #377/#378 delete the writer.
         """
         return validate_optional_schedule_config(v)
 
@@ -84,7 +91,7 @@ class WatchedItemPatch(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=255)
     description: str | None = None
     is_active: bool | None = None
-    default_schedule_config: dict | None = None
+    default_schedule_config: dict | None = Field(None, description=_INERT_ITEM_CADENCE)
     content_media_type: str | None = Field(None, max_length=CONTENT_MEDIA_TYPE_MAX_LEN)
     default_tags: list[str] | None = None
     effective_url: HttpUrlStr | None = None
@@ -141,7 +148,7 @@ class WatchedItemResponse(BaseModel):
     last_full_fetch_at: datetime | None = None
     last_changed_at: datetime | None
     health_status: WatchHealthStatus
-    default_schedule_config: dict | None
+    default_schedule_config: dict | None = Field(description=_INERT_ITEM_CADENCE)
     content_media_type: str | None
     default_tags: list[str] | None
     effective_url: str

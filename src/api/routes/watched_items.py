@@ -212,10 +212,10 @@ async def patch_watched_item(
     # Non-None when present: the schema's _reject_explicit_null forbids
     # ``"is_active": null``, so a popped value is always a real bool.
     target_active = updates.pop("is_active", None)
-    # The cadence write goes through the shared owner, which also releases any
-    # reduce_frequency throttle (#254 CR-1/CR-12) — the floor would otherwise be
-    # state an operator cannot undo, and a PATCH setting 30m would leave the item
-    # silently checking daily. Skipped in the generic loop rather than popped from
+    # The cadence write goes through the shared owner, which also clears the
+    # throttle floor (#254 CR-1/CR-12). Both columns are inert since F2 (#375):
+    # the write is stored and audited but schedules nothing, until #377/#378
+    # delete this writer. Skipped in the generic loop rather than popped from
     # ``updates``: the audit's ``other_fields`` reads that dict, and popping it
     # would quietly drop cadence changes out of the trail.
     for field, value in updates.items():

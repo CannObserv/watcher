@@ -30,20 +30,21 @@ column. On a *create* there is nothing to abstain from, so the model default
 *``watch_spec`` absence is a different question with a different answer.* Since
 cannobserv#324 the document is required on a live announcement, so the only
 delegation spelling is ``{"schema_version": 1}`` with no ``interval`` — meaning
-*apply your own default*, which for Watcher is the per-domain
-``default_schedule_config``. An unparseable interval resolves the same way and
-**must not stop scheduling**: co-core deliberately does not validate the
-document's contents, because raising at decode on a **no-DLQ** stream would drop
-the message entirely and leave the LWW key stale. That tolerance has to live
-here.
+*apply your own default*, which for Watcher is the system default since F2
+(#375); before it, the per-domain ``default_schedule_config``. An unparseable
+interval resolves the same way and **must not stop scheduling**: co-core
+deliberately does not validate the document's contents, because raising at
+decode on a **no-DLQ** stream would drop the message entirely and leave the LWW
+key stale. That tolerance has to live here.
 
 *Watcher owns what Archiver does not.* The announcement is authoritative for
 exactly five columns — ``archiver_info_source_id``, ``effective_url``,
 ``source_specs``, ``announced_schedule_config``, ``is_active`` — plus
 ``domain_name`` and its denormalized state, and only when the host actually
 moves. Everything else is Watcher's and survives: health, timings,
-``domain_suspended``, ``archived_at``, ``throttle_floor_interval``,
-``default_schedule_config``, media type, tags, notification config, audit rows.
+``domain_suspended``, ``archived_at``, ``throttle_floor_interval`` and
+``default_schedule_config`` (both inert since #375), media type, tags,
+notification config, audit rows.
 
 *No DLQ, and no dead-letter path.* An undecodable frame is logged and skipped
 with ``seek``; there is no group here, so there is no ack to skip past one with,

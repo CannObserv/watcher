@@ -12,7 +12,6 @@ from src.api.routes.domains import router as domains_router
 from src.api.routes.health import router as health_router
 from src.api.routes.notification_templates import router as notification_templates_router
 from src.api.routes.probe import router as probe_router
-from src.api.routes.temporal_profiles import router as profiles_router
 from src.api.routes.watched_item_notifications import (
     router as watched_item_notifications_router,
 )
@@ -204,7 +203,6 @@ async def lifespan(application: FastAPI):
 app = FastAPI(title="watcher", version="0.1.0", lifespan=lifespan)
 
 v1_router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_api_key)])
-v1_router.include_router(profiles_router)
 v1_router.include_router(watched_item_notifications_router)
 v1_router.include_router(notification_templates_router)
 v1_router.include_router(audit_router)

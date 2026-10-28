@@ -1,12 +1,14 @@
-{# Domain Default Interval field (#208) — the Domain tier of schedule resolution
-   (#205), distinct from Min Interval (the politeness floor, unpublished since F1, #374). Follows the inline-edit
+{# Domain Default Interval field (#208) — was the Domain tier of schedule
+   resolution (#205); inert since F2 (#375): Archiver resolves the domain
+   default and announces the item's interval. The writer stays until #377/#378.
+   Distinct from Min Interval (the politeness floor, unpublished since F1, #374). Follows the inline-edit
    pattern of the other domain fields: read-only view + Edit button by default;
    Save posts to the dedicated /default-schedule-config route (validation + back-fill
    onto WatchedItems). When blank, view mode shows the inherited system default with
    a "· default" marker. Expects: domain, cadence_interval, cadence_display,
    cadence_inherited, cadence_mode ("view"|"edit", default "view"). #}
 {% set mode = cadence_mode|default("view") %}
-{% set hint = "Default check cadence inherited by watched items on this domain" %}
+{% set hint = "Inert since F2 (#375): Archiver announces each item's cadence. An edit here is stored but schedules nothing." %}
 <div class="p-4" id="field-default_schedule_config">
   {% if mode == "edit" %}
   {# Field editing requires JS (HTMX) for Cancel; Save is a plain POST that

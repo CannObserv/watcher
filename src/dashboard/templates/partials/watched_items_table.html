@@ -26,7 +26,7 @@
             {% endif %}
           </td>
           <td>
-            {# inherited schedule shows the resolved value + a "· domain"/"· default"/"· profile" source marker, mirroring the detail page (#204, #205, #206) #}
+            {# the resolved value + a "· registry"/"· default" source marker, mirroring the detail page (#204, #205, #206, #375) #}
             <span class="text-sm">{{ schedule.interval_text }}{% if schedule.marker %} <span class="text-gray-400 dark:text-gray-500">· {{ schedule.marker }}</span>{% endif %}</span>
           </td>
           <td>

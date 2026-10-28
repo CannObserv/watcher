@@ -126,21 +126,22 @@
 </section>
 
 <section class="mb-8">
-  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Temporal Profile</h3>
+  {# Read-only since F2 (#375): Archiver evaluates profiles and runs their
+     post-actions; the row is kept for #380 and nothing here reads it. #}
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-1">Temporal Profile</h3>
+  <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">Inert since F2 (#375): Archiver evaluates profiles and announces the cadence.</p>
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
     {% if profiles %}
       {% for profile in profiles %}
       <div class="p-3 flex items-center justify-between gap-4 text-sm">
         <span class="text-gray-900 dark:text-gray-100">{{ profile.profile_type }}{% if profile.reference_date %} · {{ profile.reference_date }}{% endif %}</span>
-        {% if profile.is_active %}
-        <span class="badge badge-active">active</span>
-        {% else %}
-        <span class="badge badge-inactive">inactive</span>
-        {% endif %}
+        {# The stored flag, neutral either way: .badge-active means "monitored
+           now" (UI.md) and nothing reads this row since F2 (#375). #}
+        <span class="badge badge-inactive">{{ "active" if profile.is_active else "inactive" }}</span>
       </div>
       {% endfor %}
     {% else %}
-      <p class="p-4 text-sm text-gray-500 dark:text-gray-400">No temporal profile — scheduling uses the default interval. Manage via the API.</p>
+      <p class="p-4 text-sm text-gray-500 dark:text-gray-400">No temporal profile.</p>
     {% endif %}
   </div>
 </section>

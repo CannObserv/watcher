@@ -54,6 +54,30 @@ async def _command_count(db_session) -> int:
     return (await db_session.execute(select(func.count()).select_from(FetchCommand))).scalar_one()
 
 
+async def _run_tick(db_session, monkeypatch, now) -> tuple[list, AsyncMock]:
+    """Run one ``schedule_tick`` at ``now``; return (deferred calls, republish mock).
+
+    ``raising=False``: since #375 ``schedule_tick`` no longer imports
+    ``defer_status_republish`` at all, and the mock must still be there to
+    prove nothing republishes.
+    """
+    monkeypatch.setattr(tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session))
+    defer_calls: list = []
+    mock_configure = MagicMock()
+    mock_configure.return_value.defer_async = AsyncMock(
+        side_effect=lambda **kw: defer_calls.append(kw)
+    )
+    monkeypatch.setattr(check_watched_item, "configure", mock_configure)
+    republish = AsyncMock()
+    monkeypatch.setattr(tasks_mod, "defer_status_republish", republish, raising=False)
+
+    with patch("src.workers.tasks.datetime") as mock_dt:
+        mock_dt.now.return_value = now
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        await schedule_tick(int(now.timestamp()))
+    return defer_calls, republish
+
+
 # ---------------------------------------------------------------------------
 # check_watched_item — guards only (the fetch itself is Replicator's since #241)
 # ---------------------------------------------------------------------------
@@ -147,87 +171,41 @@ class TestCheckWatchedItemGuards:
 class TestScheduleTickAggregation:
     """schedule_tick enqueues per-WatchedItem based on WatchedItem.last_checked_at."""
 
+    NOW = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
+
     async def test_enqueues_when_watched_item_overdue(self, db_session, monkeypatch):
         """A WatchedItem whose last_checked_at is older than the interval is due."""
-        now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
         # Announced cadence = 1h (the only tier since F2, #375).
         wi = await make_watched_item(db_session, name="A")
         wi.announced_schedule_config = {"interval": "1h"}
-        wi.last_checked_at = now - timedelta(hours=2)
+        wi.last_checked_at = self.NOW - timedelta(hours=2)
         await db_session.commit()
 
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-
-        defer_calls: list = []
-        mock_configure = MagicMock()
-        mock_configure.return_value.defer_async = AsyncMock(
-            side_effect=lambda **kw: defer_calls.append(kw)
-        )
-        monkeypatch.setattr(check_watched_item, "configure", mock_configure)
-
-        with patch("src.workers.tasks.datetime") as mock_dt:
-            mock_dt.now.return_value = now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            await schedule_tick(int(now.timestamp()))
-
-        assert len(defer_calls) == 1
-        assert defer_calls[0]["watched_item_id"] == str(wi.id)
+        defer_calls, _ = await _run_tick(db_session, monkeypatch, self.NOW)
+        assert [c["watched_item_id"] for c in defer_calls] == [str(wi.id)]
 
     async def test_does_not_enqueue_when_watched_item_fresh(self, db_session, monkeypatch):
         """If the WatchedItem was checked recently, it is not due."""
-        now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
         wi = await make_watched_item(db_session, name="Fresh")
         wi.announced_schedule_config = {"interval": "1h"}
-        wi.last_checked_at = now - timedelta(minutes=5)
+        wi.last_checked_at = self.NOW - timedelta(minutes=5)
         await db_session.commit()
 
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-
-        mock_configure = MagicMock()
-        mock_configure.return_value.defer_async = AsyncMock()
-        monkeypatch.setattr(check_watched_item, "configure", mock_configure)
-
-        with patch("src.workers.tasks.datetime") as mock_dt:
-            mock_dt.now.return_value = now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            await schedule_tick(int(now.timestamp()))
-
-        mock_configure.return_value.defer_async.assert_not_called()
+        defer_calls, _ = await _run_tick(db_session, monkeypatch, self.NOW)
+        assert defer_calls == []
 
     async def test_null_last_checked_at_is_due_immediately(self, db_session, monkeypatch):
         """A WatchedItem with NULL last_checked_at is always overdue."""
-        now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
         wi = await make_watched_item(db_session, name="Never")
         wi.announced_schedule_config = {"interval": "1h"}
         # explicitly leave wi.last_checked_at as None.
         await db_session.commit()
 
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-
-        defer_calls: list = []
-        mock_configure = MagicMock()
-        mock_configure.return_value.defer_async = AsyncMock(
-            side_effect=lambda **kw: defer_calls.append(kw)
-        )
-        monkeypatch.setattr(check_watched_item, "configure", mock_configure)
-
-        with patch("src.workers.tasks.datetime") as mock_dt:
-            mock_dt.now.return_value = now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            await schedule_tick(int(now.timestamp()))
-
-        assert len(defer_calls) == 1
-        assert defer_calls[0]["watched_item_id"] == str(wi.id)
+        defer_calls, _ = await _run_tick(db_session, monkeypatch, self.NOW)
+        assert [c["watched_item_id"] for c in defer_calls] == [str(wi.id)]
 
     async def test_skips_inactive_or_archived_watched_items(self, db_session, monkeypatch):
         """is_active=False and archived_at IS NOT NULL exclude a WatchedItem."""
-        now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
         wi_inactive = await make_watched_item(
             db_session, name="Inactive WI", primary_url="https://inactive.example.com"
         )
@@ -235,23 +213,11 @@ class TestScheduleTickAggregation:
         wi_archived = await make_watched_item(
             db_session, name="Archived WI", primary_url="https://archived.example.com"
         )
-        wi_archived.archived_at = now - timedelta(days=1)
+        wi_archived.archived_at = self.NOW - timedelta(days=1)
         await db_session.commit()
 
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-
-        mock_configure = MagicMock()
-        mock_configure.return_value.defer_async = AsyncMock()
-        monkeypatch.setattr(check_watched_item, "configure", mock_configure)
-
-        with patch("src.workers.tasks.datetime") as mock_dt:
-            mock_dt.now.return_value = now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            await schedule_tick(int(now.timestamp()))
-
-        mock_configure.return_value.defer_async.assert_not_called()
+        defer_calls, _ = await _run_tick(db_session, monkeypatch, self.NOW)
+        assert defer_calls == []
 
 
 class TestScheduleTickInactiveDomain:
@@ -272,49 +238,13 @@ class TestScheduleTickInactiveDomain:
         )
         await db_session.commit()
 
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-
-        mock_configure = MagicMock()
-        mock_configure.return_value.defer_async = AsyncMock()
-        monkeypatch.setattr(check_watched_item, "configure", mock_configure)
-
-        with patch("src.workers.tasks.datetime") as mock_dt:
-            mock_dt.now.return_value = now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            await schedule_tick(int(now.timestamp()))
-
-        mock_configure.return_value.defer_async.assert_not_called()
+        defer_calls, _ = await _run_tick(db_session, monkeypatch, now)
+        assert defer_calls == []
 
 
 # ---------------------------------------------------------------------------
 # F2 (#375): the chain is announced-else-default; profiles fire nothing.
 # ---------------------------------------------------------------------------
-
-
-async def _run_tick(db_session, monkeypatch, now) -> tuple[list, AsyncMock]:
-    """Run one ``schedule_tick`` at ``now``; return (deferred calls, republish mock).
-
-    ``raising=False``: since #375 ``schedule_tick`` no longer imports
-    ``defer_status_republish`` at all, and the mock must still be there to
-    prove nothing republishes.
-    """
-    monkeypatch.setattr(tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session))
-    defer_calls: list = []
-    mock_configure = MagicMock()
-    mock_configure.return_value.defer_async = AsyncMock(
-        side_effect=lambda **kw: defer_calls.append(kw)
-    )
-    monkeypatch.setattr(check_watched_item, "configure", mock_configure)
-    republish = AsyncMock()
-    monkeypatch.setattr(tasks_mod, "defer_status_republish", republish, raising=False)
-
-    with patch("src.workers.tasks.datetime") as mock_dt:
-        mock_dt.now.return_value = now
-        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-        await schedule_tick(int(now.timestamp()))
-    return defer_calls, republish
 
 
 class TestScheduleTickChain:

@@ -2,6 +2,7 @@
 
 import asyncio
 import ipaddress
+import logging
 import re
 
 import httpx
@@ -225,6 +226,22 @@ class TestEmbeddedIPv4:
             await _head(transport, "http://[64:ff9b::a00:7]/")
 
         assert "resolves to 64:ff9b::a00:7 (embedding 10.0.0.7), inside" in str(caught.value)
+
+    async def test_the_refusal_log_names_the_address_that_matched(self, caplog):
+        """``address`` stays the destination; ``checked`` is what the row held, so the
+        journal tells an embedded refusal apart without parsing the message."""
+        transport = GuardedTransport(RecordingTransport(), resolve=never_resolves())
+
+        with caplog.at_level(logging.WARNING, logger="src.core.egress"):
+            with pytest.raises(DestinationRefused):
+                await _head(transport, "http://[64:ff9b::a00:7]/")
+
+        [record] = [r for r in caplog.records if r.getMessage() == "probe destination refused"]
+        assert (record.address, record.checked, record.network) == (
+            "64:ff9b::a00:7",
+            "10.0.0.7",
+            "10.0.0.0/8",
+        )
 
     @pytest.mark.parametrize("path", ["literal", "resolved"])
     @pytest.mark.parametrize(

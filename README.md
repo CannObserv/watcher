@@ -9,7 +9,7 @@ Notifier.
 
 The **`WatchedItem` is the single monitored entity** (#191): one row = one URL = one
 fingerprint = one change signal. It owns its `effective_url`, `source_specs`, schedule
-(`default_schedule_config` + an optional 1:1 `TemporalProfile`), `domain_name` /
+(the cadence Archiver announces, else a 1d system default — #375), `domain_name` /
 `domain_suspended`, health/timestamps, and its notification surface. A periodic
 `schedule_tick` enqueues `check_watched_item` for each due item; the processor extracts and
 fingerprints, and Watcher writes a `ChangeRevision` and dispatches `CHANGE_DETECTED` once per item.

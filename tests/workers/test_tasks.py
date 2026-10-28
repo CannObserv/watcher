@@ -25,9 +25,7 @@ from src.core.models.audit_log import AuditLog
 from src.core.models.domain import Domain
 from src.core.models.fetch_command import FetchCommand
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
-from src.core.scheduling.resolution import SYSTEM_DEFAULT_SCHEDULE_CONFIG, resolved_schedule_config
 from src.core.validators import CONDITIONAL_GET_ENV, validator_source_key
-from src.core.watched_items import set_item_schedule_interval
 from src.workers.tasks import check_watched_item, schedule_tick
 from tests.conftest import make_watched_item
 
@@ -418,34 +416,6 @@ class TestPostActionsAreGone:
         republish.assert_not_awaited()
         # And it is still scheduled at its announced cadence.
         assert [c["watched_item_id"] for c in defer_calls] == [str(wi.id)]
-
-
-class TestThrottleFloorWriterIsInert:
-    """The operator's item-interval edit still clears the floor (#254 CR-1). The
-    writer stays until #377/#378 delete the surface; since #375 neither column
-    moves the resolved cadence."""
-
-    async def test_an_explicit_item_interval_still_clears_the_column(self, db_session):
-        wi = await make_watched_item(db_session, name="Throttled")
-        wi.throttle_floor_interval = "1d"
-        await db_session.commit()
-
-        set_item_schedule_interval(wi, "30m")
-
-        assert wi.throttle_floor_interval is None
-        assert wi.default_schedule_config == {"interval": "30m"}
-        assert resolved_schedule_config(wi) == SYSTEM_DEFAULT_SCHEDULE_CONFIG
-
-    async def test_clearing_the_item_interval_still_clears_the_column(self, db_session):
-        wi = await make_watched_item(db_session, name="Throttled")
-        wi.throttle_floor_interval = "1d"
-        wi.default_schedule_config = {"interval": "15m"}
-        await db_session.commit()
-
-        set_item_schedule_interval(wi, None)
-
-        assert wi.throttle_floor_interval is None
-        assert wi.default_schedule_config is None
 
 
 class TestForcedFullFetch:

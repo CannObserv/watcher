@@ -184,7 +184,7 @@ EMBEDDING_A_PUBLIC_ADDRESS = [
 ]
 
 
-def _embedded_case(path: str, address: str, *, port: str = "") -> tuple[str, dict]:
+def _embedded_case(path: str, address: str, *, port: str = "") -> tuple[str, dict[str, list[str]]]:
     """The URL to probe and the resolver table, for the literal or the resolved path."""
     if path == "literal":
         return f"http://[{address}]{port}/", {}

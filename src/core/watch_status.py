@@ -41,8 +41,9 @@ Field mappings the consumer cannot check for us:
 * ``applied_active`` — the conjunction the scheduler actually gates on
   (``is_active`` AND un-archived AND domain not suspended), never a bare echo
   of the announcement.
-* ``applied_interval`` — the concrete resolved cadence **after** the throttle
-  floor, so cadence-only divergence (unparseable spec, delegation, floor) is
+* ``applied_interval`` — the concrete resolved cadence: announced, else the
+  system default (#375; before F2 it was the four-tier chain under the throttle
+  floor), so cadence-only divergence (unparseable spec, delegation) is
   visible while ``applied_active`` never moves, and Archiver's derived
   ``next_due_at`` stays truthful.
 * ``health`` — ``"ok"`` / ``"error"`` / ``"unknown"`` (#328); both

@@ -56,11 +56,11 @@ class TemporalProfile(Base, TimestampMixin):
         super().__init__(**kwargs)
 
     def to_resolution_dict(self) -> dict:
-        """Serialize to the plain-dict shape the scheduler resolvers consume.
+        """Serialize to the plain-dict shape the scheduler resolvers consumed.
 
-        The canonical input for ``resolve_effective_interval`` /
-        ``evaluate_post_actions`` (and thus the display helper), shared by
-        ``schedule_tick`` and the dashboard so the two never drift.
+        Unused since F2 (#375) removed ``resolve_effective_interval`` /
+        ``evaluate_post_actions``: Archiver evaluates profiles now. Kept with
+        the model, which goes in #380.
         """
         return {
             "id": str(self.id),

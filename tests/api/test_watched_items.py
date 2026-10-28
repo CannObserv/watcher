@@ -1,15 +1,17 @@
 """Integration tests for WatchedItem API endpoints."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select, text
 from ulid import ULID
 
+from src.api.main import app
 from src.core.fetch_commands import create_fetch_command
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.fetch_command import FetchCommandStatus
+from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watched_item import WatchedItem
 from tests.conftest import make_watched_item
 
@@ -1903,3 +1905,36 @@ class TestPatchStatusRepublishGate:
         response = await client.patch(f"/api/v1/watched-items/{wi.id}", json={"is_active": False})
         assert response.status_code == 200
         assert spy.await_count == 1
+
+
+class TestProfilesRoutesRemoved:
+    """#375: Archiver owns temporal profiles (CannObserv/archiver#364, #365); the
+    ``/watched-items/{id}/profiles`` routes are gone. The table and its rows stay
+    until the jump's migrations (#380)."""
+
+    @pytest.mark.parametrize(
+        ("method", "on_profile"),
+        [("get", False), ("post", False), ("patch", True), ("delete", True)],
+    )
+    async def test_the_profiles_routes_are_404(self, client, db_session, method, on_profile):
+        """Against a real stored profile, so PATCH/DELETE cannot 404 on a missing id."""
+        wi = await make_watched_item(db_session, name="No Profiles Route")
+        profile = TemporalProfile(
+            watched_item_id=wi.id,
+            profile_type=ProfileType.EVENT,
+            reference_date=date(2026, 7, 1),
+            rules=[{"days_before": 7, "interval": "1h"}],
+            post_action=PostAction.DEACTIVATE,
+        )
+        db_session.add(profile)
+        await db_session.commit()
+
+        path = f"/api/v1/watched-items/{wi.id}/profiles"
+        if on_profile:
+            path += f"/{profile.id}"
+        kwargs = {"json": {"is_active": False}} if method in ("post", "patch") else {}
+        response = await getattr(client, method)(path, **kwargs)
+        assert response.status_code == 404
+
+    def test_openapi_advertises_no_profiles_path(self):
+        assert not [p for p in app.openapi()["paths"] if "/profiles" in p]

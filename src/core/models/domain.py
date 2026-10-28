@@ -21,8 +21,9 @@ class Domain(Base, TimestampMixin):
     which stopped Watcher's producer (Archiver publishes host policy now), so
     the column is inert — while ``default_schedule_config`` is the
     operator's desired check *cadence* for items on this domain (a
-    schedule_config interval string), the Domain tier of the 3-tier schedule
-    resolution (#205).
+    schedule_config interval string), which was the Domain tier of schedule
+    resolution (#205) and is inert since F2 (#375): Archiver resolves the domain
+    default and announces each item's interval.
 
     The in-process ``DomainRateLimiter``'s columns — ``current_interval``,
     ``max_concurrency``, ``decay_window``, ``last_request_at`` — were retired
@@ -39,10 +40,11 @@ class Domain(Base, TimestampMixin):
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     # Operator's desired check *cadence* for items on this domain — a
-    # schedule_config interval string ({"interval": "6h"}), the Domain tier of the
-    # 3-tier resolution chain (#205). Distinct from min_interval, the request-level
-    # politeness floor published to Replicator (#245). none_as_null=True so
-    # an unset cadence persists as SQL NULL, not the JSONB 'null' literal (#198).
+    # schedule_config interval string ({"interval": "6h"}), was the Domain tier of
+    # the resolution chain (#205); inert since F2 (#375), dropped in #380.
+    # Distinct from min_interval, the request-level politeness floor published to
+    # Replicator (#245). none_as_null=True so an unset cadence persists as SQL
+    # NULL, not the JSONB 'null' literal (#198).
     default_schedule_config: Mapped[dict | None] = mapped_column(
         JSONB(none_as_null=True), nullable=True, default=None
     )

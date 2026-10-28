@@ -269,35 +269,15 @@ async def unacknowledged_spec_change(
 async def get_watched_item_profiles(
     session: AsyncSession, watched_item_id: ULID
 ) -> list[TemporalProfile]:
-    """Fetch the temporal profile(s) for a WatchedItem (#191: 1:1)."""
+    """Fetch the temporal profile(s) for a WatchedItem (#191: 1:1).
+
+    Display only: the detail page's read-only profile card, inert since F2
+    (#375). Goes with the table in #380.
+    """
     result = await session.execute(
         select(TemporalProfile).where(TemporalProfile.watched_item_id == watched_item_id)
     )
     return list(result.scalars().all())
-
-
-async def get_active_profiles_by_item(
-    session: AsyncSession, watched_item_ids: list[ULID]
-) -> dict[str, list[dict]]:
-    """Batch-load active temporal profiles for the given items, keyed by item id.
-
-    Returns the same ``{item_id: [resolution_dict, …]}`` shape the schedule-display
-    helper expects (``resolve_schedule_display(profiles=…)``), mirroring the
-    ``schedule_tick`` batch load so list/table display honors the profile override
-    the scheduler actually applies (#206). Empty input → empty map.
-    """
-    if not watched_item_ids:
-        return {}
-    result = await session.execute(
-        select(TemporalProfile).where(
-            TemporalProfile.is_active.is_(True),
-            TemporalProfile.watched_item_id.in_(watched_item_ids),
-        )
-    )
-    by_item: dict[str, list[dict]] = {}
-    for p in result.scalars().all():
-        by_item.setdefault(str(p.watched_item_id), []).append(p.to_resolution_dict())
-    return by_item
 
 
 async def get_watched_item_notifications(
@@ -539,20 +519,14 @@ async def get_domain_default_templates(
 def build_schedule_map(
     watched_items: list[WatchedItem],
     now: datetime,
-    profiles_by_wi: dict[str, list[dict]] | None = None,
 ) -> dict[str, ScheduleDisplay]:
-    """Resolved schedule display per item, keyed by id (#204, #205, #206).
+    """Resolved schedule display per item, keyed by id (#204, #205, #206, #375).
 
-    One ``ScheduleDisplay`` per item — carrying the interval text, inheritance
-    source marker, profile-active flag, and next-check datetime — computed once and
-    read by the list template for both the Interval and Next Check columns. Routes
-    through the same ``resolve_schedule_display`` helper as the detail page and
-    ``schedule_tick``, so the list shows the inherited cadence (with a
-    ``domain``/``default``/``profile`` marker) rather than a blank. Pass
-    ``profiles_by_wi`` (item id → active profile dicts) to honor profile overrides.
+    One ``ScheduleDisplay`` per item — carrying the interval text, its source
+    marker (``registry``/``default``) and the next-check datetime — computed once
+    and read by the list template for both the Interval and Next Check columns.
+    Routes through the same ``resolve_schedule_display`` helper as the detail page
+    and ``schedule_tick``, so the list cannot show a cadence the scheduler does
+    not run.
     """
-    profiles_by_wi = profiles_by_wi or {}
-    return {
-        str(wi.id): resolve_schedule_display(wi, now=now, profiles=profiles_by_wi.get(str(wi.id)))
-        for wi in watched_items
-    }
+    return {str(wi.id): resolve_schedule_display(wi, now=now) for wi in watched_items}

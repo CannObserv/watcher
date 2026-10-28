@@ -26,12 +26,10 @@ from src.core.fetch_commands import (
 )
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
-from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watched_item import WatchedItem
-from src.core.scheduling.cadence import compute_next_check, evaluate_post_actions, parse_interval
+from src.core.scheduling.cadence import compute_next_check
 from src.core.scheduling.resolution import resolved_schedule_config
 from src.workers import bp
-from src.workers.watch_status import defer_status_republish
 
 logger = get_logger(__name__)
 
@@ -180,21 +178,17 @@ async def schedule_tick(timestamp: int) -> None:
     """Enqueue ``check_watched_item`` jobs for every WatchedItem due now.
 
     A WatchedItem is "due" when ``last_checked_at`` is NULL (never checked) or
-    when its resolved schedule (with its optional 1:1 temporal profile applied)
-    says the next check is overdue.
+    when its resolved schedule — announced, else the system default — says the
+    next check is overdue.
 
-    Post-actions on the WatchedItem's temporal profile:
-    * ``deactivate`` flips the WatchedItem inactive.
-    * ``archive`` flips it inactive and stamps ``archived_at``.
-    * ``reduce_frequency`` slows ``default_schedule_config`` to ``1d``;
-      audited as ``WATCHED_ITEM_THROTTLED``.
+    Since F2 (#375) the tick evaluates no temporal profiles and runs no
+    post-actions: Archiver runs the profile boundary and announces the outcome
+    (CannObserv/archiver#365). The ``deactivate``/``archive`` post-actions wrote
+    ``is_active``/``archived_at`` here without the registry guard, and
+    ``reduce_frequency`` wrote ``throttle_floor_interval``; the tick writes
+    nothing now.
     """
     now = datetime.now(UTC)
-
-    def _profile_dicts(profiles_orm: list[TemporalProfile]) -> list[dict] | None:
-        if not profiles_orm:
-            return None
-        return [p.to_resolution_dict() for p in profiles_orm]
 
     async with get_session_factory()() as session:
         # Load active, non-archived, non-domain-suspended WatchedItems — the
@@ -207,91 +201,8 @@ async def schedule_tick(timestamp: int) -> None:
         )
         watched_items = list((await session.execute(wi_stmt)).scalars().all())
 
-        if not watched_items:
-            return
-
-        wi_ids = [wi.id for wi in watched_items]
-
-        # Batch-load each WatchedItem's temporal profile (#191: 1:1 on WatchedItem).
-        profiles_by_wi: dict[str, list[TemporalProfile]] = {}
-        tp_stmt = select(TemporalProfile).where(
-            TemporalProfile.is_active.is_(True),
-            TemporalProfile.watched_item_id.in_(wi_ids),
-        )
-        for p in (await session.execute(tp_stmt)).scalars().all():
-            profiles_by_wi.setdefault(str(p.watched_item_id), []).append(p)
-
         deferred = 0
-        status_moved = False  # any wire-visible post-action mutation (#264)
         for wi in watched_items:
-            profiles_orm = profiles_by_wi.get(str(wi.id), [])
-
-            # Apply the WatchedItem's temporal post-actions first; a
-            # reduce_frequency action mutates the schedule used for the due check.
-            if profiles_orm:
-                actions = evaluate_post_actions(_profile_dicts(profiles_orm), today=now.date())
-                for action_info in actions:
-                    action = action_info["action"]
-                    profile_dict = action_info["profile"]
-                    orm_profile = next(
-                        (p for p in profiles_orm if str(p.id) == profile_dict["id"]),
-                        None,
-                    )
-                    if action == "deactivate":
-                        wi.is_active = False
-                        status_moved = True
-                        logger.info(
-                            "post-action: deactivate watched_item",
-                            extra={"watched_item_id": str(wi.id), "profile_id": profile_dict["id"]},
-                        )
-                    elif action == "archive":
-                        wi.is_active = False
-                        wi.archived_at = now
-                        status_moved = True
-                        logger.info(
-                            "post-action: archive watched_item",
-                            extra={"watched_item_id": str(wi.id), "profile_id": profile_dict["id"]},
-                        )
-                    elif action == "reduce_frequency":
-                        # Throttle to 1d only when the currently-effective cadence is
-                        # faster than 1d. With the Domain cadence tier (#205) an item
-                        # may already resolve to a slower interval (e.g. a 7d domain);
-                        # pinning it to 1d would *speed it up*, the opposite of
-                        # "reduce frequency". When already ≥1d this is a no-op and no
-                        # floor is set, preserving inheritance.
-                        #
-                        # Writes the *floor*, not the item config (#254). A throttle is
-                        # protective mechanism, not cadence policy: policy is the
-                        # registry's since the info.registry reconcile landed, and a
-                        # throttle written into default_schedule_config would be
-                        # outranked by the announced tier — silently un-throttling the
-                        # item on its next announcement, which is the failure this
-                        # column split exists to prevent.
-                        if parse_interval(
-                            resolved_schedule_config(wi).get("interval")
-                        ) < parse_interval("1d"):
-                            wi.throttle_floor_interval = "1d"
-                            status_moved = True
-                            audit(
-                                session,
-                                EventType.WATCHED_ITEM_THROTTLED,
-                                watched_item_id=str(wi.id),
-                                new_interval="1d",
-                            )
-                            logger.info(
-                                "post-action: reduce frequency on watched_item",
-                                extra={
-                                    "watched_item_id": str(wi.id),
-                                    "profile_id": profile_dict["id"],
-                                },
-                            )
-                    if orm_profile is not None:
-                        orm_profile.is_active = False
-
-            # Skip if a post-action just turned this WatchedItem off.
-            if not wi.is_active or wi.archived_at is not None:
-                continue
-
             # Due iff never checked, or the resolved schedule is overdue.
             if wi.last_checked_at is None:
                 due_now = True
@@ -300,7 +211,6 @@ async def schedule_tick(timestamp: int) -> None:
                     schedule_config=resolved_schedule_config(wi),
                     last_checked_at=wi.last_checked_at,
                     now=now,
-                    profiles=_profile_dicts(profiles_orm),
                 )
                 due_now = next_due <= now
 
@@ -311,13 +221,6 @@ async def schedule_tick(timestamp: int) -> None:
                 )
                 await check_watched_item.configure().defer_async(watched_item_id=str(wi.id))
                 deferred += 1
-
-        await session.commit()
-
-    if status_moved:
-        # A post-action changed applied_active or the floor (applied_interval)
-        # — one republish covers the tick's whole batch, post-commit (#264).
-        await defer_status_republish()
 
     if deferred:
         logger.info("schedule_tick deferred checks", extra={"count": deferred})

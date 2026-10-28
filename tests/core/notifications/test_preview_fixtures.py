@@ -32,7 +32,7 @@ class _FakeWatchedItem:
 
     def __init__(self):
         self.domain_name = "example.com"
-        self.default_schedule_config = {"interval": "1h"}
+        self.announced_schedule_config = {"interval": "1h"}  # check_interval reads it (#375)
         self.last_changed_at = datetime(2026, 4, 15, 3, 22, 0, tzinfo=UTC)
         self.default_tags = ["regulatory"]
         self.description = "desc"

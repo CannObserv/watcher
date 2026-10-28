@@ -82,6 +82,9 @@ class WatchedItem(Base, TimestampMixin):
     last_observed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    # The operator's item cadence — was the item tier of schedule resolution
+    # (#205); inert since F2 (#375), Archiver announces the cadence. The writers
+    # (dashboard field, API PATCH) stay until #377/#378, the column until #380.
     # none_as_null=True so an omitted/None config persists as SQL NULL, not the
     # JSONB 'null' literal — keeps `IS NULL` queries correct (#198).
     default_schedule_config: Mapped[dict | None] = mapped_column(
@@ -111,33 +114,33 @@ class WatchedItem(Base, TimestampMixin):
     domain_suspended: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
-    # Denormalized copy of the parent Domain's default cadence — the Domain tier of
-    # the 3-tier schedule resolution (#205). Maintained on every create/PATCH path
-    # via ensure_domain_and_resolve_suspension and back-filled on domain-default
-    # edit, mirroring domain_suspended so the scheduler needs no live Domain join.
-    # none_as_null=True so an unset/inherited value persists as SQL NULL (#198).
+    # Denormalized copy of the parent Domain's default cadence — was the Domain
+    # tier of schedule resolution (#205). Inert since F2 (#375): Archiver resolves
+    # the domain default and announces the item's interval. Still maintained on
+    # every create/PATCH path via ensure_domain_and_resolve_suspension and
+    # back-filled on domain-default edit until #377/#378 delete those writers;
+    # the column goes in #380. none_as_null=True per #198.
     domain_default_schedule_config: Mapped[dict | None] = mapped_column(
         JSONB(none_as_null=True), nullable=True, default=None
     )
 
-    # Registry-announced cadence policy — the top tier of schedule resolution
-    # (#254). Written only by the info.registry reconcile, from the announcement's
-    # `watch_spec["interval"]`, and only when that interval parses. NULL is the
-    # contract's delegation case (`{"schema_version": 1}` with no `interval`,
-    # cannobserv#324) *and* the unparseable case, which resolve identically: fall
-    # to the local chain. Deliberately NOT `default_schedule_config` — that column
-    # has an operator and the reduce_frequency post-action writing to it, so
-    # reconciling into it would revert every throttle on the next snapshot and
-    # contaminate the values CannObserv/archiver#150 imports out of Watcher.
+    # Registry-announced cadence policy (#254) — since F2 (#375) the only cadence
+    # Watcher reads: announced, else the system default. Written only by the
+    # info.registry reconcile, from the announcement's `watch_spec["interval"]`,
+    # and only when that interval parses. NULL is the contract's delegation case
+    # (`{"schema_version": 1}` with no `interval`, cannobserv#324) *and* the
+    # unparseable case, which resolve identically: the system default. It was
+    # kept apart from `default_schedule_config` because that column had an
+    # operator and the reduce_frequency post-action writing to it.
     # none_as_null=True per #198.
     announced_schedule_config: Mapped[dict | None] = mapped_column(
         JSONB(none_as_null=True), nullable=True, default=None
     )
-    # Protective slow-down floor, written by the reduce_frequency post-action
-    # (#254). Mechanism, not policy: it composes with the announced cadence as a
-    # `max` rather than competing with it in the tier chain, so a throttle
-    # survives reconciliation and can only ever slow an item, never speed it past
-    # what the registry asked for. Same '30s'/'15m'/'6h'/'1d' vocabulary.
+    # Was the protective slow-down floor written by the reduce_frequency
+    # post-action (#254), applied as a `max` over the resolved cadence. Inert
+    # since F2 (#375): the post-action is gone (Archiver runs profiles) and the
+    # resolver no longer reads it. The operator's item-interval edit still clears
+    # it until #377/#378; the column goes in #380.
     throttle_floor_interval: Mapped[str | None] = mapped_column(
         String(16), nullable=True, default=None
     )
@@ -215,7 +218,7 @@ class WatchedItem(Base, TimestampMixin):
     # When anyone was last told this item is failing (#71): stamped on every
     # WATCH_ERROR dispatch, the transition's and each re-notify's, and cleared
     # on ERROR→OK. Watcher-owned, so it survives reconciliation like
-    # throttle_floor_interval. The re-notify gate measures
+    # health and timings. The re-notify gate measures
     # WATCHER_ERROR_RENOTIFY_INTERVAL from it; parked #63 (digests) is the
     # other reader it was named for.
     last_error_notified_at: Mapped[datetime | None] = mapped_column(

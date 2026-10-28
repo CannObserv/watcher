@@ -33,7 +33,7 @@ from src.core.domain_suspension import set_domain_active
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.revoked_info_item import RevokedInfoItem
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
-from src.core.scheduling.resolution import resolved_schedule_config
+from src.core.scheduling.resolution import SYSTEM_DEFAULT_SCHEDULE_CONFIG, resolved_schedule_config
 from src.workers.registry_reconcile import reconcile_announcement
 from tests.conftest import make_watched_item
 
@@ -410,10 +410,11 @@ class TestCadence:
         assert wi.announced_schedule_config == {"interval": "15m"}
         assert resolved_schedule_config(wi) == {"interval": "15m"}
 
-    async def test_no_interval_delegates_to_the_local_default(self, db_session):
+    async def test_no_interval_delegates_to_the_system_default(self, db_session):
         """cannobserv#324: `{"schema_version": 1}` with no `interval` is how the
-        producer says *apply your own default*. For this repo that is the
-        per-domain tier, which the tightening deliberately kept live."""
+        producer says *apply your own default*. Before F2 that was the per-domain
+        tier; since #375 Archiver resolves the domain default itself, so the only
+        default left here is the system one — a stale domain value is ignored."""
         info_item_id = ULID()
         await reconcile_announcement(
             db_session, _announcement(info_item_id, watch_spec={"schema_version": 1})
@@ -421,7 +422,7 @@ class TestCadence:
         wi = await _get(db_session, info_item_id)
         assert wi.announced_schedule_config is None
         wi.domain_default_schedule_config = {"interval": "7d"}
-        assert resolved_schedule_config(wi) == {"interval": "7d"}
+        assert resolved_schedule_config(wi) == SYSTEM_DEFAULT_SCHEDULE_CONFIG
 
     async def test_an_unparseable_interval_does_not_stop_scheduling(self, db_session):
         """The failure mode this whole channel exists to remove. co-core does not
@@ -537,14 +538,15 @@ class TestLocalColumnsSurvive:
         )
 
         wi = await _get(db_session, info_item_id)
+        # The column is Watcher's and survives; since #375 it binds nothing.
         assert wi.throttle_floor_interval == "1d"
-        assert resolved_schedule_config(wi) == {"interval": "1d"}
+        assert resolved_schedule_config(wi) == {"interval": "15m"}
 
     async def test_the_local_cadence_tier_survives(self, db_session):
-        """`default_schedule_config` is outranked by the announced tier, but it is
-        not *overwritten* — archiver#150 reads it out of Watcher before the SDK
-        is deleted, and it is the fallback the moment an announcement withdraws
-        its interval."""
+        """`default_schedule_config` is not *overwritten* — the #373 export reads it
+        out of Watcher for Archiver's import until #380 drops it. Inert since
+        #375: it is no longer the fallback when an announcement withdraws its
+        interval; the system default is."""
         info_item_id = ULID()
         await reconcile_announcement(db_session, _announcement(info_item_id, generation=1))
         wi = await _get(db_session, info_item_id)

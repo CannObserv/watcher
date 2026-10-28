@@ -16,8 +16,8 @@
 
     {% include "partials/domain_status_toggle.html" %}
 
-    {# Default Interval (#205, #208) — domain default check cadence; the Domain
-       tier of schedule resolution. Distinct from Min Interval, the politeness
+    {# Default Interval (#205, #208) — domain default check cadence; was the
+       Domain tier of schedule resolution, inert since F2 (#375). Distinct from Min Interval, the politeness
        floor (inert since F1, #374: Archiver publishes host policy). Sits 2nd, directly below Status. #}
     {% include "partials/domain_cadence_field.html" %}
 

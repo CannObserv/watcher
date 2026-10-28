@@ -817,7 +817,6 @@ class TestGetWatchedItemDetail:
         assert await get_watched_item_detail(db_session, str(ULID())) is None
 
 
-@pytest.mark.integration
 class TestProfileBatchLoaderIsGone:
     """#375: nothing resolves a profile any more, so the list views no longer
     batch-load them. ``get_watched_item_profiles`` stays for the detail page's
@@ -827,6 +826,7 @@ class TestProfileBatchLoaderIsGone:
         assert not hasattr(dashboard_context, "get_active_profiles_by_item")
 
 
+@pytest.mark.integration
 class TestGetAuditEntriesCount:
     """Pager totals for the audit-log / recent-activity table (#215)."""
 

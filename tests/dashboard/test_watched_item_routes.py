@@ -401,6 +401,10 @@ class TestDetailPage:
         assert b"Temporal Profile" in body
         assert b"2026-07-01" in body
         assert b"Inert since F2 (#375)" in body
+        # CR 5: a stored active flag is shown, but not with the live (green) badge.
+        card = body.split(b"Temporal Profile", 1)[1].split(b"</section>", 1)[0]
+        assert b"badge-active" not in card
+        assert b">active<" in card
 
     async def test_temporal_profile_panel_empty_state(self, client, db_session):
         """No profile → the empty state, which no longer points at the removed API."""

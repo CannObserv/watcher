@@ -135,11 +135,9 @@
       {% for profile in profiles %}
       <div class="p-3 flex items-center justify-between gap-4 text-sm">
         <span class="text-gray-900 dark:text-gray-100">{{ profile.profile_type }}{% if profile.reference_date %} · {{ profile.reference_date }}{% endif %}</span>
-        {% if profile.is_active %}
-        <span class="badge badge-active">active</span>
-        {% else %}
-        <span class="badge badge-inactive">inactive</span>
-        {% endif %}
+        {# The stored flag, neutral either way: .badge-active means "monitored
+           now" (UI.md) and nothing reads this row since F2 (#375). #}
+        <span class="badge badge-inactive">{{ "active" if profile.is_active else "inactive" }}</span>
       </div>
       {% endfor %}
     {% else %}

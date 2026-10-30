@@ -37,8 +37,9 @@ def _on_host() -> bool:
 
 
 def _runners() -> set[str]:
+    """Every job's ``runs-on``; a label list is repr-ed so it stays one hashable, distinct value."""
     return {
-        job.get("runs-on")
+        label if isinstance(label := job.get("runs-on"), str) else repr(label)
         for workflow in PINNED
         for job in yaml.safe_load(workflow.read_text(encoding="utf-8"))["jobs"].values()
     }
@@ -62,8 +63,9 @@ def test_runner_image_matches_the_host() -> None:
     if not _on_host():
         pytest.skip(f"{INSTALLED_UNIT} not present: not a host running the service")
     host = _host_image(OS_RELEASE)
-    assert _runners() == {host}, (
-        f"the host is {host}, CI runs {_runners()}: move every runs-on in "
+    runners = _runners()
+    assert runners == {host}, (
+        f"the host is {host}, CI runs {runners}: move every runs-on in "
         f"{', '.join(p.name for p in PINNED)} to {host} (#365)"
     )
 
@@ -84,7 +86,12 @@ def test_host_image_reads_a_quoted_and_a_bare_value(
 
 
 def test_a_host_that_moves_no_longer_matches(tmp_path: Path) -> None:
-    """The pretend host: the check the real one runs, against a 26.04 os-release."""
+    """The pretend host: the check the real one runs, against the next LTS's os-release.
+
+    Derived from the pin, so moving the pin never turns this red.
+    """
+    (pinned,) = _runners()
+    year, month = pinned.removeprefix("ubuntu-").split(".")
     moved = tmp_path / "os-release"
-    moved.write_text('VERSION_ID="26.04"\n')
+    moved.write_text(f'VERSION_ID="{int(year) + 2}.{month}"\n')
     assert _runners() != {_host_image(moved)}

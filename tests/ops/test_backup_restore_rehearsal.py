@@ -53,8 +53,9 @@ def _client_skew(dump_version: str, server_major: int) -> str | None:
         return None
     return (
         f"pg_dump {client_major} against a PostgreSQL {server_major} server: another major's "
-        f"archive need not restore (#365); install postgresql-client-{server_major} "
-        f"({dump_version.strip()})"
+        f"archive need not restore (#365); install postgresql-client-{server_major} and put "
+        f"/usr/lib/postgresql/{server_major}/bin first on PATH, since Ubuntu's pg_wrapper "
+        f"runs the newest client ({dump_version.strip()})"
     )
 
 

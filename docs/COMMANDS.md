@@ -404,6 +404,17 @@ gcloud iam service-accounts add-iam-policy-binding \
   --member="principalSet://iam.googleapis.com/projects/912903030445/locations/global/workloadIdentityPools/github/attribute.repository/CannObserv/watcher"
 ```
 
+**The runner is pinned to the host's release (#365).** Every `ci.yml` job and
+`audit.yml`'s run `ubuntu-24.04`, never `ubuntu-latest`: the backup rehearsal runs
+the image's own `pg_dump`/`pg_restore`, and 26.04's PostgreSQL 18 client writes
+an archive the `postgres:16` service rejects. The 24.04 image's client is the
+host's major. `tests/ci/test_workflow_pins.py` holds one image for both
+workflows, and on the host it fails until that image is `ubuntu-$VERSION_ID`,
+so moving the host is what moves the pin. The rehearsal fixture skips a client
+of any other major, naming the skew, and the `integration` job's no-skip check
+turns that skip red. `context-cadence.yml` stays on `ubuntu-latest`: it is
+generated, and it is outside the gate.
+
 **The lock audit is not CI's gate (#397).** `.github/workflows/audit.yml`'s one
 job, `uv audit (report-only)`, runs `scripts/audit_lock.sh` weekly, on demand, and
 on a lock-touching push or PR. It always exits 0 — a finding is a warning and the

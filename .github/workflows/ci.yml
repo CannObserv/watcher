@@ -16,10 +16,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Every job runs ubuntu-24.04, the host's release, never ubuntu-latest (#365):
+# 26.04's PostgreSQL 18 client broke the backup rehearsal against postgres:16.
+# On the host, tests/ci/test_workflow_pins.py fails until this follows it.
 jobs:
   lint:
     name: lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # WIF: mint an OIDC token for google-github-actions/auth to impersonate the
     # read-only co-pypi-reader SA and pull the cannobserv wheelhouse (#220).
     # Job-scoped so no other job gains cloud access it doesn't need.
@@ -74,7 +77,7 @@ jobs:
   # no wheelhouse, no uv. Keep the pin equal to scripts/build-css.sh's.
   css:
     name: css
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -92,7 +95,7 @@ jobs:
 
   test:
     name: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # WIF: mint an OIDC token for google-github-actions/auth (see the lint job).
     permissions:
       contents: read
@@ -148,7 +151,7 @@ jobs:
   # the `migrations` job below covers the chain (#234).
   integration:
     name: integration
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # WIF: mint an OIDC token for google-github-actions/auth (see the lint job).
     permissions:
       contents: read
@@ -213,7 +216,7 @@ jobs:
 
   migrations:
     name: migrations
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # WIF: mint an OIDC token for google-github-actions/auth (see the lint job).
     permissions:
       contents: read

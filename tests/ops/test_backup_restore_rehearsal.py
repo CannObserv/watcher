@@ -42,6 +42,38 @@ def _major(version_text: str) -> int:
     return int(re.search(r"(\d+)", version_text).group(1))
 
 
+def _client_skew(dump_version: str, server_major: int) -> str | None:
+    """Why this ``pg_dump`` cannot rehearse against the server, or ``None``.
+
+    Any other major is a skew, newer included: the rehearsal is production's
+    pair, client and server of one major (#365).
+    """
+    client_major = _major(dump_version)
+    if client_major == server_major:
+        return None
+    return (
+        f"pg_dump {client_major} against a PostgreSQL {server_major} server: another major's "
+        f"archive need not restore (#365); install postgresql-client-{server_major} and put "
+        f"/usr/lib/postgresql/{server_major}/bin first on PATH, since Ubuntu's pg_wrapper "
+        f"runs the newest client ({dump_version.strip()})"
+    )
+
+
+@pytest.mark.parametrize("client", ["15.8", "18.6"])
+def test_a_client_of_another_major_names_the_skew(client: str) -> None:
+    """#365: an 18 ``pg_dump`` writes ``SET transaction_timeout``, which a 16
+    server rejects mid-restore. Newer is as wrong as older: skip, naming both."""
+    reason = _client_skew(f"pg_dump (PostgreSQL) {client} (Ubuntu {client}-1)\n", 16)
+    assert reason is not None
+    assert f"pg_dump {client.split('.')[0]}" in reason
+    assert "PostgreSQL 16 server" in reason
+    assert "postgresql-client-16" in reason
+
+
+def test_a_client_of_the_servers_major_rehearses() -> None:
+    assert _client_skew("pg_dump (PostgreSQL) 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)\n", 16) is None
+
+
 @pytest.fixture
 async def databases():
     """Two scratch databases on the test server, created and always dropped.
@@ -59,8 +91,8 @@ async def databases():
     async with admin.connect() as conn:
         server_major = int((await conn.execute(text("SHOW server_version_num"))).scalar()) // 10000
         dump_version = subprocess.run(["pg_dump", "--version"], capture_output=True, text=True)
-        if _major(dump_version.stdout) < server_major:
-            pytest.skip(f"pg_dump is older than the server ({dump_version.stdout.strip()})")
+        if skew := _client_skew(dump_version.stdout, server_major):
+            pytest.skip(skew)
         exists = (
             await conn.execute(text("SELECT 1 FROM pg_roles WHERE rolname = :r"), {"r": APP_ROLE})
         ).scalar()

@@ -38,8 +38,9 @@ concurrency:
 jobs:
   audit:
     name: uv audit (report-only)
-    # ci.yml's runner: the job needs only the uv binary (#365 reads the image).
-    runs-on: ubuntu-latest
+    # ci.yml's runner: the job needs only the uv binary, but one image per repo
+    # keeps the host check whole (#365, tests/ci/test_workflow_pins.py).
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

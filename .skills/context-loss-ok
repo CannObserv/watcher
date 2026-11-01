@@ -375,3 +375,38 @@ docs/SKILLS.md :: disproven :: most of them (gregoryfoster/skills#286). For `bra
 docs/SKILLS.md :: disproven :: run at all: `obra/superpowers` ships no `version:`, so the stamp comparison has nothing on the
 docs/SKILLS.md :: disproven :: vendor side and `version:` there is watcher's own number. Leaving `synced-from:` at the old
 docs/SKILLS.md :: disproven :: | `brainstorming` | `SKILL.md` only: `docs/plans/` path
+# #413/#409: the last override (shipping-work-python-fastapi) is retired; every skills/ entry is a vendor symlink, `test -L` and tests/test_no_skill_overrides.py refute each override claim. The marker/synced-from rule survives, reworded, in SKILLS.md → No overrides; the deltas' new homes are SKILLS.md → Shipping.
+AGENTS.md :: disproven :: A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `skills/` shadow
+docs/SKILLS.md :: disproven :: | `skills/` | agentskills.io | Committed overrides + symlinks
+docs/SKILLS.md :: disproven :: Local overrides in `skills/` automatically shadow vendor skills in both systems.
+docs/SKILLS.md :: retarget :: | `shipping-work-python-fastapi` | ship it, push GH, close GH, wrap up |
+docs/SKILLS.md :: disproven :: | Local override | `skills/<name>/` | Committed in this repo
+docs/SKILLS.md :: rename :: ## Local Overrides
+docs/SKILLS.md :: disproven :: A committed directory in `skills/` completely supersedes the vendor version
+docs/SKILLS.md :: disproven :: inheritance, so whatever the directory does not provide, the skill does not have.
+docs/SKILLS.md :: disproven :: **not** mean copying the vendor tree: the override forks `SKILL.md` alone
+docs/SKILLS.md :: disproven :: sibling asset back to `skills-vendor/`, so upstream fixes to the parts that were never
+docs/SKILLS.md :: disproven :: customized arrive with a submodule bump. Each override records its base commit in a
+docs/SKILLS.md :: disproven :: `<!-- forked from <vendor>@<sha> -->` marker directly under the frontmatter
+docs/SKILLS.md :: disproven :: what makes the next refresh a 3-way diff instead of a guess.
+docs/SKILLS.md :: retarget :: [tests/test_fork_markers.py](../tests/test_fork_markers.py) holds it to that
+docs/SKILLS.md :: disproven :: `skills/*/SKILL.md` must carry a marker, and its SHA must resolve
+docs/SKILLS.md :: disproven :: be an ancestor of the pinned commit. Falling *behind* the pin is fine
+docs/SKILLS.md :: disproven :: down on the fork's own schedule; a stamp that names no commit
+docs/SKILLS.md :: disproven :: marker that cannot be diffed against.
+docs/SKILLS.md :: disproven :: **The same commit is recorded twice, and a re-sync bumps both** (#301, #303).
+docs/SKILLS.md :: disproven :: the reader; `synced-from: "<repo> <tag> (<commit>)"` in the frontmatter metadata
+docs/SKILLS.md :: disproven :: `.skills/doctor.sh` reads, and it is the doctor's *second* drift comparison
+docs/SKILLS.md :: disproven :: commit against the vendor now, scoped to the override's own real files.
+docs/SKILLS.md :: disproven :: comparison that can see a vendor `SKILL.md` change that carried no `version:` bump
+docs/SKILLS.md :: disproven :: most of them (gregoryfoster/skills#286); an `obra/superpowers` fork would have it alone
+docs/SKILLS.md :: disproven :: that repo ships no `version:`. Leaving `synced-from:` at the old
+docs/SKILLS.md :: disproven :: commit re-reports drift that was just paid down; dropping it gives up the comparand
+docs/SKILLS.md :: disproven :: and the doctor reports an override nothing can compare as the same failure
+docs/SKILLS.md :: disproven :: detection at all.
+docs/SKILLS.md :: disproven :: | Skill | Override reason |
+docs/SKILLS.md :: disproven :: | `shipping-work-python-fastapi` | `SKILL.md` only: watcher commit convention in Step 2
+docs/SKILLS.md :: disproven :: **No `.skills/pre-ship-uv-args`, deliberately** (#318). Vendor 1.5 reads extra `uv run`
+docs/SOCRATICODE.md :: disproven :: indexed: it holds the first-party overrides, and its vendor symlinks resolve to
+docs/SOCRATICODE.md :: disproven :: the excluded `skills-vendor/` paths.
+docs/COMMANDS.md :: retarget :: vendored gate in `shipping-work-python-fastapi`, and once that passes runs

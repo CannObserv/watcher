@@ -136,6 +136,20 @@ deploy. A wrapper-side addition, not a gate change — a gate change belongs in
 gregoryfoster/skills. Forking the gate to add those lines is the failure mode this replaced: the fork stops
 receiving upstream fixes without saying so.
 
+Two wrapper choices shape the gate's run:
+
+- **The stamp key carries env names** (#404). The gate records a pass against the exact tree,
+  under the git common directory, so every worktree shares it, and keys it on the names in
+  `PRE_SHIP_ENV_NAMES`; an exported but empty list writes no stamp
+  ([gregoryfoster/skills#497](https://github.com/gregoryfoster/skills/issues/497)). The loader
+  collects the names, falling back to the primary checkout's `.env` in a linked worktree, and
+  the wrapper exports them. Exporting is the wrapper's job, so interactive shells that source
+  the loader never carry the variable. `GATE_STAMP=off` forces a run;
+  `GATE_STAMP_EXPLAIN=1` prints the key's inputs.
+- **The gate gets CI's no-server `TEST_DATABASE_URL`** (#406), the `test` job's string
+  verbatim, so a DB test missing `integration` fails locally rather than only in CI after the
+  code is live. The integration run keeps the loaded URL.
+
 **No `.skills/pre-ship-uv-args`, deliberately** (#318). The gate reads extra `uv run`
 arguments from that file ([gregoryfoster/skills#304](https://github.com/gregoryfoster/skills/issues/304))
 for a project whose tests need a non-default group (`--group seed`). Watcher's only

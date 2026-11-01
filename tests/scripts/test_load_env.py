@@ -21,10 +21,20 @@ sourcing the file — a secrets file is data, and must never be executed.
 
 ``WATCHER_SYSTEM_ENV_FILE`` / ``WATCHER_PROJECT_ENV_FILE`` override the two
 default paths so these tests never touch the real ``/etc/watcher/.env``.
+
+In a linked worktree the git-ignored ``.env`` exists only in the primary
+checkout, so without an override the loader falls back to it, and warns when
+neither file is readable (#404). It records the names it set, never a value, in
+the unexported ``WATCHER_LOADED_ENV_NAMES``: ``scripts/pre-ship.sh`` exports
+them as the gate's ``PRE_SHIP_ENV_NAMES``, and an interactive shell never sees
+a gate-only variable.
 """
 
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "load-env.sh"
@@ -35,6 +45,7 @@ def source_and_probe(
     project_env: Path | None,
     probe: str,
     strict: bool = True,
+    cwd: Path = REPO_ROOT,
 ) -> subprocess.CompletedProcess[str]:
     """Source the script in a hermetic shell, then run ``probe``.
 
@@ -58,7 +69,7 @@ def source_and_probe(
         env=env,
         capture_output=True,
         text=True,
-        cwd=REPO_ROOT,
+        cwd=cwd,
     )
 
 
@@ -182,3 +193,127 @@ class TestPrecedence:
         proj_f.write_text("SHARED=from-project\n")
         r = source_and_probe(sys_f, proj_f, 'echo "[$SHARED][$ONLY_SYSTEM]"')
         assert "[from-project][sys]" in r.stdout
+
+
+class TestNoEnvFileWarns:
+    """#404: a load that found nothing says so, on stderr, naming paths only."""
+
+    def test_neither_file_readable_warns_with_both_paths(self, tmp_path: Path) -> None:
+        sys_f, proj_f = tmp_path / "nope.env", tmp_path / "also-nope.env"
+        r = source_and_probe(sys_f, proj_f, "echo done")
+        assert r.returncode == 0, r.stderr
+        assert "done" in r.stdout
+        assert "WARN" in r.stderr
+        assert str(sys_f) in r.stderr and str(proj_f) in r.stderr
+
+    def test_one_readable_file_is_silent(self, tmp_path: Path) -> None:
+        sys_f = tmp_path / "sys.env"
+        sys_f.write_text("KEY=value\n")
+        r = source_and_probe(sys_f, tmp_path / "nope.env", "echo done")
+        assert r.stderr == ""
+
+
+class TestLoadedNames:
+    """The names the files set, for the ship gate's stamp key — never values."""
+
+    def test_names_from_both_files_are_recorded_in_load_order(self, tmp_path: Path) -> None:
+        sys_f, proj_f = tmp_path / "sys.env", tmp_path / "proj.env"
+        sys_f.write_text("ALPHA=secret-a\n# comment\nBAD-KEY=x\n")
+        proj_f.write_text("BETA='secret b'\n")
+        r = source_and_probe(sys_f, proj_f, 'echo "[$WATCHER_LOADED_ENV_NAMES]"')
+        assert "[ALPHA BETA]" in r.stdout
+
+    def test_names_are_not_exported(self, tmp_path: Path) -> None:
+        sys_f = tmp_path / "sys.env"
+        sys_f.write_text("ALPHA=a\n")
+        r = source_and_probe(sys_f, None, "bash -c 'echo \"[${WATCHER_LOADED_ENV_NAMES-unset}]\"'")
+        assert "[unset]" in r.stdout
+
+    def test_resourcing_does_not_accumulate(self, tmp_path: Path) -> None:
+        sys_f = tmp_path / "sys.env"
+        sys_f.write_text("ALPHA=a\n")
+        r = source_and_probe(
+            sys_f, tmp_path / "nope.env", f"source '{SCRIPT}'\necho \"[$WATCHER_LOADED_ENV_NAMES]\""
+        )
+        assert "[ALPHA]" in r.stdout
+
+    def test_nothing_loaded_records_an_empty_list(self, tmp_path: Path) -> None:
+        r = source_and_probe(
+            tmp_path / "nope.env",
+            tmp_path / "also-nope.env",
+            'echo "[${WATCHER_LOADED_ENV_NAMES-unset}]"',
+        )
+        assert "[]" in r.stdout
+
+
+def _git(*args: str, cwd: Path) -> None:
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+    )
+
+
+@pytest.fixture
+def worktree(tmp_path: Path) -> tuple[Path, Path]:
+    """A primary checkout with a commit, and a linked worktree of it."""
+    if shutil.which("git") is None:
+        pytest.skip("git not available")
+    primary, linked = tmp_path / "primary", tmp_path / "linked"
+    primary.mkdir()
+    _git("init", "-q", cwd=primary)
+    _git("commit", "-q", "--allow-empty", "-m", "init", cwd=primary)
+    _git("worktree", "add", "-q", "-b", "wt", str(linked), cwd=primary)
+    return primary, linked
+
+
+class TestLinkedWorktreeFallback:
+    """#404: a linked worktree has no ``.env`` of its own; the primary's is used."""
+
+    def test_primary_checkout_env_is_loaded(self, worktree: tuple[Path, Path]) -> None:
+        primary, linked = worktree
+        (primary / ".env").write_text("WT_KEY=from-primary\n")
+        r = source_and_probe(
+            primary / "no-system.env",
+            None,
+            'echo "[$WT_KEY][$WATCHER_LOADED_ENV_NAMES]"',
+            cwd=linked,
+        )
+        assert r.returncode == 0, r.stderr
+        assert "[from-primary][WT_KEY]" in r.stdout
+        assert r.stderr == ""
+
+    def test_loading_prints_no_value(self, worktree: tuple[Path, Path]) -> None:
+        primary, linked = worktree
+        (primary / ".env").write_text("WT_KEY=must-not-be-printed-either\n")
+        r = source_and_probe(primary / "no-system.env", None, ":", cwd=linked)
+        assert "must-not-be-printed" not in r.stdout + r.stderr
+
+    def test_the_worktrees_own_env_wins(self, worktree: tuple[Path, Path]) -> None:
+        primary, linked = worktree
+        (primary / ".env").write_text("WT_KEY=from-primary\n")
+        (linked / ".env").write_text("WT_KEY=from-linked\n")
+        r = source_and_probe(primary / "no-system.env", None, 'echo "[$WT_KEY]"', cwd=linked)
+        assert "[from-linked]" in r.stdout
+
+    def test_an_explicit_project_file_wins_over_the_fallback(
+        self, worktree: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        primary, linked = worktree
+        (primary / ".env").write_text("WT_KEY=from-primary\n")
+        r = source_and_probe(
+            primary / "no-system.env",
+            tmp_path / "absent.env",
+            'echo "[${WT_KEY-unset}]"',
+            cwd=linked,
+        )
+        assert "[unset]" in r.stdout
+
+    def test_neither_file_warns_with_every_path_tried(self, worktree: tuple[Path, Path]) -> None:
+        primary, linked = worktree
+        r = source_and_probe(primary / "no-system.env", None, "echo done", cwd=linked)
+        assert r.returncode == 0, r.stderr
+        assert "WARN" in r.stderr
+        for path in (primary / "no-system.env", linked / ".env", primary / ".env"):
+            assert str(path.resolve()) in r.stderr or str(path) in r.stderr, (path, r.stderr)

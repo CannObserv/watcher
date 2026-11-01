@@ -44,6 +44,10 @@ skips a malformed line instead of aborting. It replaced
 both files were absent, died under `set -e` on any comment line, and word-split values
 containing spaces. Paths are overridable via `WATCHER_SYSTEM_ENV_FILE` /
 `WATCHER_PROJECT_ENV_FILE`; guarded by `tests/scripts/test_load_env.py`.
+In a linked worktree, which has no `.env` of its own, it falls back to the primary
+checkout's, and when neither file is readable it prints a `WARN` naming the paths
+tried, never a value (#404). It leaves the names it set, unexported, in
+`WATCHER_LOADED_ENV_NAMES` for the ship gate's stamp.
 
 ## Shipping
 

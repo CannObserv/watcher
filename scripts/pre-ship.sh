@@ -52,10 +52,17 @@ fi
 
 # Load secrets through the shared loader — it parses each file rather than
 # sourcing it, so a secrets file is never executed, and a malformed line is
-# skipped rather than deciding whether the ship gate runs.
+# skipped rather than deciding whether the ship gate runs. In a linked worktree
+# it falls back to the primary checkout's .env (#404).
 # Guarded by tests/scripts/test_load_env.py.
 # shellcheck source=scripts/load-env.sh
 source "$PROJECT_ROOT/scripts/load-env.sh"
+
+# The gate keys its pass stamp on these names (never values), and writes no
+# stamp when the list is exported empty, so a run that loaded nothing cannot
+# bless the tree for one that does (gregoryfoster/skills#497, #404). Exported
+# here rather than by the loader, which interactive shells also source.
+export PRE_SHIP_ENV_NAMES="$WATCHER_LOADED_ENV_NAMES"
 
 # Not exec'd any more — the integration run follows. Under `set -e` a failing
 # gate still exits with its own code, so the Iron Law sees it unchanged.

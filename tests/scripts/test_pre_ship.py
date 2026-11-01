@@ -6,6 +6,11 @@ code is live. The wrapper therefore runs ``pytest -m integration`` itself once
 the vendored gate passes (#353), and fails on a skip as well as a failure
 (``scripts/check_no_skips.py``).
 
+The gate keys its pass stamp on ``PRE_SHIP_ENV_NAMES``, the names (never the
+values) the env files set, and writes no stamp when that list is exported
+empty (gregoryfoster/skills#497). The wrapper exports it from the loader's
+``WATCHER_LOADED_ENV_NAMES`` (#404).
+
 Hermetic: the wrapper runs from a scratch git repo holding copies of it and
 ``load-env.sh``, a fake vendored gate and a fake ``uv`` that log their argv,
 so neither the real gate nor the real suite runs (and nothing recurses).
@@ -24,7 +29,8 @@ LOAD_ENV = REPO_ROOT / "scripts" / "load-env.sh"
 DELEGATE = Path("skills/shipping-work/scripts/pre-ship.sh")
 
 FAKE_DELEGATE = """#!/usr/bin/env bash
-echo "delegate probe=${PRE_SHIP_PROBE:-unset} args=$*" >> "$PRE_SHIP_LOG"
+names="[${PRE_SHIP_ENV_NAMES-unset}]"
+echo "delegate probe=${PRE_SHIP_PROBE:-unset} names=$names args=$*" >> "$PRE_SHIP_LOG"
 exit "${FAKE_DELEGATE_RC:-0}"
 """
 
@@ -59,14 +65,16 @@ def sandbox(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def run(sandbox: Path, *args: str, **rcs: int) -> tuple[subprocess.CompletedProcess[str], list]:
+def run(
+    sandbox: Path, *args: str, project_env: str = "project.env", **rcs: int
+) -> tuple[subprocess.CompletedProcess[str], list]:
     log = sandbox / "calls.log"
     env = {
         "PATH": f"{sandbox / 'bin'}:/usr/bin:/bin",
         "HOME": str(sandbox),
         "PRE_SHIP_LOG": str(log),
         "WATCHER_SYSTEM_ENV_FILE": str(sandbox / "absent.env"),
-        "WATCHER_PROJECT_ENV_FILE": str(sandbox / "project.env"),
+        "WATCHER_PROJECT_ENV_FILE": str(sandbox / project_env),
         **{f"FAKE_{k.upper()}_RC": str(v) for k, v in rcs.items()},
     }
     result = subprocess.run(
@@ -161,3 +169,18 @@ def test_help_still_works_beside_the_uv_args_file(sandbox: Path) -> None:
     result, calls = run(sandbox, "--help")
     assert result.returncode == 0
     assert len(calls) == 1 and calls[0].endswith("args=--help")
+
+
+def test_the_gate_sees_the_loaded_names_and_no_value(sandbox: Path) -> None:
+    """#404: the stamp is keyed on names; a value never reaches the key."""
+    _, calls = run(sandbox)
+    assert "names=[PRE_SHIP_PROBE]" in calls[0]
+    assert "loaded" not in calls[0].split("names=", 1)[1]
+
+
+def test_no_env_file_exports_an_empty_list_and_warns(sandbox: Path) -> None:
+    """Exported but empty is the gate's "write no stamp" signal (#497)."""
+    result, calls = run(sandbox, project_env="absent-too.env")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "names=[]" in calls[0]
+    assert "WARN" in result.stderr

@@ -2,9 +2,10 @@
 # pre-ship.sh — watcher's env-loading wrapper around the vendored
 # shipping-work ship gate.
 #
-# watcher's conftest needs TEST_DATABASE_URL, so the gate needs
-# /etc/watcher/.env (system) and $PROJECT_ROOT/.env (repo-local) in the
-# environment before it runs. Upstream ships without env loading and documents
+# It loads /etc/watcher/.env (system) and $PROJECT_ROOT/.env (repo-local, the
+# primary checkout's from a linked worktree) first: the integration run needs
+# their real TEST_DATABASE_URL, and the gate keys its pass stamp on the names
+# they set. Upstream ships without env loading and documents
 # this wrapper as the supported override point: SKILL.md Step 1 probes
 # `scripts/` first, finds this file, and this file delegates back to the
 # vendored gate. Do NOT fork the gate itself — a fork copies every check to add

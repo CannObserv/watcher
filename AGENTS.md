@@ -176,7 +176,7 @@ utilities (UI §4), and `is_htmx(request)` rather than a bare `HX-Request` read
 
 ## Agent Skills
 
-A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `skills/` shadow `skills-vendor/`: [docs/SKILLS.md](docs/SKILLS.md).
+A skill is symlinked, unforked, into both `skills/` and `.claude/skills/` (#413): [docs/SKILLS.md](docs/SKILLS.md).
 
 **`brainstorming`, overriding its text (#396):** explicit ask or undesigned feature only; doc → `docs/plans/` → issue → `using-git-worktrees`; `writing-plans` optional. Companion: SKILLS.md *Design work*.
 

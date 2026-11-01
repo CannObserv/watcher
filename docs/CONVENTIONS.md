@@ -4,6 +4,12 @@ The long-form conventions. `AGENTS.md` keeps the commit format, the logger
 import, the four-key floor, and the general code rules; the reasoning behind them
 is here.
 
+## Commit scope parens
+
+`AGENTS.md` → *Conventions* holds the commit format, which `shipping-work` reads as
+authoritative. A parenthesised scope after the type is optional and in use:
+`#247 docs(cr): …` marks a commit that applies a code-review finding.
+
 ## Log-record key contract
 
 Every record serializes as JSON with **at least** `timestamp` / `level` / `logger` /

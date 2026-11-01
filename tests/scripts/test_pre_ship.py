@@ -21,7 +21,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WRAPPER = REPO_ROOT / "scripts" / "pre-ship.sh"
 LOAD_ENV = REPO_ROOT / "scripts" / "load-env.sh"
-DELEGATE = Path("skills/shipping-work-python-fastapi/scripts/pre-ship.sh")
+DELEGATE = Path("skills/shipping-work/scripts/pre-ship.sh")
 
 FAKE_DELEGATE = """#!/usr/bin/env bash
 echo "delegate probe=${PRE_SHIP_PROBE:-unset} args=$*" >> "$PRE_SHIP_LOG"

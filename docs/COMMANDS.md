@@ -53,7 +53,7 @@ bash scripts/pre-ship.sh
 ```
 
 This is watcher's thin wrapper — it loads the env files above, delegates to the
-vendored gate in `shipping-work-python-fastapi`, and once that passes runs
+vendored gate in `shipping-work`, and once that passes runs
 `pytest -m integration` (~20 s against the local test DB), failing on a skip or xfail as well
 as a failure (#353). The vendored gate deselects the mark; watcher runs it here
 because merging to `main` locally and restarting means CI reports only after the code

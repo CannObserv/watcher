@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # pre-ship.sh — watcher's env-loading wrapper around the vendored
-# shipping-work-python-fastapi ship gate.
+# shipping-work ship gate.
 #
 # watcher's conftest needs TEST_DATABASE_URL, so the gate needs
 # /etc/watcher/.env (system) and $PROJECT_ROOT/.env (repo-local) in the
@@ -21,7 +21,7 @@ cd "$PROJECT_ROOT"
 
 # Delegate through the skills/ path, never skills-vendor/ — the symlink is the
 # stable interface, the vendor directory layout is not.
-DELEGATE="skills/shipping-work-python-fastapi/scripts/pre-ship.sh"
+DELEGATE="skills/shipping-work/scripts/pre-ship.sh"
 [[ -f "$DELEGATE" ]] || {
   echo "ERROR: vendored gate missing at $DELEGATE" >&2
   echo "       fix: git submodule update --init --recursive" >&2

@@ -1,6 +1,6 @@
 """The `.skills/` tailoring for `doc-check.sh` must stay live (#281).
 
-`doc-check.sh` (vendored with `shipping-work-python-fastapi`) matches its
+`doc-check.sh` (vendored with `shipping-work`) matches its
 sensitive-path list against *path segments*, and a list whose entries match
 nothing prints the same clean green as a genuinely doc-neutral branch — the
 gregoryfoster/skills#252 defect. Upstream now exits 2 when **no** entry matches
@@ -27,7 +27,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PATHS_FILE = REPO_ROOT / ".skills" / "doc-sensitive-paths"
 SECTIONS_FILE = REPO_ROOT / ".skills" / "doc-sections"
-DOC_CHECK = REPO_ROOT / "skills" / "shipping-work-python-fastapi" / "scripts" / "doc-check.sh"
+DOC_CHECK = REPO_ROOT / "skills" / "shipping-work" / "scripts" / "doc-check.sh"
 
 
 def _parse_list_file(path: Path) -> list[str]:

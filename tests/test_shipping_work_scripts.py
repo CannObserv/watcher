@@ -1,16 +1,18 @@
-"""The shipping-work override resolves every script its later steps run (#320).
+"""The vendored shipping-work skill resolves every script its later steps run (#320).
 
-Upstream fences Step 1's resolution block as
-`<!-- skill:required id=skill-scripts -->` and resolves each of its six
-scripts on its own (gregoryfoster/skills#301). Watcher is the layout that
-needs it: `scripts/pre-ship.sh` exists here as the env-loading wrapper, so a
-block resolving one directory for all six stops at `scripts/` and sends
-`doc-check.sh` and the four after it to exit 127 — none of them exist there.
+`skills/shipping-work` is a whole-directory symlink into `skills-vendor/`
+(#413), so this guards upstream's text, not a fork. Upstream fences Step 1's
+resolution block as `<!-- skill:required id=skill-scripts -->` and resolves
+each of its six scripts on its own (gregoryfoster/skills#301). Watcher is the
+layout that needs it: `scripts/pre-ship.sh` exists here as the env-loading
+wrapper, so a block resolving one directory for all six stops at `scripts/`
+and sends `doc-check.sh` and the four after it to exit 127 — none of them
+exist there. A vendor rewrite that drops the per-script loop arrives with an
+ordinary submodule bump, and this is what notices.
 
-`.skills/doctor.sh` reports a dropped fragment, but only as advice. This runs
-the block itself from the project root, the cwd an agent actually has, and
-holds the two halves together: every `<name.sh>` placeholder a later step
-invokes is one the block prints, and every path it prints opens a file.
+This runs the block itself from the project root, the cwd an agent actually
+has, and holds the two halves together: every `<name.sh>` placeholder a later
+step invokes is one the block prints, and every path it prints opens a file.
 """
 
 import re
@@ -21,7 +23,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SKILL_MD = REPO_ROOT / "skills" / "shipping-work-python-fastapi" / "SKILL.md"
+SKILL_MD = REPO_ROOT / "skills" / "shipping-work" / "SKILL.md"
 VENDOR_REPO = REPO_ROOT / "skills-vendor" / "gregoryfoster-skills"
 FENCE_RE = re.compile(
     r"<!--\s*skill:required\s+id=skill-scripts\s*-->\s*```bash\n(.*?)```", re.DOTALL

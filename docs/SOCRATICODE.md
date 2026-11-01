@@ -283,8 +283,8 @@ SessionStart hooks' install and audit runbook stays in [SKILLS.md](SKILLS.md).
 
 - **`skills-vendor/` and `.claude/skills/` (#240).** Vendored skill trees are
   agent instructions, and their prose outranked this repo's code. `skills/` stays
-  indexed: it holds the first-party overrides, and its vendor symlinks resolve to
-  the excluded `skills-vendor/` paths.
+  unexcluded: since #413 it holds only vendor symlinks, which resolve to the
+  excluded `skills-vendor/` paths, and a first-party skill added there would index.
 - **`docs/plans/` (#300).** Measured 2026-09-24: `codebase_search "notification
   delivery to notifier service when a change is detected"` drew 5 of 10 hits from
   `docs/plans/`, led by the superseded 2026-05-02 notifier-adapter plan

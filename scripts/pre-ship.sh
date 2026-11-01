@@ -10,6 +10,7 @@
 # vendored gate. Do NOT fork the gate itself — a fork copies every check to add
 # a handful of lines, then stops receiving upstream fixes without saying so.
 #
+# The gate itself runs with CI's no-server TEST_DATABASE_URL (#406, below).
 # Then it runs what the vendored gate deselects: `pytest -m integration`
 # (#353). watcher merges to main locally and restarts from it, so CI reports
 # after the code is live and this is the last gate before deploy. The mark
@@ -33,7 +34,8 @@ if [[ "${1:-}" == "--help" ]]; then
   bash "$DELEGATE" "$@"
   echo ""
   echo "watcher wrapper (scripts/pre-ship.sh): loads the env files, runs the gate"
-  echo "above, then 'uv run pytest -m integration' and fails on any failure or"
+  echo "above with CI's no-server TEST_DATABASE_URL (an unmarked DB test fails, #406),"
+  echo "then 'uv run pytest -m integration' and fails on any failure or"
   echo "skip or xfail (scripts/check_no_skips.py). Exits 2 while .skills/pre-ship-uv-args"
   echo "exists (the integration run would ignore it). Exit code: the first failing step's."
   exit 0
@@ -64,9 +66,18 @@ source "$PROJECT_ROOT/scripts/load-env.sh"
 # here rather than by the loader, which interactive shells also source.
 export PRE_SHIP_ENV_NAMES="$WATCHER_LOADED_ENV_NAMES"
 
+# The gate's default suite gets CI's `test` job URL: _test-suffixed, port 1,
+# never a server, so an unmarked test that connects fails here as it does in
+# CI instead of passing against the real test database (#406). Only the gate:
+# the integration run below keeps the loaded URL. ruff, the import check and
+# the deselected suite need no database. A value changes, not a name, so the
+# stamp key is the same. Must match .github/workflows/ci.yml's test job —
+# tests/scripts/test_pre_ship.py compares the two.
+GATE_TEST_DATABASE_URL="postgresql+asyncpg://nobody:nothing@127.0.0.1:1/watcher_test"
+
 # Not exec'd any more — the integration run follows. Under `set -e` a failing
 # gate still exits with its own code, so the Iron Law sees it unchanged.
-bash "$DELEGATE" "$@"
+TEST_DATABASE_URL="$GATE_TEST_DATABASE_URL" bash "$DELEGATE" "$@"
 
 echo ""
 echo "=== Integration tests (watcher wrapper, #353) ==="

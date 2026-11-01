@@ -8,8 +8,8 @@
 # kept deliberately — do not narrow them:
 #   deploy/   -> tests/deploy/   (asserts the installed unit and the unit-only
 #                                 notifier credential — DEPLOYMENT/ENVIRONMENT)
-#   scripts/  -> tests/scripts/  (and the vendored skill symlinks under
-#                                 skills/*/scripts/ — COMMANDS.md)
+#   scripts/  -> tests/scripts/  (COMMANDS.md; skills/ are whole-directory
+#                                 symlinks since #413, so nothing under them)
 #   tools/    -> tests/tools/    (ARCHITECTURE.md's module table)
 # For a spot-check that exits 1 and asks a human to look, over-matching is the
 # cheap failure; the miss that exits 0 is the expensive one. Narrowing any of

@@ -410,3 +410,6 @@ docs/SKILLS.md :: disproven :: **No `.skills/pre-ship-uv-args`, deliberately** (
 docs/SOCRATICODE.md :: disproven :: indexed: it holds the first-party overrides, and its vendor symlinks resolve to
 docs/SOCRATICODE.md :: disproven :: the excluded `skills-vendor/` paths.
 docs/COMMANDS.md :: retarget :: vendored gate in `shipping-work-python-fastapi`, and once that passes runs
+# #413 CR 1: the override's six tracked skills/*/scripts/ links are gone (git ls-files 'skills/*/scripts/*' → 0), so `scripts/` no longer over-matches them.
+docs/SKILLS.md :: disproven :: `deploy/` reaching `tests/deploy/`, and `scripts/` reaching `tests/scripts/` and the vendored
+docs/SKILLS.md :: disproven :: skill symlinks, are kept over-matches — for a spot-check that exits 1

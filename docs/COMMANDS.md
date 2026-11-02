@@ -44,6 +44,10 @@ skips a malformed line instead of aborting. It replaced
 both files were absent, died under `set -e` on any comment line, and word-split values
 containing spaces. Paths are overridable via `WATCHER_SYSTEM_ENV_FILE` /
 `WATCHER_PROJECT_ENV_FILE`; guarded by `tests/scripts/test_load_env.py`.
+In a linked worktree, which has no `.env` of its own, it falls back to the primary
+checkout's, and when neither file is readable it prints a `WARN` naming the paths
+tried, never a value (#404). It leaves the names it set, unexported, in
+`WATCHER_LOADED_ENV_NAMES` for the ship gate's stamp.
 
 ## Shipping
 
@@ -53,13 +57,17 @@ bash scripts/pre-ship.sh
 ```
 
 This is watcher's thin wrapper — it loads the env files above, delegates to the
-vendored gate in `shipping-work-python-fastapi`, and once that passes runs
+vendored gate in `shipping-work`, and once that passes runs
 `pytest -m integration` (~20 s against the local test DB), failing on a skip or xfail as well
 as a failure (#353). The vendored gate deselects the mark; watcher runs it here
 because merging to `main` locally and restarting means CI reports only after the code
 is live. Run it from the repo root; it exits non-zero on any failure and 2 on
 tooling/infra problems (including an uninitialized `skills-vendor/` submodule). See [SKILLS.md](SKILLS.md) for why the gate itself is not
 forked.
+
+The vendored gate's default suite runs with CI's no-server `TEST_DATABASE_URL`, so the
+local default run matches CI's `test` job: a DB test missing its `integration` marker
+fails here too (#406).
 
 ## Service Management
 

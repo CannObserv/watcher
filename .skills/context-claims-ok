@@ -18,3 +18,10 @@ docs/WATCHED-ITEMS.md :: retarget :: ARCHITECTURE.md
 # #396: atoms of the retired brainstorming override's row. The commit format is AGENTS.md's Conventions; elements-of-style was a dead pointer v7.0.1 no longer has.
 docs/SKILLS.md :: disproven :: #<n> [type]:
 docs/SKILLS.md :: disproven :: elements-of-style
+# #413/#409: atoms of the retired override machinery in SKILLS.md → Local Overrides. No fork remains (tests/test_no_skill_overrides.py); the two test files were renamed in the same change (retarget), and the drift-comparison detail is the doctor's own (skills/managing-skills references/the-doctor.md).
+docs/SKILLS.md :: disproven :: gregoryfoster/skills#286
+docs/SKILLS.md :: disproven :: skills/*/SKILL.md
+docs/SKILLS.md :: disproven :: synced-from: "<repo> <tag> (<commit>)"
+docs/SKILLS.md :: retarget :: tests/test_fork_markers.py
+docs/SKILLS.md :: retarget :: tests/test_shipping_work_override.py
+docs/SKILLS.md :: disproven :: version:

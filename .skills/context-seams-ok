@@ -226,3 +226,6 @@ tests/scripts/test_dev_server.py :: user on the box — the argv hazard docs/REC
 docs/RECOVERY-PROVISIONING.md :: The variables the templates can use: [What a check-in carries](RECOVERY.md#provisioning--needs-the-gcp-project-owner).
 docs/SKILLS.md :: | `brainstorming` | brainstorm, design this, let's design. Vendored as-is
 docs/SKILLS.md :: preferences, not skill logic, so they now live in `AGENTS.md` → *Agent Skills*
+docs/CONVENTIONS.md :: `AGENTS.md` → *Conventions* holds the commit format, which `shipping-work` reads as
+docs/SKILLS.md :: - this file or `AGENTS.md`, which the skills read as project preferences.
+docs/SKILLS.md :: | Step 2: the watcher commit convention | `AGENTS.md` → *Conventions*, which the skill treats

@@ -1,0 +1,6 @@
+# Import check for shipping-work's gate (gate-topology row 7, #413). One module
+# per line; `#`-comments ignored. Without this file the gate guesses the
+# [project] name, `watcher`, finds no such package and skips the check.
+# src.api.main is the unit's ExecStart module, so it pulls in the app graph;
+# it imports with an empty environment and never connects.
+src.api.main

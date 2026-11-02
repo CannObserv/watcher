@@ -8,10 +8,10 @@ Two directories serve different discovery systems:
 
 | Directory | Discovery system | Contents |
 |---|---|---|
-| `skills/` | agentskills.io | Committed overrides + symlinks → `skills-vendor/` |
+| `skills/` | agentskills.io | Whole-directory symlinks → `skills-vendor/` |
 | `.claude/skills/` | Claude Code | Symlinks → `../../skills/<name>` |
 
-Local overrides in `skills/` automatically shadow vendor skills in both systems. When adding a skill, always create both the `skills/<name>` entry and `.claude/skills/<name>` symlink — [tests/test_skill_links.py](../tests/test_skill_links.py) fails on either half missing; the doctor sees only links that dangle.
+`skills/` holds no forks (*No overrides* below). When adding a skill, always create both the `skills/<name>` entry and `.claude/skills/<name>` symlink — [tests/test_skill_links.py](../tests/test_skill_links.py) fails on either half missing; the doctor sees only links that dangle.
 
 ## External Skill Repos (Git Submodules)
 
@@ -33,7 +33,7 @@ To add a new external skill repo: follow the `managing-skills` skill.
 | `reviewing-code-python-fastapi` | CR, code review |
 | `reviewing-architecture` | AR, architecture review |
 | `enforcing-architecture` | add a fitness function, enforce this contract, lock this rule (delegated to by `reviewing-architecture` on a `fitness` directive) |
-| `shipping-work-python-fastapi` | ship it, push GH, close GH, wrap up |
+| `shipping-work` | ship it, push GH, close GH, wrap up. Detects the stack itself (`Detected: … uv … fastapi`); watcher's wrapper and knobs: *Shipping* below |
 | `brainstorming` | brainstorm, design this, let's design. Vendored as-is: its own description claims all creative work, and `AGENTS.md` narrows that and overrides its handoff (*Design work* below) |
 | `writing-plans` | write plan, implementation plan |
 | `writing-skills` | write skill, new skill, author skill |
@@ -62,41 +62,68 @@ The trigger list is **Skill Triggers** above. Each project skill is sourced from
 
 | Source | Path | Notes |
 |---|---|---|
-| Local override | `skills/<name>/` | Committed in this repo; supersedes any vendor copy of the same name |
 | `gregoryfoster/skills` | `skills-vendor/gregoryfoster-skills/` | Cross-project skills authored for Cannabis Observer |
 | `obra/superpowers` | `skills-vendor/obra-superpowers/` | Upstream community skills |
 
 Description-driven skills (`systematic-debugging`, `verification-before-completion`, `test-driven-development`) activate from their description field rather than an explicit trigger phrase — they fire on any bug/test failure, before any completion claim, and before writing implementation code respectively.
 
-## Local Overrides
+## No overrides
 
-A committed directory in `skills/` completely supersedes the vendor version — there is no
-inheritance, so whatever the directory does not provide, the skill does not have. That does
-**not** mean copying the vendor tree: the override forks `SKILL.md` alone and symlinks every
-sibling asset back to `skills-vendor/`, so upstream fixes to the parts that were never
-customized arrive with a submodule bump. Each override records its base commit in a
-`<!-- forked from <vendor>@<sha> -->` marker directly under the frontmatter — that marker is
-what makes the next refresh a 3-way diff instead of a guess.
-[tests/test_fork_markers.py](../tests/test_fork_markers.py) holds it to that: every non-symlinked
-`skills/*/SKILL.md` must carry a marker, and its SHA must resolve in that vendor's submodule and
-be an ancestor of the pinned commit. Falling *behind* the pin is fine — that is sync debt, paid
-down on the fork's own schedule; a stamp that names no commit, or one ahead of the pin, is a
-marker that cannot be diffed against.
+Every `skills/<name>` is a whole-directory symlink into `skills-vendor/` (#413). A fork of a
+vendored `SKILL.md` falls out of sync with its upstream: every vendor rewrite means re-applying
+its deltas by hand, and until someone does it stops receiving fixes without saying so. The last
+two forks were retired that way: `brainstorming` (#396, *Design work* below) and
+`shipping-work-python-fastapi` (#409, #413, *Shipping* below). What an override used to carry
+goes to one of three places:
 
-**The same commit is recorded twice, and a re-sync bumps both** (#301, #303). The marker is for
-the reader; `synced-from: "<repo> <tag> (<commit>)"` in the frontmatter metadata is what
-`.skills/doctor.sh` reads, and it is the doctor's *second* drift comparison — a diff of that
-commit against the vendor now, scoped to the override's own real files. It is the only
-comparison that can see a vendor `SKILL.md` change that carried no `version:` bump, which is
-most of them (gregoryfoster/skills#286); an `obra/superpowers` fork would have it alone, since
-that repo ships no `version:`. Leaving `synced-from:` at the old
-commit re-reports drift that was just paid down; dropping it gives up the comparand entirely,
-and the doctor reports an override nothing can compare as the same failure as no drift
-detection at all.
+- a `.skills/` knob (upstream's inventory: gregoryfoster/skills `docs/KNOBS.md`);
+- a repo-root wrapper that loads what the project needs and runs the vendored script —
+  [scripts/pre-ship.sh](../scripts/pre-ship.sh) is the one here;
+- this file or `AGENTS.md`, which the skills read as project preferences.
 
-| Skill | Override reason |
+A delta that fits none of them is a knob request in the vendor repo, not a reason to fork. If a
+fork is unavoidable until that knob ships, name it in `ALLOWED_OVERRIDES` in
+[tests/test_no_skill_overrides.py](../tests/test_no_skill_overrides.py) with the request's URL,
+and stamp its `SKILL.md` with `<!-- forked from <vendor>@<sha> -->` (#281): the test holds the
+SHA to a commit that resolves in that vendor's submodule and is an ancestor of the pin. Every
+other `skills/` entry that is not a `../skills-vendor/` symlink fails it. `.skills/doctor.sh`
+also reads an override's `synced-from:` metadata for drift (#301, #303); a fork that needs it
+records the same commit there.
+
+## Shipping
+
+`shipping-work` is gregoryfoster/skills' unified ship skill
+([gregoryfoster/skills#537](https://github.com/gregoryfoster/skills/issues/537)), linked whole.
+It detects the toolchain and framework itself (`uv`, `fastapi` here) and runs one gate for them;
+what each check does, and why: the vendor's `references/gate-topology.md`. Watcher's deltas from
+the retired `shipping-work-python-fastapi` fork, and where each now lives:
+
+| Was in the fork | Now |
 |---|---|
-| `shipping-work-python-fastapi` | `SKILL.md` only: watcher commit convention in Step 2 and Step 1.5 naming watcher's `.skills/` tailoring. Step 1's `skill-scripts` block is upstream's, verbatim: it resolves each script on its own, so [scripts/pre-ship.sh](../scripts/pre-ship.sh) wins for `pre-ship.sh` alone and the other five fall through to the skill directory — a one-directory block sent them to `scripts/` and exit 127 (#320), which [tests/test_shipping_work_override.py](../tests/test_shipping_work_override.py) now runs the block to catch. All six `scripts/` entries are vendor symlinks — the ship gate is **not** forked |
+| Step 2: the watcher commit convention | `AGENTS.md` → *Conventions*, which the skill treats as authoritative; the optional scope parens are [CONVENTIONS.md](CONVENTIONS.md)'s |
+| Step 1.5: naming watcher's `.skills/` tailoring | *The doc spot-check is tailored* below; the skill describes both files generically |
+| `compatibility:` — needs `/etc/watcher/.env` | The wrapper loads it (below); without it the DB-backed tests have no URL |
+| Notes: the wrapper wins for `pre-ship.sh` alone | Below, and [tests/test_shipping_work_scripts.py](../tests/test_shipping_work_scripts.py) |
+
+**Step 1 resolves each script on its own.** The vendor's `skill-scripts` block probes `scripts/`
+first, per script ([gregoryfoster/skills#301](https://github.com/gregoryfoster/skills/issues/301)),
+so [scripts/pre-ship.sh](../scripts/pre-ship.sh) wins for `pre-ship.sh` alone and the other five
+fall through to `.claude/skills/shipping-work/scripts/`. A block resolving one directory for all
+six sent them to `scripts/` and exit 127 (#320);
+[tests/test_shipping_work_scripts.py](../tests/test_shipping_work_scripts.py) runs the vendored
+block and holds every placeholder to a real file, so an upstream rewrite that drops the loop
+fails here on the submodule bump. The wrapper runs the integration tests, so Step 8's
+*Integration tests* row is already done by Step 1.
+
+**`.skills/import-targets` names `src.api.main`** (#413). Without it the gate guesses the
+`[project]` name, `watcher`, finds no such package and skips its import check
+(gate-topology row 7). `src.api.main` is the unit's `ExecStart` module; it imports with an empty
+environment and never connects.
+
+**No `.skills/test-workers`.** pytest-xdist is not in this environment, so the gate runs the
+suite serially and prints a NOTE; it never adds the dependency. Adding xdist means first running
+the suite shuffled under `-n auto --dist loadfile`: the DB- and Redis-backed tests may share an
+instance, and if they do the knob is `off`, not `auto`.
 
 **The ship gate's env loading lives outside the skill.** [scripts/pre-ship.sh](../scripts/pre-ship.sh)
 is watcher's wrapper, in the location upstream's Step 1 resolution loop probes first for that script. It sources
@@ -109,7 +136,21 @@ deploy. A wrapper-side addition, not a gate change — a gate change belongs in
 gregoryfoster/skills. Forking the gate to add those lines is the failure mode this replaced: the fork stops
 receiving upstream fixes without saying so.
 
-**No `.skills/pre-ship-uv-args`, deliberately** (#318). Vendor 1.5 reads extra `uv run`
+Two wrapper choices shape the gate's run:
+
+- **The stamp key carries env names** (#404). The gate records a pass against the exact tree,
+  under the git common directory, so every worktree shares it, and keys it on the names in
+  `PRE_SHIP_ENV_NAMES`; an exported but empty list writes no stamp
+  ([gregoryfoster/skills#497](https://github.com/gregoryfoster/skills/issues/497)). The loader
+  collects the names, falling back to the primary checkout's `.env` in a linked worktree, and
+  the wrapper exports them. Exporting is the wrapper's job, so interactive shells that source
+  the loader never carry the variable. `GATE_STAMP=off` forces a run;
+  `GATE_STAMP_EXPLAIN=1` prints the key's inputs.
+- **The gate gets CI's no-server `TEST_DATABASE_URL`** (#406), the `test` job's string
+  verbatim, so a DB test missing `integration` fails locally rather than only in CI after the
+  code is live. The integration run keeps the loaded URL.
+
+**No `.skills/pre-ship-uv-args`, deliberately** (#318). The gate reads extra `uv run`
 arguments from that file ([gregoryfoster/skills#304](https://github.com/gregoryfoster/skills/issues/304))
 for a project whose tests need a non-default group (`--group seed`). Watcher's only
 `[dependency-groups]` entry is `dev`, which uv includes by default, so the file would be empty.
@@ -131,8 +172,9 @@ a miss byte-identical to a pass. Two committed files replace its built-in defaul
 Tailor them together: the list says what the gate watches and the sections say what to do about
 a hit, so tailoring only the list leaves advice written for someone else's stack
 ([gregoryfoster/skills#261](https://github.com/gregoryfoster/skills/issues/261)).
-`deploy/` reaching `tests/deploy/`, and `scripts/` reaching `tests/scripts/` and the vendored
-skill symlinks, are kept over-matches — for a spot-check that exits 1 and asks a human to look,
+`deploy/` reaching `tests/deploy/`, and `scripts/` reaching `tests/scripts/`, are kept
+over-matches (the `skills/` links are whole directories since #413, so no tracked path under
+them matches) — for a spot-check that exits 1 and asks a human to look,
 over-matching is the cheap failure, and narrowing either means listing files individually, which
 is the under-match #252 fixed. Both files are guarded by
 [tests/test_doc_sensitive_paths.py](../tests/test_doc_sensitive_paths.py): an entry matching no

@@ -7,9 +7,10 @@ is not dangling, it is absent, and Claude Code simply never discovers the
 skill. The auto-refresh hook bumps vendor pointers but creates no symlinks, so
 vendoring a skill is a by-hand step whose most likely slip is the second half.
 
-Routing through `skills/` rather than straight to `skills-vendor/` is what lets
-a committed override shadow the vendor copy in both systems, so the target is
-checked exactly.
+Routing through `skills/` rather than straight to `skills-vendor/` keeps one
+place that decides what each name resolves to: today always a vendor symlink
+(tests/test_no_skill_overrides.py), and an allowlisted override there would
+shadow the vendor copy in both systems. So the target is checked exactly.
 """
 
 import os

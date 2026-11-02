@@ -5,10 +5,10 @@
 # inflates embedding time and lets vendor prose outrank this repo's own code in
 # codebase_search results.
 #
-# `skills/` itself is NOT excluded: it holds this repo's committed first-party
-# skill override (shipping-work-python-fastapi). Its other
-# entries are symlinks into skills-vendor/ and index under those real paths, so
-# excluding skills-vendor/ already covers them.
+# `skills/` itself is NOT excluded. Since #413 it holds no first-party skill:
+# every entry is a symlink into skills-vendor/ and indexes under that real path,
+# so excluding skills-vendor/ already covers them. A first-party skill added
+# there later would be indexed, which is what it would want.
 skills-vendor/
 .claude/skills/
 

@@ -16,7 +16,7 @@ cannot drift. A suspension acts on Watcher's scheduling alone: since F1 (#374)
 nothing downstream sees it.
 
 **The break-glass imports this module**, and it exists to work when Archiver is
-down, so this module reaches the database and nothing else: no bus, no worker
+down, so this module imports no bus, no worker, no dashboard and no API
 (#262). ``tests/ops/test_suspend_domain.py`` pins that import set.
 """
 

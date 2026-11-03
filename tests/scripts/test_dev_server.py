@@ -16,12 +16,15 @@ not a hand-run server.
 exit before exec'ing uvicorn, so the guard is testable without binding a port.
 """
 
+import re
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "dev_server.sh"
+LOADER = SCRIPT.parent / "load-env.sh"
 
 # Distinctive, so a leak test cannot be satisfied by the role or database name
 # happening to be spelled "watcher" too.
@@ -40,7 +43,7 @@ DEV_URL_SHOWN = "postgresql+asyncpg://watcher:***@localhost:5432/watcher_dev"
 def run(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     """Invoke the script in dry-run mode with a hermetic environment.
 
-    ``WATCHER_DEV_SERVER_SKIP_ENV_FILES`` stops the script sourcing the real
+    ``WATCHER_DEV_SERVER_SKIP_ENV_FILES`` stops the script loading the real
     ``/etc/watcher/.env`` and ``.env``, so tests control resolution entirely.
     """
     return subprocess.run(
@@ -111,7 +114,7 @@ def test_overrides_inherited_migration_url() -> None:
     """WATCHER_MIGRATION_DATABASE_URL must be forced onto the dev database.
 
     #259 gives Alembic its own credential, and ``/etc/watcher/.env`` — which
-    this script sources — is where it lives. The script runs ``alembic upgrade
+    this script loads — is where it lives. The script runs ``alembic upgrade
     head`` before exec'ing uvicorn, so an inherited production value would make
     the *dev* launch path migrate **production** with the schema owner's
     rights: the #233 hazard with the one variable that can drop tables.
@@ -183,27 +186,216 @@ def test_accepts_test_and_dev_suffixed_names(suffix: str) -> None:
     assert f"DATABASE_URL={shown}" in result.stdout
 
 
-def test_sources_env_files_when_not_skipped(tmp_path: Path) -> None:
-    """Cover the env-file sourcing path, not just the skip flag.
+def make_repo(root: Path) -> Path:
+    """A throwaway REPO_ROOT: the script and its loader under ``root/scripts``.
+
+    Returns the copied script. The loader travels with it because the script
+    finds it beside itself, never on the real checkout's path.
+    """
+    (root / "scripts").mkdir(parents=True)
+    for src in (SCRIPT, LOADER):
+        (root / "scripts" / src.name).write_bytes(src.read_bytes())
+    return root / "scripts" / SCRIPT.name
+
+
+def run_loading(script: Path, system_env: Path, cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Dry-run *script* with its env files loaded, not skipped.
+
+    ``WATCHER_SYSTEM_ENV_FILE`` points the loader at a ``tmp_path`` file, so no
+    test reads the real ``/etc/watcher/.env`` (#407). The project file is left
+    to the loader's own resolution, which is what these tests exercise.
+    """
+    return subprocess.run(
+        ["bash", str(script)],
+        cwd=cwd,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "WATCHER_DEV_SERVER_DRY_RUN": "1",
+            "WATCHER_SYSTEM_ENV_FILE": str(system_env),
+        },
+        text=True,
+        capture_output=True,
+    )
+
+
+def _git(*args: str, cwd: Path) -> None:
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_loads_env_files_when_not_skipped(tmp_path: Path) -> None:
+    """Cover the env-file loading path, not just the skip flag.
 
     ``WATCHER_DEV_SERVER_SKIP_ENV_FILES`` exists only for tests, so without
     this case the real-world resolution path — read .env, then guard — is never
     exercised. Runs the script against a throwaway repo root whose .env
     supplies TEST_DATABASE_URL.
     """
-    (tmp_path / "scripts").mkdir()
-    script_copy = tmp_path / "scripts" / "dev_server.sh"
-    script_copy.write_bytes(SCRIPT.read_bytes())
-    (tmp_path / ".env").write_text(f"TEST_DATABASE_URL={TEST_URL}\n")
+    script = make_repo(tmp_path / "repo")
+    (tmp_path / "repo" / ".env").write_text(f"TEST_DATABASE_URL={TEST_URL}\n")
 
-    result = subprocess.run(
-        ["bash", str(script_copy)],
-        env={"PATH": "/usr/bin:/bin", "WATCHER_DEV_SERVER_DRY_RUN": "1"},
-        text=True,
-        capture_output=True,
-    )
+    result = run_loading(script, tmp_path / "no-system.env", cwd=tmp_path / "repo")
     assert result.returncode == 0, result.stderr
-    assert f"DATABASE_URL={TEST_URL_SHOWN}" in result.stdout
+    assert f"DATABASE_URL={TEST_URL_SHOWN}" in result.stdout.splitlines()
+
+
+def test_system_file_loads_before_the_project_file(tmp_path: Path) -> None:
+    """The loader's order: a repo-local value wins over the system file's."""
+    script = make_repo(tmp_path / "repo")
+    system = tmp_path / "system.env"
+    system.write_text(f"TEST_DATABASE_URL={DEV_URL}\nWATCHER_DEV_PORT=8123\n")
+    (tmp_path / "repo" / ".env").write_text(f"TEST_DATABASE_URL={TEST_URL}\n")
+
+    result = run_loading(script, system, cwd=tmp_path / "repo")
+    assert result.returncode == 0, result.stderr
+    assert f"DATABASE_URL={TEST_URL_SHOWN}" in result.stdout.splitlines()
+    assert "PORT=8123" in result.stdout.splitlines()
+
+
+@pytest.mark.parametrize("shape", ["$(touch {m})", "`touch {m}`"])
+def test_a_command_substitution_in_an_env_file_is_never_run(tmp_path: Path, shape: str) -> None:
+    """#407: the env files are parsed, never sourced.
+
+    Sourced, a ``$(…)`` in a secrets file runs as shell code in the dev
+    server's launch path. Parsed, it is a string: the value reaches the report
+    as written and the command never runs.
+    """
+    marker = tmp_path / "ran"
+    value = shape.format(m=marker)
+    script = make_repo(tmp_path / "repo")
+    (tmp_path / "repo" / ".env").write_text(
+        f"TEST_DATABASE_URL={TEST_URL}\nWATCHER_DEV_PUBLIC_BASE_URL={value}\n"
+    )
+
+    result = run_loading(script, tmp_path / "no-system.env", cwd=tmp_path / "repo")
+    assert result.returncode == 0, result.stderr
+    assert not marker.exists()
+    assert f"WATCHER_PUBLIC_BASE_URL={value}" in result.stdout.splitlines()
+
+
+def test_a_cwd_outside_the_repo_still_loads_the_repos_env(tmp_path: Path) -> None:
+    """The loader resolves ``.env`` from the cwd's checkout, not the script's.
+
+    So the script ``cd``s to REPO_ROOT before loading: run from anywhere else,
+    it would read the wrong ``.env`` or none. The decoy here names a database
+    the guard accepts, so only the report's database name can tell them apart.
+    """
+    script = make_repo(tmp_path / "repo")
+    (tmp_path / "repo" / ".env").write_text(f"TEST_DATABASE_URL={TEST_URL}\n")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / ".env").write_text(f"TEST_DATABASE_URL={DEV_URL}\n")
+
+    result = run_loading(script, tmp_path / "no-system.env", cwd=elsewhere)
+    assert result.returncode == 0, result.stderr
+    assert f"DATABASE_URL={TEST_URL_SHOWN}" in result.stdout.splitlines()
+
+
+def test_a_linked_worktree_without_env_loads_the_primarys(tmp_path: Path) -> None:
+    """#404 through the dev server: the git-ignored ``.env`` lives only in the
+    primary checkout, so a linked worktree's launch falls back to it. Run from
+    outside both checkouts, so the script's own ``cd`` is what finds the
+    worktree."""
+    if shutil.which("git") is None:
+        pytest.skip("git not available")
+    primary, linked = tmp_path / "primary", tmp_path / "linked"
+    make_repo(primary)
+    _git("init", "-q", cwd=primary)
+    _git("add", "scripts", cwd=primary)
+    _git("commit", "-q", "-m", "init", cwd=primary)
+    _git("worktree", "add", "-q", "-b", "wt", str(linked), cwd=primary)
+    (primary / ".env").write_text(f"TEST_DATABASE_URL={TEST_URL}\n")
+    assert not (linked / ".env").exists()
+
+    result = run_loading(linked / "scripts" / SCRIPT.name, tmp_path / "no-system.env", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert f"DATABASE_URL={TEST_URL_SHOWN}" in result.stdout.splitlines()
+
+
+def test_no_loaded_value_reaches_stdout_or_stderr(tmp_path: Path) -> None:
+    """The report is pasted into issues; the env files hold every secret.
+
+    Each value below carries a sentinel no report line has any reason to
+    print. The URLs the report does name come back redacted or replaced.
+    """
+    sys_secret, proj_secret = "sys-9d2e71", "proj-4b8c06"
+    system = tmp_path / "system.env"
+    system.write_text(
+        f"DATABASE_URL=postgresql+asyncpg://watcher_app:{sys_secret}@localhost:5432/watcher\n"
+        f"WATCHER_MIGRATION_DATABASE_URL=postgresql://watcher:{sys_secret}@localhost/watcher\n"
+        f"WATCHER_BUS_REDIS_URL=redis://watcher:{sys_secret}@broker:6379/0\n"
+        f"WATCHER_PUBLIC_BASE_URL=https://{sys_secret}.invalid\n"
+    )
+    script = make_repo(tmp_path / "repo")
+    (tmp_path / "repo" / ".env").write_text(
+        f"TEST_DATABASE_URL={TEST_URL}\nGH_TOKEN={proj_secret}\n"
+    )
+
+    result = run_loading(script, system, cwd=tmp_path / "repo")
+    assert result.returncode == 0, result.stderr
+    for secret in (sys_secret, proj_secret, PASSWORD):
+        assert secret not in result.stdout + result.stderr, secret
+    assert f"DATABASE_URL={TEST_URL_SHOWN}" in result.stdout.splitlines()
+
+
+def test_loads_through_the_loader_and_no_env_file() -> None:
+    """#407: one loader for every hand-run path. The script names neither env
+    file, so a second, sourcing copy of the load cannot come back."""
+    text = SCRIPT.read_text()
+    code = [line.strip() for line in text.splitlines() if not line.lstrip().startswith("#")]
+    assert '. "$REPO_ROOT/scripts/load-env.sh"' in code
+    assert not [line for line in code if "/etc/watcher/.env" in line or '/.env"' in line]
+
+
+#: Where a hand-run recipe lives. docs/plans/ and the dated rehearsal log are
+#: history, quoted as it was run.
+SOURCING_SCOPE_GLOBS = ("scripts/**/*", "docs/**/*.md", "AGENTS.md", "README.md")
+SOURCING_SCOPE_EXCLUDED = ("docs/plans/", "docs/RECOVERY-REHEARSALS.md")
+
+#: ``set -a``, then — past comment lines and an ``[ -f … ] &&`` guard — a ``.``
+#: or ``source``: sourcing a file to export what it defines.
+SET_A_SOURCE = re.compile(
+    r"set -a\s*(?:;|\n)(?:[ \t]*#[^\n]*\n)*\s*(?:\[[^\]\n]*\]\s*&&\s*)?(?:\.|source)\s"
+)
+
+
+@pytest.mark.parametrize(
+    "form",
+    [
+        "set -a; . /etc/watcher/backup.env; set +a",
+        "set -a\n  # shellcheck disable=SC1091\n  [ -f /etc/watcher/.env ] && . /etc/watcher/.env",
+        "set -a\nsource .env\nset +a",
+    ],
+)
+def test_the_sourcing_guard_matches_the_forms_it_replaced(form: str) -> None:
+    """So the scan below cannot pass by matching nothing."""
+    assert SET_A_SOURCE.search(form)
+
+
+def test_no_recipe_sources_an_env_file_under_set_a() -> None:
+    """#407: an env file is data. ``scripts/load-env.sh`` parses it; ``set -a;
+    . file`` runs it as shell code, and exports every name to whatever follows.
+    Runbook one-liners take the loader with ``WATCHER_SYSTEM_ENV_FILE`` and
+    ``WATCHER_PROJECT_ENV_FILE`` pointed at the one file they mean."""
+    root = SCRIPT.parents[1]
+    paths = {
+        p
+        for glob in SOURCING_SCOPE_GLOBS
+        for p in root.glob(glob)
+        if p.is_file()
+        and not any(p.relative_to(root).as_posix().startswith(x) for x in SOURCING_SCOPE_EXCLUDED)
+    }
+    assert root / "scripts" / "dev_server.sh" in paths
+    offenders = [
+        p.relative_to(root).as_posix()
+        for p in sorted(paths)
+        if SET_A_SOURCE.search(p.read_text(errors="replace"))
+    ]
+    assert not offenders, f"set -a sources an env file in: {offenders}"
 
 
 def test_reports_planned_migration_of_the_dev_database() -> None:
@@ -430,7 +622,7 @@ def test_dev_bus_branch_sets_the_bus_opt_in() -> None:
 def test_an_inherited_bus_opt_in_does_not_survive_without_a_dev_bus() -> None:
     """A flag leaked into an env file must not re-arm the production URL.
 
-    The unit is the only sanctioned home for it, but this script sources
+    The unit is the only sanctioned home for it, but this script loads
     /etc/watcher/.env and the repo .env — so it clears what it did not set.
     """
     result = run(
@@ -450,7 +642,7 @@ def test_inherited_production_notifier_is_cleared() -> None:
 
     /etc/watcher/.env carried WATCHER_NOTIFIER_BASE_URL and WATCHER_NOTIFIER_API_KEY until
     #278 moved them to a unit-only file; the clearing stays regardless, and this
-    script sources it. The dev server runs the embedded worker against a real
+    script loads it. The dev server runs the embedded worker against a real
     check pipeline, so an inherited key means real deliveries to real
     subscribers — the #233 hazard, notifier edition, and the only one of the
     three whose stray output cannot be recalled.
@@ -510,7 +702,7 @@ def test_dev_notifier_url_without_a_dev_key_refuses() -> None:
 def test_an_inherited_notifier_opt_in_does_not_survive() -> None:
     """A flag leaked into an env file must not re-arm the production tenant.
 
-    The unit is the only sanctioned home for it, but this script sources
+    The unit is the only sanctioned home for it, but this script loads
     /etc/watcher/.env and the repo .env — so it clears what it did not set.
     """
     result = run(
@@ -530,7 +722,7 @@ def test_inherited_public_base_url_is_cleared() -> None:
     """#296 D6: a dev server's notifications must not link into production.
 
     /etc/watcher/.env carries the production WATCHER_PUBLIC_BASE_URL, and the
-    dev server sources it. Inherited, every notification the dev worker sends
+    dev server loads it. Inherited, every notification the dev worker sends
     would point readers at the live dashboard — at an item id that exists only
     in the dev database. Cleared, links are omitted, which is honest.
     """

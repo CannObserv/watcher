@@ -17,9 +17,9 @@ class Domain(Base, TimestampMixin):
 
     Two distinct interval concerns live here: ``min_interval`` is the
     request-level politeness floor in float seconds — published to Replicator
-    on ``content.fetch-policy`` from the Phase-4 cutover (#245) until F1 (#374),
-    which stopped Watcher's producer (Archiver publishes host policy now), so
-    the column is inert — while ``default_schedule_config`` is the
+    on ``content.fetch-policy`` from the Phase-4 cutover (#245) until F1 (#374)
+    handed host policy to Archiver, so the column is inert until #377/#378 —
+    while ``default_schedule_config`` is the
     operator's desired check *cadence* for items on this domain (a
     schedule_config interval string), which was the Domain tier of schedule
     resolution (#205) and is inert since F2 (#375): Archiver resolves the domain

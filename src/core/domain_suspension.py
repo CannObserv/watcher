@@ -7,11 +7,12 @@ toggle and the break-glass CLI (``src.ops.suspend_domain``) both delegate here,
 so the CLI imports nothing from ``src.dashboard`` (#377 deletes it) and the two
 cannot drift.
 
-Deliberately not in ``src.core.domains``: that module imports
-``src.core.fetch_policy``, and with it the bus client and a publisher. The
-break-glass exists to work when Archiver is down, so its import path reaches
-the database and nothing else (#262). Since F1 (#374) Watcher publishes nothing
-on ``content.fetch-policy``, so a suspension acts on Watcher's scheduling alone.
+Deliberately its own module: ``src.core.domains`` imported the fetch-policy
+producer, and with it the bus client, until #374 removed it. The break-glass
+exists to work when Archiver is down, so its import path reaches the database
+and nothing else (#262), and ``tests/ops/test_suspend_domain.py`` pins that
+import set rather than trusting today's neighbours. A suspension acts on
+Watcher's scheduling alone: since F1 (#374) nothing downstream sees it.
 """
 
 from typing import NamedTuple

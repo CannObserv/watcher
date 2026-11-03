@@ -379,8 +379,8 @@ def test_bus_url_is_cleared_unless_dev_bus_is_explicit() -> None:
     """An inherited production WATCHER_BUS_REDIS_URL must not reach the child (#245).
 
     /etc/watcher/.env carries the production bus URL; a dev server inheriting it
-    would publish fetch-policy frames onto the stream the live Replicator paces
-    real origins from — the #233 hazard, bus edition.
+    would publish content.fetch commands that make the live Replicator request
+    real origins — the #233 hazard, bus edition.
     """
     result = run(
         {

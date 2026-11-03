@@ -295,9 +295,10 @@ class TestPolicyIsApplied:
         ``TimeoutError`` raised *after* the broker already applied an ``XADD``
         publishes the entry a second time.
 
-        Watcher's exposure is on the producer side. Duplicates on the two
-        last-write-wins config streams (``content.fetch-policy``,
-        ``info.watch-status``) are absorbed by construction, but
+        Watcher's exposure is on the producer side. Duplicates on the
+        last-write-wins config stream (``info.watch-status``;
+        ``content.fetch-policy`` is Archiver's since F1, #374) are absorbed by
+        construction, but
         ``content.fetch`` is a command stream with a consumer group, and a
         duplicated command is a duplicated fetch — a second real origin request
         against a government portal under Watcher's pinned User-Agent.

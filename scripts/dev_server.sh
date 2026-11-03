@@ -166,8 +166,8 @@ export WATCHER_MIGRATION_DATABASE_URL="$DEV_URL"
 
 # Same guard for the bus (#245): /etc/watcher/.env carries the production
 # WATCHER_BUS_REDIS_URL, and a dev server inheriting it would publish
-# fetch-policy frames onto the stream the live Replicator paces real origins
-# from. Publish only when a dev bus is explicitly configured.
+# content.fetch commands that make the live Replicator request real origins.
+# Publish only when a dev bus is explicitly configured.
 #
 # WATCHER_BUS_ENABLED is the opt-in src/core/bus.py requires beside the URL
 # (#262) — normally unit-only, exactly like WATCHER_ALLOW_PRODUCTION_DB. This

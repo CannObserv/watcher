@@ -218,6 +218,27 @@ design — nothing has read them for behavior since #241 step 5 (`current_interv
 froze at the Phase-4 cutover; `last_request_at` had no writer at all).
 Subsequent deploys use the standard order above.
 
+## Restart-before-migrate — one-time, `7f3d3491e921` (#374)
+
+`7f3d3491e921` **drops** the `fetch_policy_tombstones` table, which carried a
+deleted host's `revoked=True` through every `content.fetch-policy` full set
+(#245). F1 handed that stream to Archiver, and part 2 deletes the producer and
+the `FetchPolicyTombstone` model. The order is reversed for the same reason as
+`10783d8a2405` above: the previous release still maps the table and writes it
+on every domain create and delete, so dropping first fails those paths until
+the restart lands.
+
+```bash
+sudo systemctl restart watcher      # new code first — it never names the table
+uv run alembic upgrade head         # then drop it
+```
+
+Restart-first has no window: the new code never names the table, and nothing
+has read it since F1 stopped Watcher's producer (2026-10-26). The rows are
+dead; the nightly backup holds them, and the downgrade recreates the table
+empty. No grants step: `watcher` owns it (#259 above). Subsequent deploys use
+the standard order above.
+
 ## No safe order — one-time, `e7c4b2a91f60` (#252)
 
 `e7c4b2a91f60` adds `fetch_commands.info_source_id` NOT NULL, and the release

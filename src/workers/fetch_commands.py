@@ -620,8 +620,7 @@ async def apply_fetch_blob(command_id: str, bus_client=None) -> dict:
         # Async-probe resolution (#241 step 3): a PROBING item's first fact is
         # its probe. When the origin redirected, final_url becomes the
         # effective_url — exactly what the inline probe used to discover — and
-        # the domain facts are re-derived through the shared #196 helper (which
-        # also retires any fetch-policy tombstone for the new host). PROBING
+        # the domain facts are re-derived through the shared #196 helper. PROBING
         # clears to OK via _record_check_success below. Steady-state redirects
         # (non-PROBING) stay audit-only: Archiver is authoritative then.
         if (

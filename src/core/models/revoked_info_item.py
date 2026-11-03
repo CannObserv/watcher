@@ -16,8 +16,8 @@ milder version of the same shape — every live announcement preceding the
 tombstone is re-seen.
 
 Recording the revoking generation here keeps the comparison total: every key has
-a left-hand side, whether or not it still has a row. Mirrors
-``FetchPolicyTombstone``, which solves the same problem one stream over.
+a left-hand side, whether or not it still has a row. ``FetchPolicyTombstone``
+solved the same problem one stream over until #374 dropped it.
 
 Rows are removed when a *newer* generation announces the key live again — a
 genuine un-revoke, which the contract permits since ``revoked`` is a level and

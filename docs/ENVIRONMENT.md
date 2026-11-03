@@ -65,6 +65,17 @@ For shell commands that need secrets:
 source scripts/load-env.sh
 ```
 
+It parses each file and never runs it. A runbook line that needs one file
+names it, and `/dev/null` keeps the repo `.env`'s tokens out — `backup.env`
+under `sudo` is the case in point:
+
+```bash
+WATCHER_SYSTEM_ENV_FILE=<file> WATCHER_PROJECT_ENV_FILE=/dev/null . scripts/load-env.sh
+```
+
+Never source a file under `set -a`: `tests/scripts/test_dev_server.py` fails
+that across `scripts/` and `docs/` (#407).
+
 ## Environment Variables
 
 **Naming rule for new variables.** Anything naming a shared external resource

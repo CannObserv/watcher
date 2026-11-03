@@ -3,8 +3,8 @@
 Resolution mirrors the create-time probe path's domain handling but takes a URL
 or hostname that is already known (Archiver is authoritative for
 ``effective_url``), so no network probe is performed. Centralising the upsert +
-suspension logic keeps the API create branch, the API PATCH branch, and the
-dashboard /effective-url route from drifting (#196).
+suspension-resolution logic keeps the API create branch, the API PATCH branch,
+and the dashboard /effective-url route from drifting (#196).
 
 ``set_domain_active`` is the one writer of ``Domain.is_active`` (#372).
 Deactivating a domain suspends every WatchedItem on it — the denormalized

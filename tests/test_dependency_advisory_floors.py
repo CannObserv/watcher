@@ -1,4 +1,4 @@
-"""Regression guard: the venv holds each advisory's fixed release (#392, #400).
+"""Regression guard: the venv holds each advisory's fixed release (#392, #400, #415).
 
 ``uv audit --frozen --no-dev`` on ``223eac7`` reported 20 unique advisories in
 six runtime packages. Each was fixed by moving the lock alone
@@ -22,6 +22,11 @@ rather than bumped. The environment this test runs in is synced with ``dev``,
 as CI's is, so a dev row is checked the same way. Each is lock-only; none is
 declared.
 
+**pyasn1 (#415).** Four quadratic-CPU decoder advisories against 0.6.4, a
+runtime transitive via google-auth's ``pyasn1-modules``, which requires
+``pyasn1>=0.6.1,<0.7.0``. 0.6.5 is inside that range, so the lock move holds
+it; a constraint is for a floor no lock bump can hold (certifi).
+
 Add a row when an advisory is fixed by a lock bump; drop one only with the
 package. **Precondition:** the environment is synced from ``uv.lock``, as for
 ``tests/test_dependency_extras.py``.
@@ -40,6 +45,10 @@ _FLOORS: dict[str, tuple[str, str]] = {
     "mako": ("1.4.2", "PYSEC-2026-88, -2617, -4243"),
     "starlette": ("1.3.1", "PYSEC-2026-161, -248, -249, -2280, -2281"),
     "anyio": ("4.14.2", "PYSEC-2026-4024, -4025"),
+    "pyasn1": (
+        "0.6.5",
+        "GHSA-9m75-vc3g-4x39, GHSA-mm57-4v3p-rchx, GHSA-fm9c-5rcf-2q5p, GHSA-2qm8-x737-gmw5",
+    ),
     # dev group (#400). virtualenv's 15 GHSAs, in full so a grep finds them:
     #   GHSA-394h-qwmc-48pf, GHSA-43mp-35q3-x3fq, GHSA-494p-63j8-28p3, GHSA-558c-9hv2-4prj,
     #   GHSA-5vjq-rrrf-7h2q, GHSA-6w3r-xr62-4xcp, GHSA-8rjx-v5ww-45pp, GHSA-c947-3pg5-gm8q,
@@ -58,5 +67,5 @@ def test_installed_meets_advisory_floor(package: str) -> None:
     floor, advisories = _FLOORS[package]
     installed = Version(metadata.version(package))
     assert installed >= Version(floor), (
-        f"{package} {installed} < {floor}: still exposed to {advisories} (#392, #400)"
+        f"{package} {installed} < {floor}: still exposed to {advisories} (#392, #400, #415)"
     )

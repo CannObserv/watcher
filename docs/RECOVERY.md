@@ -198,6 +198,7 @@ the ones `/etc/watcher/.env` **already holds**: `setup-db-roles.sql` sets
 WATCHER_SYSTEM_ENV_FILE=/etc/watcher/.env WATCHER_PROJECT_ENV_FILE=/dev/null . scripts/load-env.sh
 u="${WATCHER_MIGRATION_DATABASE_URL#*://watcher:}"; MIGRATE_PW="${u%%@*}"
 u="${DATABASE_URL#*://watcher_app:}"; APP_PW="${u%%@*}"
+[ -n "$MIGRATE_PW" ] && [ -n "$APP_PW" ] || echo "STOP: no passwords read — is /etc/watcher/.env readable?" >&2
 
 # 1. Fresh cluster only: the owner role (an existing cluster has it). Environment
 #    and \getenv, never argv: `sudo -u postgres VAR=…` shows the value in `ps`.

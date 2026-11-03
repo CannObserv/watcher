@@ -298,10 +298,10 @@ class TestPolicyIsApplied:
         Watcher's exposure is on the producer side. Duplicates on the
         last-write-wins config stream (``info.watch-status``;
         ``content.fetch-policy`` is Archiver's since F1, #374) are absorbed by
-        construction, but
-        ``content.fetch`` is a command stream with a consumer group, and a
-        duplicated command is a duplicated fetch — a second real origin request
-        against a government portal under Watcher's pinned User-Agent.
+        construction, but ``content.fetch`` is a command stream with a consumer
+        group, and a duplicated command is a duplicated fetch — a second real
+        origin request against a government portal under Watcher's pinned
+        User-Agent.
 
         The library's default depends on *which constructor* is used, which is
         the trap (CR round 1, finding 5). On the ``from_url`` path this code

@@ -66,9 +66,9 @@ async def ensure_domain_and_resolve_suspension(
     Idempotent and ``IntegrityError``-safe (mirrors the create-time upsert).
     Returns a :class:`DomainResolution`: ``suspended`` is True when the domain
     exists and is archived or inactive; ``default_schedule_config`` is the
-    domain's cadence (#205; inert since #375). Callers copy both onto the WatchedItem so the
-    scheduler needs no live Domain join. A freshly-created domain (or an
-    empty/None ``domain_name``) resolves to ``(False, None)``.
+    domain's cadence (#205; inert since #375). Callers copy both onto the
+    WatchedItem so the scheduler needs no live Domain join. A freshly-created
+    domain (or an empty/None ``domain_name``) resolves to ``(False, None)``.
     """
     if not domain_name:
         return DomainResolution(suspended=False, default_schedule_config=None)

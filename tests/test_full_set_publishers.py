@@ -2,10 +2,10 @@
 
 ``publish_status_events`` derives its retention floor from the batch it is
 handed — ``len(events) * RETAINED_FULL_SETS``. That is the corpus only while
-the batch *is* the corpus. A partial batch floors the
-cap at a fraction of the set and the publish then trims the set down to it: the
-silent partial-replay failure the floor exists to prevent, arriving through the
-parameter that implements it.
+the batch *is* the corpus. A partial batch floors the cap at a fraction of the
+set and the publish then trims the set down to it: the silent partial-replay
+failure the floor exists to prevent, arriving through the parameter that
+implements it.
 
 The helper's docstring states the precondition, and prose is not a guard. What
 makes it one is that it has exactly one caller — its own full-set function,

@@ -55,9 +55,9 @@ Field mappings the consumer cannot check for us:
   arrived" (cannobserv#565).
 * ``health_reason`` / ``health_status_code`` — the latest failed check's
   ``WatchHealthReason`` and HTTP status, written by ``record_check_failure``
-  on every failure and cleared whenever health leaves ERROR (#370). They publish only in
-  ``"error"``; a reason change inside an episode is not a trigger, so it shows
-  at the next periodic republish.
+  on every failure and cleared whenever health leaves ERROR (#370). They
+  publish only in ``"error"``; a reason change inside an episode is not a
+  trigger, so it shows at the next periodic republish.
 * Tombstones ride ``revoked_info_items`` into every full set. A never-
   reconciled item deleted locally gets **no tombstone** — it was never
   announced, so Archiver holds no entry to retire (and the DELETE route 409s

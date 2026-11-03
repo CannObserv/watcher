@@ -16,14 +16,13 @@ class Domain(Base, TimestampMixin):
     """Per-domain politeness floor and check cadence.
 
     Two distinct interval concerns live here: ``min_interval`` is the
-    request-level politeness floor in float seconds — published to Replicator
-    on ``content.fetch-policy`` from the Phase-4 cutover (#245) until F1 (#374)
+    request-level politeness floor in float seconds — published to Replicator on
+    ``content.fetch-policy`` from the Phase-4 cutover (#245) until F1 (#374)
     handed host policy to Archiver, so the column is inert until #377/#378 —
-    while ``default_schedule_config`` is the
-    operator's desired check *cadence* for items on this domain (a
-    schedule_config interval string), which was the Domain tier of schedule
-    resolution (#205) and is inert since F2 (#375): Archiver resolves the domain
-    default and announces each item's interval.
+    while ``default_schedule_config`` is the operator's desired check *cadence*
+    for items on this domain (a schedule_config interval string), which was the
+    Domain tier of schedule resolution (#205) and is inert since F2 (#375):
+    Archiver resolves the domain default and announces each item's interval.
 
     The in-process ``DomainRateLimiter``'s columns — ``current_interval``,
     ``max_concurrency``, ``decay_window``, ``last_request_at`` — were retired

@@ -737,11 +737,11 @@ class TestBrokerMirroredConstants:
     ``FullSetFloor`` computes ``info.watch-status``'s length threshold from all
     three of them, and derives the last-entry age threshold from the period.
     (``content.fetch-policy`` is Archiver's since F1, #374, so its copy of these
-    numbers is Archiver's to pin.) So
-    a retune here moves a live threshold there, and the move is invisible from
-    this repo in both directions — raised and unmirrored, the probe warns early
-    on a cap that is being applied correctly; lowered, it goes quiet over the
-    backlog CannObserv/broker#40 was filed to expose.
+    numbers is Archiver's to pin.) So a retune here moves a live threshold
+    there, and the move is invisible from this repo in both directions — raised
+    and unmirrored, the probe warns early on a cap that is being applied
+    correctly; lowered, it goes quiet over the backlog CannObserv/broker#40 was
+    filed to expose.
 
     A comment beside each constant is the other half and it is not sufficient on
     its own, for the reason BUS.md gives about the group-name

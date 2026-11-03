@@ -356,10 +356,12 @@ def test_loads_through_the_loader_and_no_env_file() -> None:
 SOURCING_SCOPE_GLOBS = ("scripts/**/*", "docs/**/*.md", "AGENTS.md", "README.md")
 SOURCING_SCOPE_EXCLUDED = ("docs/plans/", "docs/RECOVERY-REHEARSALS.md")
 
-#: ``set -a``, then — past comment lines and an ``[ -f … ] &&`` guard — a ``.``
-#: or ``source``: sourcing a file to export what it defines.
+#: ``set -a`` (or ``set -o allexport``), then — past comment lines and an
+#: ``[ -f … ] &&`` guard — a ``.`` or ``source``: sourcing a file to export what
+#: it defines.
 SET_A_SOURCE = re.compile(
-    r"set -a\s*(?:;|\n)(?:[ \t]*#[^\n]*\n)*\s*(?:\[[^\]\n]*\]\s*&&\s*)?(?:\.|source)\s"
+    r"set -(?:a|o allexport)\s*(?:;|&&|\n)(?:[ \t]*#[^\n]*\n)*\s*"
+    r"(?:\[[^\]\n]*\]\s*&&\s*)?(?:\.|source)\s"
 )
 
 
@@ -369,6 +371,8 @@ SET_A_SOURCE = re.compile(
         "set -a; . /etc/watcher/backup.env; set +a",
         "set -a\n  # shellcheck disable=SC1091\n  [ -f /etc/watcher/.env ] && . /etc/watcher/.env",
         "set -a\nsource .env\nset +a",
+        "set -a && . /etc/watcher/.env && set +a",
+        "set -o allexport; . /etc/watcher/.env; set +o allexport",
     ],
 )
 def test_the_sourcing_guard_matches_the_forms_it_replaced(form: str) -> None:

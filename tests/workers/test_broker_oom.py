@@ -181,8 +181,8 @@ class TestContentFetchUnderOOM:
 class TestConfigStateProducersUnderOOM:
     """``info.watch-status`` is an LWW full set with no outbox: the correct
     response to a refusal is to fail the job loudly and let the next periodic
-    tick republish everything. (``content.fetch-policy``, the other one, lost
-    its Watcher producer in F1, #374.) What must NOT happen is a
+    tick republish everything. (``content.fetch-policy``, the other one, is
+    Archiver's since F1, #374.) What must NOT happen is a
     swallowed exception, which would report a stale set as delivered.
 
     Driven through the **Procrastinate tasks**, not the core publish helpers.

@@ -15,8 +15,9 @@ bus, no worker, no Archiver; a test pins that import set (#262).
 The running service acts on it: ``schedule_tick`` stops enqueuing the host's
 items and an already-queued check no-ops; a ``content.fetch`` command issued
 before the suspension still goes out. Since F1 (#374) nothing downstream sees
-it: Replicator takes host policy from Archiver. A suspension survives re-announcement: the registry
-reconcile re-derives the domain only when an item's host moves.
+it: Replicator takes host policy from Archiver. A suspension survives
+re-announcement: the registry reconcile re-derives the domain only when an
+item's host moves.
 
 Exit 0 on a change or a no-op (it says which), 1 for an unknown or archived
 host, 2 when it could not run: a configuration or usage error, or a database it
@@ -39,7 +40,7 @@ from src.core.db_safety import (
     ProductionDatabaseRefused,
     assert_environment_db_allowed,
 )
-from src.core.domain_suspension import DomainArchived, DomainNotFound, set_domain_active
+from src.core.domains import DomainArchived, DomainNotFound, set_domain_active
 from src.core.logging import configure_logging
 
 AUDIT_SOURCE = "cli"

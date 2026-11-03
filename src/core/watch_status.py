@@ -4,9 +4,10 @@ Archiver announces desired state on ``info.registry``; Watcher reports what it
 has *actually applied* here, as ``WatchStatusState`` frames keyed
 ``info_item_id`` (contract: cannobserv#321; consumer: archiver#151, which
 renders the watched-item panel and the announced-vs-applied drift detector
-from this stream with zero SDK calls). Same posture as ``content.fetch-policy``:
-config/state kind, broadcast LWW, no consumer group, no DLQ, periodic full
-republish, retention riding on the producer's ``maxlen``.
+from this stream with zero SDK calls). Same posture as ``content.fetch-policy``
+had while Watcher produced it (until F1, #374): config/state kind, broadcast
+LWW, no consumer group, no DLQ, periodic full republish, retention riding on
+the producer's ``maxlen``.
 
 **Every publish is built from committed rows.** The contract's one ordering
 rule — publish ``applied_generation`` only after the reconcile commits, or the
@@ -54,9 +55,9 @@ Field mappings the consumer cannot check for us:
   arrived" (cannobserv#565).
 * ``health_reason`` / ``health_status_code`` — the latest failed check's
   ``WatchHealthReason`` and HTTP status, written by ``record_check_failure``
-  on every failure and cleared whenever health leaves ERROR (#370). They publish only in
-  ``"error"``; a reason change inside an episode is not a trigger, so it shows
-  at the next periodic republish.
+  on every failure and cleared whenever health leaves ERROR (#370). They
+  publish only in ``"error"``; a reason change inside an episode is not a
+  trigger, so it shows at the next periodic republish.
 * Tombstones ride ``revoked_info_items`` into every full set. A never-
   reconciled item deleted locally gets **no tombstone** — it was never
   announced, so Archiver holds no entry to retire (and the DELETE route 409s
@@ -94,14 +95,14 @@ WATCH_STATUS_STREAM_MAXLEN_ENV = "WATCHER_WATCH_STATUS_STREAM_MAXLEN"
 #: items there are. ``RETAINED_FULL_SETS`` raises the cap for a corpus that
 #: outgrows this number, so the small default is safe as the registry fills.
 #:
-#: **Mirrored on the broker node**, by the same ``LWW_PRODUCER_MAXLEN`` in
-#: ``broker:src/broker/bus_health.py`` that mirrors
-#: ``DEFAULT_FETCH_POLICY_STREAM_MAXLEN`` — one constant for both LWW
-#: streams, so the two cannot be retuned apart without a broker change
-#: first. This is the stream where the floor governs first: its set grows
-#: with the registry, and past 50 items ``RETAINED_FULL_SETS`` overtakes
-#: this number and the probe starts reading the set off the stream instead
-#: (CannObserv/broker#44). ``tests/test_bus_stream_kinds.py`` pins it.
+#: **Mirrored on the broker node**, by ``LWW_PRODUCER_MAXLEN`` in
+#: ``broker:src/broker/bus_health.py``. Broker holds one constant for both LWW
+#: streams, and the other, ``content.fetch-policy``, is Archiver's since F1
+#: (#374), so retuning this is a broker change first. This is the stream
+#: where the floor governs first: its set grows with the registry, and past
+#: 50 items ``RETAINED_FULL_SETS`` overtakes this number and the probe starts
+#: reading the set off the stream instead (CannObserv/broker#44).
+#: ``tests/test_bus_stream_kinds.py`` pins it.
 DEFAULT_WATCH_STATUS_STREAM_MAXLEN = 500
 
 _HEALTH_WIRE = {

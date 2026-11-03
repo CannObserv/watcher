@@ -4,8 +4,8 @@
 # surviving pointer names — confirmed by grep, not by assumption.
 
 # --- Infrastructure / the bus -> docs/ARCHITECTURE.md "Redis and the bus" ---
-# All four published streams are enumerated there (content.fetch,
-# content.fetch-policy, content.revisions, info.watch-status).
+# The published streams are enumerated there (content.fetch,
+# content.revisions, info.watch-status; content.fetch-policy until #374).
 duplicate :: **The bus.** Archiver operates the broker. Watcher publishes `content.fetch`
 
 # --- Server Lifecycle -> docs/COMMANDS.md "Development" (L83-86) ---

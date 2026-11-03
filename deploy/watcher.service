@@ -6,9 +6,9 @@ Description=Watcher — Cannabis Observer monitoring service
 # exist on this host.
 #
 # The reasoning it replaces still holds and is restated rather than dropped:
-# Watcher only *publishes* to the bus (the content.fetch-policy producer, #245),
-# and a missing broker degrades to a logged publish failure, never a boot
-# failure. What changes is that the dependency is now a network hop carrying an
+# a missing broker degrades Watcher's bus traffic, publishes and consumer loops
+# alike, to logged and retried failures, never a boot failure (#245, #287).
+# What changes is that the dependency is now a network hop carrying an
 # explicit connection policy (src/core/bus.py, #287) rather than a local unit.
 #
 # tailscaled is ORDERING ONLY (#296): the broker and notifier are MagicDNS

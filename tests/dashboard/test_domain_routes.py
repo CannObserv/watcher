@@ -136,6 +136,8 @@ class TestDomainDetail:
         response = await client.get("/domains/config.com")
         assert b"3.5" in response.content
         assert b"Minimum seconds between requests" in response.content
+        # F1 (#374): kept until #377/#378 delete the field, and marked like F2's.
+        assert b"Inert since F1 (#374)" in response.content
 
     async def test_detail_page_shows_notes(self, client, db_session):
         db_session.add(Domain(name="noted.com", notes="Important note"))

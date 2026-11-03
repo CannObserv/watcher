@@ -29,7 +29,7 @@ from co_core.pure.models.changes import RegistryAnnouncementEmit
 from sqlalchemy import select
 from ulid import ULID
 
-from src.core.domain_suspension import set_domain_active
+from src.core.domains import set_domain_active
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.revoked_info_item import RevokedInfoItem
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus

@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import get_db_session
 from src.api.schemas.domain import DomainPatch, DomainResponse
 from src.core.domains import backfill_domain_schedule_config
-from src.core.fetch_policy import clear_tombstone, record_tombstone
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import DEFAULT_MIN_INTERVAL, Domain
 from src.core.models.watched_item import WatchedItem
@@ -69,10 +68,6 @@ async def upsert_domain(
     updates = data.model_dump(exclude_unset=True)
 
     if domain is None:
-        # The host is live again: clear its fetch-policy tombstone (if any),
-        # atomically with the row that supersedes it (#245). Nothing republishes
-        # tombstones since F1 (#374); part 2 deletes this bookkeeping.
-        await clear_tombstone(session, name)
         domain = Domain(
             name=name,
             min_interval=updates.get("min_interval", DEFAULT_MIN_INTERVAL),
@@ -129,9 +124,6 @@ async def delete_domain(name: str, session: AsyncSession = Depends(get_db_sessio
             detail=f"Cannot delete: watched items still reference domain '{name}'",
         )
 
-    # Tombstone the host atomically with the Domain delete (#245). Nothing
-    # republishes it since F1 (#374); part 2 deletes this bookkeeping.
-    await record_tombstone(session, name)
     await session.delete(domain)
     await session.commit()
 

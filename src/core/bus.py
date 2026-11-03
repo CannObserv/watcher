@@ -18,20 +18,20 @@ anything that sources it (the #233 hazard in env-var form). Unset means "no
 bus": producers skip loudly, the consumer never starts.
 
 A URL is *configuration*, not *permission* (#262). Anything that sources
-``/etc/watcher/.env`` inherits the production broker address — an agent shell,
-a one-off script, a ``python -c``, a REPL — and before the gate below, merely
+``/etc/watcher/.env`` inherits the production broker address — an agent shell, a
+one-off script, a ``python -c``, a REPL — and before the gate below, merely
 importing a producer in one of those was enough to reach the live streams. That
 is not the "merely noisy stray producer" archiver#139 reasoned about: a stray
 ``content.fetch`` makes Replicator issue **real origin requests** against
 government portals under Watcher's pinned User-Agent; ``content.fetch-policy``
-is last-write-wins per host, so a dev database's numbers become cluster-wide
-politeness instruction until the next full-set republish; and
-``content.revisions`` writes into **Archiver's** registry, which a dev database
-seeded from production would fill with real-looking rows. So publishing (and
-consuming) additionally requires ``WATCHER_BUS_ENABLED=1``, which only
-``deploy/watcher.service`` and ``scripts/dev_server.sh``'s scratch-bus branch
-set — never an env file, for the same reason as
-``WATCHER_ALLOW_PRODUCTION_DB`` (#233).
+was last-write-wins per host, so a dev database's numbers became cluster-wide
+politeness instruction until the next full-set republish (until F1, #374, handed
+that stream to Archiver); and ``content.revisions`` writes into **Archiver's**
+registry, which a dev database seeded from production would fill with
+real-looking rows. So publishing (and consuming) additionally requires
+``WATCHER_BUS_ENABLED=1``, which only ``deploy/watcher.service`` and
+``scripts/dev_server.sh``'s scratch-bus branch set — never an env file, for the
+same reason as ``WATCHER_ALLOW_PRODUCTION_DB`` (#233).
 """
 
 import asyncio
@@ -140,11 +140,11 @@ HEALTH_CHECK_INTERVAL_SECONDS = 30
 #: already applied an ``XADD`` publishes the entry a second time.
 #:
 #: Watcher's exposure is on the producer side — ``content.fetch``,
-#: ``content.fetch-policy``, ``info.watch-status``, ``content.revisions``.
-#: Duplicates on the two last-write-wins config streams are absorbed by
-#: construction, but ``content.fetch`` is a command stream with a consumer group,
-#: and a duplicated command is a duplicated fetch: a second real origin request
-#: against a government portal under Watcher's pinned User-Agent.
+#: ``content.process``, ``info.watch-status``, ``info.watch-events``,
+#: ``content.revisions``. Duplicates on the last-write-wins config stream are
+#: absorbed by construction, but ``content.fetch`` is a command stream with a
+#: consumer group, and a duplicated command is a duplicated fetch: a second real
+#: origin request against a government portal under Watcher's pinned User-Agent.
 #:
 #: Nothing is given up by declining it. Both consumer loops already back off on
 #: any error and retry, and the fetch-command outbox is the durable buffer behind
@@ -591,13 +591,13 @@ def _maxlen_extra(raw: str, default: int, floor: int, effective: int) -> dict[st
 def resolve_stream_maxlen(env_name: str, default: int, *, floor: int = 1) -> int:
     """Parse a stream-retention cap from ``env_name`` defensively; never unbounded.
 
-    Config/state streams (``content.fetch-policy``, ``info.watch-status``)
-    republish their full set periodically, so an untrimmed stream grows without
-    bound and a consumer's replay-from-``0-0`` boot cost tracks *history*
-    rather than corpus size (watcher#264 CR-1/CR-3; the pattern mirrors
-    Archiver's ``resolve_registry_maxlen``). An invalid or non-positive value
-    falls back to ``default`` with a warning — misconfiguration must degrade
-    to bounded, not to unbounded.
+    Config/state streams (``info.watch-status``; ``content.fetch-policy`` until
+    F1, #374) republish their full set periodically, so an untrimmed stream
+    grows without bound and a consumer's replay-from-``0-0`` boot cost tracks
+    *history* rather than corpus size (watcher#264 CR-1/CR-3; the pattern
+    mirrors Archiver's ``resolve_registry_maxlen``). An invalid or non-positive
+    value falls back to ``default`` with a warning — misconfiguration must
+    degrade to bounded, not to unbounded.
 
     ``floor`` is the other half, and #292 is why it exists. A cap that is merely
     *finite* does not bound what a consumer pays: 50_000 against a three-host

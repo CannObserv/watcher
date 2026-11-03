@@ -52,8 +52,9 @@ class TestBusEnabledGate:
     ``WATCHER_BUS_REDIS_URL``: an agent shell, a one-off script, a REPL. Before
     this gate, importing a producer in one of those was enough to publish onto
     the live streams — a stray ``content.fetch`` makes Replicator hit real
-    government portals, a stray ``content.fetch-policy`` overwrites cluster
-    politeness last-write-wins, and a stray ``content.revisions`` writes into
+    government portals, a stray ``content.fetch-policy`` overwrote cluster
+    politeness last-write-wins (until F1, #374, handed that stream to
+    Archiver), and a stray ``content.revisions`` writes into
     Archiver's registry. The flag lives only in ``deploy/watcher.service``, so
     nothing that merely sources an env file can carry it.
     """

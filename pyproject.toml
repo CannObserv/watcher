@@ -44,8 +44,8 @@ dev = [
     # tests/dashboard parses HTMX responses; production parses no HTML itself —
     # the processor owns the extraction stack (#350).
     "beautifulsoup4>=4.12.0,<5",
-    # In-memory Redis for the fetch-policy producer tests (#245); mirrors
-    # replicator's test harness so the two ends of the stream test alike.
+    # In-memory Redis for the bus producer and consumer tests (#245); mirrors
+    # replicator's test harness so both ends of a stream test alike.
     "fakeredis>=2.26,<3",
     # Imported directly by tests/test_dependency_extras.py; declared rather than
     # relied on as a transitive of procrastinate (#242).

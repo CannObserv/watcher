@@ -215,6 +215,9 @@ async def test_engine():
         # the old suite still holds it: drop it, so the schema here is the
         # schema production has. Safe — the _test/_dev suffix check ran at import.
         await conn.execute(text("DROP SCHEMA IF EXISTS information CASCADE"))
+        # Same reasoning for #374's dropped table: the models no longer map it,
+        # so drop_all never removes one an interrupted older-suite run left.
+        await conn.execute(text("DROP TABLE IF EXISTS fetch_policy_tombstones"))
         await conn.run_sync(Base.metadata.create_all)
         # Phase 5 (#156): trg_changes_update_last_changed_at trigger removed.
         # No triggers to recreate.

@@ -141,9 +141,9 @@ HEALTH_CHECK_INTERVAL_SECONDS = 30
 #: already applied an ``XADD`` publishes the entry a second time.
 #:
 #: Watcher's exposure is on the producer side — ``content.fetch``,
-#: ``info.watch-status``, ``content.revisions``. Duplicates on the
-#: last-write-wins config stream are absorbed by
-#: construction, but ``content.fetch`` is a command stream with a consumer group,
+#: ``content.process``, ``info.watch-status``, ``info.watch-events``,
+#: ``content.revisions``. Duplicates on the last-write-wins config stream are
+#: absorbed by construction, but ``content.fetch`` is a command stream with a consumer group,
 #: and a duplicated command is a duplicated fetch: a second real origin request
 #: against a government portal under Watcher's pinned User-Agent.
 #:

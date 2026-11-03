@@ -3,8 +3,10 @@
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy import select
 
 from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_suspension
+from src.core.models.domain import Domain
 
 
 class TestDomainNameForUrl:
@@ -34,10 +36,6 @@ class TestDomainDefaultScheduleConfig:
     """#205: Domain.default_schedule_config — operator cadence, not the rate-limiter floor."""
 
     async def test_defaults_null_and_matches_is_null(self, db_session):
-        from sqlalchemy import select
-
-        from src.core.models.domain import Domain
-
         db_session.add(Domain(name="dom-null.example"))
         await db_session.flush()
         found = (
@@ -51,10 +49,6 @@ class TestDomainDefaultScheduleConfig:
         assert found.default_schedule_config is None
 
     async def test_round_trips(self, db_session):
-        from sqlalchemy import select
-
-        from src.core.models.domain import Domain
-
         db_session.add(
             Domain(name="dom-cadence.example", default_schedule_config={"interval": "6h"})
         )
@@ -68,10 +62,6 @@ class TestDomainDefaultScheduleConfig:
 @pytest.mark.integration
 class TestEnsureDomainAndResolveSuspension:
     async def test_creates_missing_domain_and_returns_not_suspended(self, db_session):
-        from sqlalchemy import select
-
-        from src.core.models.domain import Domain
-
         result = await ensure_domain_and_resolve_suspension(db_session, "fresh-core.example")
         assert result.suspended is False
         domain = (
@@ -80,16 +70,12 @@ class TestEnsureDomainAndResolveSuspension:
         assert domain is not None
 
     async def test_inactive_domain_returns_suspended(self, db_session):
-        from src.core.models.domain import Domain
-
         db_session.add(Domain(name="inactive-core.example", is_active=False))
         await db_session.flush()
         result = await ensure_domain_and_resolve_suspension(db_session, "inactive-core.example")
         assert result.suspended is True
 
     async def test_active_domain_returns_not_suspended(self, db_session):
-        from src.core.models.domain import Domain
-
         db_session.add(Domain(name="active-core.example", is_active=True))
         await db_session.flush()
         result = await ensure_domain_and_resolve_suspension(db_session, "active-core.example")
@@ -102,8 +88,6 @@ class TestEnsureDomainAndResolveSuspension:
 
     async def test_returns_domain_default_schedule_config(self, db_session):
         """#205: the helper surfaces the domain's cadence for denormalization."""
-        from src.core.models.domain import Domain
-
         db_session.add(
             Domain(name="cadence-core.example", default_schedule_config={"interval": "7d"})
         )
@@ -122,8 +106,6 @@ class TestEnsureDomainAndResolveSuspension:
         rolls back alone and the winner is re-read. #374 part 2 removed the
         tombstone DELETE that used to sit in that savepoint; the duplicate must
         still surface inside it, not at the caller's commit."""
-        from src.core.models.domain import Domain
-
         db_session.add(Domain(name="lost-race.example", is_active=False))
         await db_session.flush()
 

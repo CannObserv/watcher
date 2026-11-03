@@ -239,6 +239,12 @@ dead; the nightly backup holds them, and the downgrade recreates the table
 empty. No grants step: `watcher` owns it (#259 above). Subsequent deploys use
 the standard order above.
 
+The same release unregisters the `publish_fetch_policy` task, which part 1
+kept only so a queued job drained as a no-op. Before the restart, confirm none
+is left: `SELECT status, count(*) FROM procrastinate_jobs WHERE task_name =
+'publish_fetch_policy' AND status IN ('todo', 'doing') GROUP BY status;` should
+return no rows. A job left over fails as an unknown task rather than draining.
+
 ## No safe order — one-time, `e7c4b2a91f60` (#252)
 
 `e7c4b2a91f60` adds `fetch_commands.info_source_id` NOT NULL, and the release

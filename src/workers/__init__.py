@@ -48,7 +48,6 @@ def get_app() -> procrastinate.App:
         # Import task modules so decorators register on the blueprint
         # before we copy tasks into the App.
         import src.workers.fetch_commands  # noqa: F401
-        import src.workers.fetch_policy  # noqa: F401
         import src.workers.process_commands  # noqa: F401
         import src.workers.retention  # noqa: F401
         import src.workers.source_revisions_drain  # noqa: F401

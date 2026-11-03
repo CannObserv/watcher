@@ -1,5 +1,7 @@
 """Unit + integration tests for src.core.domains (#196)."""
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_suspension
@@ -114,3 +116,32 @@ class TestEnsureDomainAndResolveSuspension:
         """#205: a freshly-upserted domain has a NULL cadence (system default applies)."""
         result = await ensure_domain_and_resolve_suspension(db_session, "fresh-cadence.example")
         assert result.default_schedule_config is None
+
+    async def test_a_lost_create_race_resolves_from_the_winning_row(self, db_session, monkeypatch):
+        """The create runs in a savepoint so a concurrent insert of the same host
+        rolls back alone and the winner is re-read. #374 part 2 removed the
+        tombstone DELETE that used to sit in that savepoint; the duplicate must
+        still surface inside it, not at the caller's commit."""
+        from src.core.models.domain import Domain
+
+        db_session.add(Domain(name="lost-race.example", is_active=False))
+        await db_session.flush()
+
+        real_execute = db_session.execute
+        calls = 0
+
+        async def _first_lookup_misses(statement, *args, **kwargs):
+            nonlocal calls
+            calls += 1
+            result = await real_execute(statement, *args, **kwargs)
+            if calls == 1:
+                miss = MagicMock()
+                miss.scalar_one_or_none.return_value = None
+                return miss
+            return result
+
+        monkeypatch.setattr(db_session, "execute", _first_lookup_misses)
+        result = await ensure_domain_and_resolve_suspension(db_session, "lost-race.example")
+
+        assert result.suspended is True
+        assert calls == 2

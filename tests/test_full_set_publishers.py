@@ -1,19 +1,20 @@
 """The full-set publish helpers may only be called with the full set (#292, CR 1).
 
-``publish_policy_events`` and ``publish_status_events`` derive their retention
-floor from the batch they are handed — ``len(events) * RETAINED_FULL_SETS``. That
-is the corpus only while the batch *is* the corpus. A partial batch floors the
+``publish_status_events`` derives its retention floor from the batch it is
+handed — ``len(events) * RETAINED_FULL_SETS``. That is the corpus only while
+the batch *is* the corpus. A partial batch floors the
 cap at a fraction of the set and the publish then trims the set down to it: the
 silent partial-replay failure the floor exists to prevent, arriving through the
 parameter that implements it.
 
-Both helpers' docstrings state the precondition, and prose is not a guard. What
-makes it one is that each has exactly one caller — its own full-set function,
-which reads every row. This reads the source rather than the runtime because the
-failure it guards against is a *new* call site written the wrong way, which no
-existing test would exercise; it is the same reasoning as
-``tests/test_bus_stream_kinds.py``, and it asserts it found the call sites so a
-rename fails loudly instead of passing vacuously.
+The helper's docstring states the precondition, and prose is not a guard. What
+makes it one is that it has exactly one caller — its own full-set function,
+which reads every row. (``publish_policy_events`` had the same rule until F1,
+#374, retired Watcher's fetch-policy producer.) This reads the source rather
+than the runtime because the failure it guards against is a *new* call site
+written the wrong way, which no existing test would exercise; it is the same
+reasoning as ``tests/test_bus_stream_kinds.py``, and it asserts it found the
+call sites so a rename fails loudly instead of passing vacuously.
 
 The cheaper-looking alternative — have the helpers take the set size, or assert
 on it — does not exist: nothing inside the helper can tell a complete sequence
@@ -35,7 +36,6 @@ SCANNED_ROOTS = (ROOT / "src", ROOT / "scripts")
 #: derived from its argument belongs here; one that takes an explicit cap does
 #: not, which is why this is a mapping rather than a blanket rule about names.
 FULL_SET_PUBLISHERS = {
-    "publish_policy_events": "publish_full_policy_set",
     "publish_status_events": "publish_full_status_set",
 }
 

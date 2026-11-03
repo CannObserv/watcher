@@ -44,7 +44,6 @@ from co_core.pure.adapters.bus.streams import dlq_name, stream_kind
 from co_core_aio.bus import AsyncBusConsumer
 
 from src.core.bus import RETAINED_FULL_SETS
-from src.core.fetch_policy import DEFAULT_FETCH_POLICY_STREAM_MAXLEN
 from src.core.watch_status import DEFAULT_WATCH_STATUS_STREAM_MAXLEN
 from src.workers.watch_status import DEFAULT_REPUBLISH_CRON, REPUBLISH_CRON_ENV
 
@@ -76,8 +75,8 @@ GROUP_NAME_DERIVERS = frozenset({"group_name"})
 # a complete one. That is the silent failure the taxonomy exists to prevent (CR-28).
 BOUNDED_MAXLEN_RESOLVERS = frozenset({"resolve_stream_maxlen"})
 
-# Every stream Watcher touches: six published, four consumed — six until F1
-# (#374) retires `content.fetch-policy`, then five again. AGENTS.md and
+# Every stream Watcher touches: five published, four consumed — five again
+# since F1 (#374) handed `content.fetch-policy` to Archiver. AGENTS.md and
 # BUS.md say exactly that in prose; asserting the set — not just each
 # kind — is what makes an *addition* fail here rather than drift silently (CR-29).
 WATCHER_STREAMS = frozenset(
@@ -86,7 +85,6 @@ WATCHER_STREAMS = frozenset(
         streams.CONTENT_DERIVED,
         streams.CONTENT_REVISIONS,
         streams.CONTENT_FETCH,
-        streams.CONTENT_FETCH_POLICY,
         streams.CONTENT_PROCESS,
         streams.INFO_REGISTRY,
         streams.INFO_WATCH_CHECK,
@@ -693,7 +691,7 @@ class TestTaxonomyCoverage:
             assert stream_kind(topic) in {"command", "fact", "config_state"}
 
     def test_the_inventory_is_exactly_what_the_docs_describe(self):
-        """AGENTS.md and BUS.md say six published and four consumed.
+        """AGENTS.md and BUS.md say five published and four consumed.
         Pinning each stream's *kind* catches a co-core reclassification but not
         an addition, and the prose is wrong either way (CR-29)."""
         referenced = set()
@@ -706,7 +704,7 @@ class TestTaxonomyCoverage:
                         referenced.add(topic)
         assert referenced == WATCHER_STREAMS, (
             "the set of streams Watcher touches changed — update the inventory here and "
-            "the 'publishes six streams and consumes four' prose in AGENTS.md and "
+            "the 'publishes five streams and consumes four' prose in AGENTS.md and "
             "docs/BUS.md, which this set exists to keep honest"
         )
 
@@ -720,14 +718,13 @@ class TestTaxonomyCoverage:
             (streams.CONTENT_FETCH, "command"),
             (streams.CONTENT_PROCESS, "command"),
             (streams.INFO_WATCH_CHECK, "command"),
-            (streams.CONTENT_FETCH_POLICY, "config_state"),
             (streams.INFO_REGISTRY, "config_state"),
             (streams.INFO_WATCH_STATUS, "config_state"),
         ],
     )
     def test_watchers_inventory_has_the_kinds_the_docs_claim(self, topic, kind):
         """AGENTS.md and BUS.md describe this inventory in prose —
-        six published streams and four consumed, one of the consumed four
+        five published streams and four consumed, one of the consumed four
         groupless. If co-core reclassifies one, that prose is wrong and this
         fails rather than the description quietly drifting."""
         assert stream_kind(topic) == kind
@@ -737,8 +734,10 @@ class TestBrokerMirroredConstants:
     """Every number broker's bus-health probe holds a copy of, pinned here.
 
     Since CannObserv/broker#44 the probe does not merely *display* these: its
-    ``FullSetFloor`` computes the length threshold for both LWW streams from all
-    three of them, and derives the last-entry age threshold from the period. So
+    ``FullSetFloor`` computes ``info.watch-status``'s length threshold from all
+    three of them, and derives the last-entry age threshold from the period.
+    (``content.fetch-policy`` is Archiver's since F1, #374, so its copy of these
+    numbers is Archiver's to pin.) So
     a retune here moves a live threshold there, and the move is invisible from
     this repo in both directions — raised and unmirrored, the probe warns early
     on a cap that is being applied correctly; lowered, it goes quiet over the
@@ -750,9 +749,8 @@ class TestBrokerMirroredConstants:
     site". Before this class every one of these could be retuned with the whole
     suite still green.
 
-    What is **not** pinnable here: the three environment variables that move the
+    What is **not** pinnable here: the two environment variables that move the
     same numbers at deploy time with no commit —
-    ``WATCHER_FETCH_POLICY_STREAM_MAXLEN`` and
     ``WATCHER_WATCH_STATUS_STREAM_MAXLEN`` (``resolve_stream_maxlen`` puts
     ``max(env, floor)`` in force, not the default below) and
     ``WATCHER_WATCH_STATUS_REPUBLISH_CRON``. Those are why the comments at the
@@ -782,11 +780,10 @@ class TestBrokerMirroredConstants:
         ("value", "expected", "broker_symbol"),
         [
             (RETAINED_FULL_SETS, 10, "LWW_RETAINED_FULL_SETS"),
-            (DEFAULT_FETCH_POLICY_STREAM_MAXLEN, 500, "LWW_PRODUCER_MAXLEN"),
             (DEFAULT_WATCH_STATUS_STREAM_MAXLEN, 500, "LWW_PRODUCER_MAXLEN"),
             (DEFAULT_REPUBLISH_CRON, "*/5 * * * *", "LWW_REPUBLISH_PERIOD_SECONDS"),
         ],
-        ids=["retained-full-sets", "fetch-policy-maxlen", "watch-status-maxlen", "republish-cron"],
+        ids=["retained-full-sets", "watch-status-maxlen", "republish-cron"],
     )
     def test_the_value_broker_mirrors_has_not_moved(self, value, expected, broker_symbol):
         assert value == expected, (

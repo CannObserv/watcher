@@ -60,6 +60,10 @@ class TestGetAppRegistration:
         task_keys = {name for name, _ in app.periodic_registry.periodic_tasks}
         assert "drain_pending_watch_events" in task_keys
 
+    def test_the_retired_fetch_policy_task_is_gone(self):
+        """#374 part 2: F1 stopped it; Archiver produces the stream now."""
+        assert "publish_fetch_policy" not in get_app().tasks
+
     def test_every_task_is_a_coroutine_function(self):
         """#334: a stop that outlives ``SHUTDOWN_GRACEFUL_SECONDS`` aborts the
         running jobs by cancelling them, and only an ``async def`` task can be

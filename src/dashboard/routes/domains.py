@@ -19,7 +19,6 @@ from src.core.domains import (
     backfill_domain_schedule_config,
 )
 from src.core.egress import DestinationRefused
-from src.core.fetch_policy import clear_tombstone, record_tombstone
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
 from src.core.models.notification_template import (
@@ -44,10 +43,9 @@ from src.dashboard.deps import clamp_pagination, is_htmx
 from src.dashboard.forms import parse_content_config_from_form
 from src.dashboard.templating import templates
 
-# NOTE (#245; F1, #374): Watcher no longer publishes content.fetch-policy —
-# Archiver does — so a politeness or suspension edit here reaches nothing
-# downstream; Watcher's own scheduling still acts on it. Only the tombstone/clear
-# bookkeeping is left in-request, and F1 part 2 deletes it.
+# NOTE (F1, #374): Watcher no longer publishes content.fetch-policy — Archiver
+# does — so a politeness or suspension edit here reaches nothing downstream;
+# Watcher's own scheduling still acts on a suspension.
 
 router = APIRouter()
 
@@ -188,8 +186,6 @@ async def domain_create_submit(
 
     domain = Domain(name=domain_name)
     session.add(domain)
-    # The host is live again: stop republishing its tombstone, if any (#245).
-    await clear_tombstone(session, domain_name)
     audit(session, EventType.DOMAIN_CREATED, domain_name=domain_name, source="dashboard")
     await session.commit()
     return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
@@ -316,9 +312,6 @@ async def domain_delete(
         return HTMLResponse(status_code=409, content=msg)
 
     audit(session, EventType.DOMAIN_DELETED, domain_name=name, source="dashboard")
-    # Tombstone lands atomically with the delete; the producer keeps
-    # republishing it so LWW consumers can revoke the host's policy (#245).
-    await record_tombstone(session, name)
     await session.delete(domain)
     await session.commit()
 

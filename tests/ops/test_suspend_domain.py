@@ -33,7 +33,6 @@ FORBIDDEN_PREFIXES = (
     "src.dashboard",
     "src.api",
     "src.core.bus",
-    "src.core.fetch_policy",
     "redis",
     "co_core_aio",
     "procrastinate",

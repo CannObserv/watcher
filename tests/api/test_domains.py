@@ -3,9 +3,6 @@
 import pytest
 from ulid import ULID
 
-import src.workers.fetch_policy as fetch_policy_mod
-from src.core.models.fetch_policy_tombstone import FetchPolicyTombstone
-
 pytestmark = pytest.mark.integration
 
 
@@ -238,13 +235,12 @@ class TestUpsertDomainRaceReapply:
 
         first = MagicMock()
         first.scalar_one_or_none.return_value = None  # initial select: not found → create branch
-        tombstone_clear = MagicMock()  # create branch clears the policy tombstone (#245)
         refetch = MagicMock()
         refetch.scalar_one.return_value = winner  # post-rollback re-fetch finds the winner
         backfill_result = MagicMock()
 
         session = MagicMock()
-        session.execute = AsyncMock(side_effect=[first, tombstone_clear, refetch, backfill_result])
+        session.execute = AsyncMock(side_effect=[first, refetch, backfill_result])
         session.flush = AsyncMock(
             side_effect=IntegrityError("INSERT", {}, Exception("duplicate key"))
         )
@@ -346,67 +342,3 @@ class TestDeleteDomainViaApi:
         await client.patch("/api/v1/domains/api-del.com", json={})
         response = await client.delete("/api/v1/domains/api-del.com")
         assert response.status_code == 204
-
-
-class TestFetchPolicyTombstoneHooks:
-    """Domain delete/re-create must maintain the fetch-policy tombstone table (#245)."""
-
-    async def test_delete_records_tombstone(self, client, db_session):
-        await client.patch("/api/v1/domains/ts-del.example", json={})
-        response = await client.delete("/api/v1/domains/ts-del.example")
-        assert response.status_code == 204
-
-        row = await db_session.get(FetchPolicyTombstone, "ts-del.example")
-        assert row is not None
-
-    async def test_recreate_clears_tombstone(self, client, db_session):
-        await client.patch("/api/v1/domains/ts-back.example", json={})
-        await client.delete("/api/v1/domains/ts-back.example")
-        assert await db_session.get(FetchPolicyTombstone, "ts-back.example") is not None
-
-        response = await client.patch("/api/v1/domains/ts-back.example", json={"min_interval": 2.0})
-        assert response.status_code == 200
-        # Expire so the get() re-reads the row state the route just committed.
-        db_session.expire_all()
-        assert await db_session.get(FetchPolicyTombstone, "ts-back.example") is None
-
-
-class TestNoRouteDefersThePolicyPublish:
-    """F1 (#374): Watcher's ``content.fetch-policy`` producer has stopped.
-
-    Before F1 every mutation here deferred ``publish_fetch_policy`` (#245,
-    #250 CR-1). Archiver owns the stream now, and design D8's one-producer rule
-    is held only by sequencing — no ACL refuses a second writer — so no route
-    may queue the task, even though the task itself is a no-op.
-    """
-
-    @pytest.fixture
-    def defers(self, monkeypatch) -> list[int]:
-        calls: list[int] = []
-
-        def _spy(*_args, **_kwargs):
-            calls.append(1)
-            raise AssertionError("publish_fetch_policy was deferred")
-
-        monkeypatch.setattr(fetch_policy_mod.publish_fetch_policy, "configure", _spy)
-        monkeypatch.setattr(fetch_policy_mod.publish_fetch_policy, "defer_async", _spy)
-        return calls
-
-    async def test_upsert_defers_nothing(self, client, defers):
-        response = await client.patch("/api/v1/domains/f1-up.example", json={"min_interval": 2.0})
-        assert response.status_code == 200
-        assert defers == []
-
-    async def test_delete_defers_nothing(self, client, defers):
-        await client.patch("/api/v1/domains/f1-del.example", json={})
-        defers.clear()
-        response = await client.delete("/api/v1/domains/f1-del.example")
-        assert response.status_code == 204
-        assert defers == []
-
-    async def test_archive_and_restore_defer_nothing(self, client, defers):
-        await client.patch("/api/v1/domains/f1-arch.example", json={})
-        defers.clear()
-        assert (await client.post("/api/v1/domains/f1-arch.example/archive")).status_code == 200
-        assert (await client.post("/api/v1/domains/f1-arch.example/restore")).status_code == 200
-        assert defers == []

@@ -23,8 +23,9 @@ as CI's is, so a dev row is checked the same way. Each is lock-only; none is
 declared.
 
 **pyasn1 (#415).** Four quadratic-CPU decoder advisories against 0.6.4, a
-transitive under google-auth's ``pyasn1-modules`` (``>=0.6.1,<0.7.0``), so the
-lock move holds it; a constraint is for a floor no lock bump can hold (certifi).
+runtime transitive via google-auth's ``pyasn1-modules``, which requires
+``pyasn1>=0.6.1,<0.7.0``. 0.6.5 is inside that range, so the lock move holds
+it; a constraint is for a floor no lock bump can hold (certifi).
 
 Add a row when an advisory is fixed by a lock bump; drop one only with the
 package. **Precondition:** the environment is synced from ``uv.lock``, as for
@@ -66,5 +67,5 @@ def test_installed_meets_advisory_floor(package: str) -> None:
     floor, advisories = _FLOORS[package]
     installed = Version(metadata.version(package))
     assert installed >= Version(floor), (
-        f"{package} {installed} < {floor}: still exposed to {advisories} (#392, #400)"
+        f"{package} {installed} < {floor}: still exposed to {advisories} (#392, #400, #415)"
     )

@@ -14,9 +14,11 @@ from src.api.deps import get_db_session, get_probe_fn
 from src.api.routes.helpers import parse_ulid
 from src.api.schemas.content_config import ContentConfig
 from src.api.schemas.validators import validate_event_list
-from src.core.domain_suspension import DomainArchived, DomainNotFound, set_domain_active
 from src.core.domains import (
+    DomainArchived,
+    DomainNotFound,
     backfill_domain_schedule_config,
+    set_domain_active,
 )
 from src.core.egress import DestinationRefused
 from src.core.models.audit_log import EventType, audit

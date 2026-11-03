@@ -39,7 +39,7 @@ from src.core.db_safety import (
     ProductionDatabaseRefused,
     assert_environment_db_allowed,
 )
-from src.core.domain_suspension import DomainArchived, DomainNotFound, set_domain_active
+from src.core.domains import DomainArchived, DomainNotFound, set_domain_active
 from src.core.logging import configure_logging
 
 AUDIT_SOURCE = "cli"

@@ -35,18 +35,19 @@
 #   WATCHER_DEV_NOTIFIER_BASE_URL        scratch notifier; opts in, needs the key below
 #   WATCHER_DEV_NOTIFIER_API_KEY         scratch notifier key ('development'-marked); required with the URL
 #   WATCHER_DEV_PUBLIC_BASE_URL          base for this server's notification links (e.g. its :8001 URL)
-#   WATCHER_DEV_SERVER_SKIP_ENV_FILES=1  skip sourcing env files (tests)
+#   WATCHER_DEV_SERVER_SKIP_ENV_FILES=1  skip loading the env files (tests)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# The env files load through scripts/load-env.sh, which parses them and never
+# runs them (#407): /etc/watcher/.env, then the checkout's .env — in a linked
+# worktree with none, the primary's (#404). The loader finds that .env from the
+# cwd's checkout, not this script's path, hence the cd first.
 if [[ "${WATCHER_DEV_SERVER_SKIP_ENV_FILES:-}" != "1" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  [ -f /etc/watcher/.env ] && . /etc/watcher/.env
-  # shellcheck disable=SC1091
-  [ -f "$REPO_ROOT/.env" ] && . "$REPO_ROOT/.env"
-  set +a
+  cd "$REPO_ROOT"
+  # shellcheck source=scripts/load-env.sh
+  . "$REPO_ROOT/scripts/load-env.sh"
 fi
 
 PORT="${WATCHER_DEV_PORT:-8001}"
@@ -156,7 +157,7 @@ unset PROCRASTINATE_DATABASE_URL
 
 # Same treatment for the migration credential (#259), and it is the sharpest of
 # the three: alembic reads WATCHER_MIGRATION_DATABASE_URL first, that variable
-# lives in /etc/watcher/.env which this script sources, and the `alembic
+# lives in /etc/watcher/.env which this script loads, and the `alembic
 # upgrade head` below runs with whatever it finds. Inheriting it would point
 # the *dev* launch path at production holding DDL rights — including the
 # public-schema DROP in the TEST_DATABASE_URL branch. Overwritten rather than
@@ -196,7 +197,7 @@ fi
 # scratch notifier and clears it in the branch that has none.
 #
 # Since #278 the production credential lives in /etc/watcher/notifier.env, which
-# only deploy/watcher.service loads — so the env files sourced above no longer
+# only deploy/watcher.service loads — so the env files loaded above no longer
 # supply WATCHER_NOTIFIER_BASE_URL or WATCHER_NOTIFIER_API_KEY at all. The clearing below
 # stays regardless: it is what makes this script's guarantee independent of the
 # VM's file layout, and it still catches a shell that exported the pair by hand

@@ -168,7 +168,7 @@ does not.
 
 ```bash
 cd /home/exedev/watcher
-ENV='set -a; . /etc/watcher/backup.env; set +a; export GOOGLE_APPLICATION_CREDENTIALS=/etc/watcher/co-watcher-backup.json'
+ENV='WATCHER_SYSTEM_ENV_FILE=/etc/watcher/backup.env WATCHER_PROJECT_ENV_FILE=/dev/null . scripts/load-env.sh; export GOOGLE_APPLICATION_CREDENTIALS=/etc/watcher/co-watcher-backup.json'
 SRC=co-watcher                                # the host that shipped the dump
                                               # (`watcher` is the retired VM's)
 
@@ -193,10 +193,12 @@ the ones `/etc/watcher/.env` **already holds**: `setup-db-roles.sql` sets
 
 ```bash
 # The passwords /etc/watcher/.env already carries — never new ones, and read
-# from it rather than typed, so neither lands in shell history.
-set -a; . /etc/watcher/.env; set +a
+# from it rather than typed, so neither lands in shell history. Parsed by the
+# loader, never sourced (#407); /dev/null keeps the repo .env out.
+WATCHER_SYSTEM_ENV_FILE=/etc/watcher/.env WATCHER_PROJECT_ENV_FILE=/dev/null . scripts/load-env.sh
 u="${WATCHER_MIGRATION_DATABASE_URL#*://watcher:}"; MIGRATE_PW="${u%%@*}"
 u="${DATABASE_URL#*://watcher_app:}"; APP_PW="${u%%@*}"
+[ -n "$MIGRATE_PW" ] && [ -n "$APP_PW" ] || echo "STOP: no passwords read — is /etc/watcher/.env readable?" >&2
 
 # 1. Fresh cluster only: the owner role (an existing cluster has it). Environment
 #    and \getenv, never argv: `sudo -u postgres VAR=…` shows the value in `ps`.

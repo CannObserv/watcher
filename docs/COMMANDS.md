@@ -95,7 +95,9 @@ sudo systemctl daemon-reload && sudo systemctl restart watcher
 # applies the procrastinate schema (#341), and refuses any DB whose name lacks
 # a _test/_dev suffix. Never hand-run uvicorn with the prod env loaded:
 # /etc/watcher/.env points DATABASE_URL at production, and the embedded worker
-# would consume the prod task queue.
+# would consume the prod task queue. Its env files load through
+# scripts/load-env.sh — parsed, never sourced; a linked worktree with no .env
+# gets the primary checkout's (#407, #404).
 bash scripts/dev_server.sh
 
 # Knobs: WATCHER_DEV_PORT (default 8001; 8000 refused — it belongs to
@@ -295,7 +297,7 @@ sudo systemctl start watcher-backup.service
 # Restore — always name the host that shipped the dump (docs/RECOVERY.md → Restore).
 # This host ships under `co-watcher/`; `watcher/` is the retired VM's timeline, whose
 # newest object post-dates the #296 cutover — `--latest --prefix watcher` is the wrong DB:
-sudo bash -c "set -a; . /etc/watcher/backup.env; set +a; export GOOGLE_APPLICATION_CREDENTIALS=/etc/watcher/co-watcher-backup.json; .venv/bin/python -m src.ops.restore --list"
+sudo bash -c "WATCHER_SYSTEM_ENV_FILE=/etc/watcher/backup.env WATCHER_PROJECT_ENV_FILE=/dev/null . scripts/load-env.sh; export GOOGLE_APPLICATION_CREDENTIALS=/etc/watcher/co-watcher-backup.json; .venv/bin/python -m src.ops.restore --list"
 
 # One-off job-history backlog prune; the hourly task holds it after
 # (docs/DEPLOYMENT.md → Job history). The opt-in covers the dry run too:

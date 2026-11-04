@@ -34,7 +34,7 @@ from src.core.notifications.diff import ChangeDiff, diff_requested
 from src.core.notifications.diff_loader import load_change_diff
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifier_client import build_idempotency_key, get_notifier_client
-from src.core.notify_cutover import format_cutover, notify_cutover_at
+from src.core.notify_cutover import format_instant, notify_cutover_at
 
 logger = get_logger(__name__)
 
@@ -153,8 +153,8 @@ async def dispatch_event_notifications(session: AsyncSession, event: WatchEvent)
             extra={
                 "event_type": event.event_type.value,
                 "watched_item_id": event.watched_item_id,
-                "occurred_at": format_cutover(event.occurred_at),
-                "cutover_at": format_cutover(cutover),
+                "occurred_at": format_instant(event.occurred_at),
+                "cutover_at": format_instant(cutover),
             },
         )
         return

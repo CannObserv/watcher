@@ -16,7 +16,7 @@ from src.core.notify_cutover import (
     NOTIFY_CUTOVER_AT_ENV,
     NotifyCutoverInvalid,
     assert_notify_cutover_at,
-    format_cutover,
+    format_instant,
     notify_cutover_at,
 )
 
@@ -102,7 +102,7 @@ class TestAssertNotifyCutoverAt:
 class TestFormatCutover:
     def test_six_fraction_digits_always(self) -> None:
         assert (
-            format_cutover(datetime(2026, 11, 6, 21, tzinfo=UTC)) == "2026-11-06T21:00:00.000000Z"
+            format_instant(datetime(2026, 11, 6, 21, tzinfo=UTC)) == "2026-11-06T21:00:00.000000Z"
         )
 
     def test_a_non_utc_aware_instant_is_shown_in_utc(self) -> None:
@@ -110,7 +110,7 @@ class TestFormatCutover:
         wall time would misstate the instant the drain check reads."""
         pst = timezone(timedelta(hours=-8))
         assert (
-            format_cutover(datetime(2026, 11, 6, 13, tzinfo=pst)) == "2026-11-06T21:00:00.000000Z"
+            format_instant(datetime(2026, 11, 6, 13, tzinfo=pst)) == "2026-11-06T21:00:00.000000Z"
         )
 
 

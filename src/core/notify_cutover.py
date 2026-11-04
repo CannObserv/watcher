@@ -65,7 +65,7 @@ def notify_cutover_at(environ: Mapping[str, str]) -> datetime | None:
         ) from None
 
 
-def format_cutover(cutover: datetime) -> str:
+def format_instant(cutover: datetime) -> str:
     """An aware instant as ``YYYY-MM-DDTHH:MM:SS.ffffffZ`` in UTC, as Archiver logs T."""
     return cutover.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
@@ -81,5 +81,5 @@ def assert_notify_cutover_at(environ: Mapping[str, str]) -> None:
         logger.info("notify cutover: unset (Watcher dispatches every event)")
     else:
         logger.info(
-            "notify cutover: %s (events at or after it are Archiver's)", format_cutover(cutover)
+            "notify cutover: %s (events at or after it are Archiver's)", format_instant(cutover)
         )

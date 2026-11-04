@@ -334,10 +334,11 @@ Watcher sends events with `occurred_at` < T (`WATCHER_NOTIFY_CUTOVER_AT`,
 services restarted before it:** a gap drops, an overlap double-sends. Every
 production read and restart takes the operator's OK; the window is attended.
 
-1. **Parity (archiver#369 D6).** Export from **2026-10-22** (Archiver's group replayed
-   pre-window facts). No `event_id` in the audit: the join is item + type + `created_at`
-   ± tolerance. No URLs; the operator picks where the rows go. Archiver's coordinator
-   reports parity on #376.
+1. **Parity (archiver#369 D6).** Export from **2026-10-21** (Archiver's group replayed
+   facts back to 10-21 16:56Z). No `event_id` in the audit: Archiver joins item + type,
+   Watcher's `created_at` − its `occurred_at` in 0–120 s, `template_id` ↔
+   `imported_watcher_id`; `success` is informational. No URLs; the operator picks where
+   the rows go. Archiver's coordinator reports parity on #376.
 
    ```bash
    sudo -u postgres psql -d watcher -v ON_ERROR_STOP=1 --csv <<'SQL'
@@ -347,7 +348,7 @@ production read and restart takes the operator's OK; the window is attended.
    FROM audit_log a
    LEFT JOIN watched_items w ON w.id = a.payload->>'watched_item_id'
    CROSS JOIN LATERAL jsonb_array_elements(a.payload->'results') r
-   WHERE a.event_type = 'notification.dispatched' AND a.created_at >= '2026-10-22T00:00:00Z'
+   WHERE a.event_type = 'notification.dispatched' AND a.created_at >= '2026-10-21T00:00:00Z'
    ORDER BY a.created_at;
    ROLLBACK;
    SQL
@@ -355,11 +356,13 @@ production read and restart takes the operator's OK; the window is attended.
 
 2. **#373's re-export** vs the baseline (sha256 `10dcf6ef…7c52e`): only `exported_at`
    moves (command above).
-3. **T**, 30–60 min ahead, as `YYYY-MM-DDTHH:MM:SSZ`; posted on #368 first. Watcher:
-   `WATCHER_NOTIFY_CUTOVER_AT=<T>` in `/etc/watcher/.env`, `sudo systemctl restart
-   watcher`. Archiver: its unit's `Environment=` line, in its thread. Before T: both
-   `/health`s, and `sudo journalctl -u watcher -b | grep 'notify cutover:'` shows the
-   same `…ffffffZ` instant as Archiver's `notify cutover:` line.
+3. **T**, 30–60 min ahead, as `YYYY-MM-DDTHH:MM:SSZ`; posted on #368 first. **Archiver
+   first:** its staged unit-line PR merges on the parity go (CI, `deploy.sh`), and it
+   posts its `notify cutover:` line on #376. Not live by ~T−10 min → Watcher never sets
+   T, and T moves. **Then Watcher, by ~T−2 min** (after Archiver is live, a late Watcher
+   double-sends): `WATCHER_NOTIFY_CUTOVER_AT=<T>` in `/etc/watcher/.env`, `sudo
+   systemctl restart watcher`, `/health`, and `sudo journalctl -u watcher -b | grep
+   'notify cutover:'` — its `…ffffffZ` token equals Archiver's (the wording differs).
 4. **After T: drain.** No Watcher test sends from now on (ungated; notifier#118 needs
    the key unused since the drain).
    - `0` dispatch audits since T: `sudo -u postgres psql -d watcher -tA -c "BEGIN READ ONLY; SELECT count(*) FROM audit_log WHERE event_type = 'notification.dispatched' AND created_at >= '<T>'; ROLLBACK;"`

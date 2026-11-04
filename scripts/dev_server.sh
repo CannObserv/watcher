@@ -242,6 +242,13 @@ else
   PUBLIC_BASE_REPORT="(cleared)"
 fi
 
+# And for the notification cutover instant (#376). /etc/watcher/.env holds
+# production's T from F3 on: an agreement between production Watcher and
+# production Archiver. Inherited, this server would stop notifying at that
+# instant with no dev Archiver to take over. No dev override: the gate is
+# deleted with Watcher's dispatch path (#376 part 2).
+unset WATCHER_NOTIFY_CUTOVER_AT
+
 # pytest builds watcher_test with Base.metadata.create_all, not alembic, so
 # its alembic_version (if any) never matches the actual tables and a plain
 # `upgrade head` fails mid-history. The test DB is disposable by definition,
@@ -294,6 +301,7 @@ if [[ "${WATCHER_DEV_SERVER_DRY_RUN:-}" == "1" ]]; then
   echo "WATCHER_NOTIFIER_BASE_URL=$NOTIFIER_REPORT"
   echo "WATCHER_NOTIFIER_ENABLED=$NOTIFIER_ENABLED_REPORT"
   echo "WATCHER_PUBLIC_BASE_URL=$PUBLIC_BASE_REPORT"
+  echo "WATCHER_NOTIFY_CUTOVER_AT=(cleared)"
   echo "PORT=$PORT"
   echo "MIGRATE=$MIGRATE_REPORT"
   echo "RESET=$RESET_REPORT"

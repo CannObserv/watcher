@@ -160,6 +160,11 @@ os.environ.pop("WATCHER_DEV_NOTIFIER_API_KEY", None)
 os.environ.pop("WATCHER_PUBLIC_BASE_URL", None)
 os.environ.pop("WATCHER_DEV_PUBLIC_BASE_URL", None)
 
+# The notification cutover instant (#376) lives in /etc/watcher/.env from F3 on.
+# Inherited, every event built on now() would be suppressed, and the suite's
+# answer would depend on which shell ran it. Tests that want a T set their own.
+os.environ.pop("WATCHER_NOTIFY_CUTOVER_AT", None)
+
 
 def _make_mock_probe():
     """Return a mock probe that resolves URLs without real HTTP calls."""

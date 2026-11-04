@@ -15,9 +15,12 @@ optional 1–6 digit fraction, and ``Z`` or ``+00:00``. A date alone, a naive
 time or any other offset refuses startup — a value only one service accepts,
 or that the two read differently, is a gap or a double send nobody sees.
 
-Validated at startup by ``assert_notify_cutover_at``, then read per call like
-``src.core.public_base_url``: the process environment cannot change without a
-restart, so this is the same T every time, and a test sees its own.
+Validated at startup by ``assert_notify_cutover_at`` — the uvicorn lifespan's,
+the only production path — then read per call like ``src.core.public_base_url``:
+the process environment cannot change without a restart, so this is the same T
+every time, and a test sees its own. A path that skips the lifespan (a
+standalone ``procrastinate worker``) meets a malformed T as a raise inside the
+dispatch instead: loud, never a silent send.
 
 Temporary: part 2 deletes this module with Watcher's dispatch path.
 """

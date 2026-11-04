@@ -7,6 +7,7 @@ a double send or a silent gap, so it refuses startup.
 """
 
 import logging
+import os
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
@@ -111,3 +112,10 @@ class TestFormatCutover:
         assert (
             format_cutover(datetime(2026, 11, 6, 13, tzinfo=pst)) == "2026-11-06T21:00:00.000000Z"
         )
+
+
+def test_the_session_starts_without_a_cutover() -> None:
+    """``tests/conftest.py`` pops it: ``/etc/watcher/.env`` holds T from F3 on, and
+    a suite inheriting it would suppress every event built on ``now()`` — the
+    result would depend on which shell ran it. Tests set their own T."""
+    assert NOTIFY_CUTOVER_AT_ENV not in os.environ

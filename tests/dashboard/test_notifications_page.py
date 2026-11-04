@@ -298,6 +298,35 @@ async def test_test_result_returns_flash_on_success(client: AsyncClient, db_sess
 
 
 @pytest.mark.integration
+async def test_test_result_is_not_gated_by_the_cutover(
+    client: AsyncClient, db_session, monkeypatch
+):
+    """#376: the dashboard's test send bypasses ``dispatch_event_notifications``,
+    so T long past does not suppress it. #379 deletes this route."""
+    monkeypatch.setenv("WATCHER_NOTIFY_CUTOVER_AT", "2020-01-01T00:00:00Z")
+    tpl = await _make_template(db_session, "AfterT")
+
+    with (
+        patch(
+            "src.dashboard.routes.notifications.dispatch_via_notifier",
+            new_callable=AsyncMock,
+            return_value=DispatchResult(success=True, reason="sent"),
+        ) as mock_dispatch,
+        patch("src.dashboard.routes.notifications.get_notifier_client") as mock_client_factory,
+    ):
+        client_mock = AsyncMock()
+        client_mock.__aenter__ = AsyncMock(return_value=client_mock)
+        client_mock.__aexit__ = AsyncMock(return_value=False)
+        mock_client_factory.return_value = client_mock
+        resp = await client.post(
+            f"/notifications/{tpl.id}/test-result", headers={"HX-Request": "true"}
+        )
+
+    assert resp.status_code == 200
+    mock_dispatch.assert_called_once()
+
+
+@pytest.mark.integration
 async def test_test_result_uses_template_content_config(client: AsyncClient, db_session):
     """POST /{id}/test-result renders title via the template's content_config."""
     tpl = await _make_template(

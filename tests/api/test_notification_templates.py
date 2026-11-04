@@ -387,6 +387,33 @@ async def test_test_endpoint_returns_success(client: AsyncClient):
 
 
 @pytest.mark.integration
+async def test_test_endpoint_is_not_gated_by_the_cutover(client: AsyncClient, monkeypatch):
+    """#376: the cutover gate lives in ``dispatch_event_notifications``; an
+    operator test send calls ``dispatch_via_notifier`` directly and still goes
+    out with T long past. #379 deletes these routes."""
+    monkeypatch.setenv("WATCHER_NOTIFY_CUTOVER_AT", "2020-01-01T00:00:00Z")
+    tpl_resp = await client.post(
+        "/api/v1/notifications/templates",
+        json=_payload(title="After T"),
+    )
+    template_id = tpl_resp.json()["id"]
+
+    with (
+        patch(
+            "src.api.routes.notification_templates.dispatch_via_notifier",
+            new_callable=AsyncMock,
+            return_value=DispatchResult(success=True, reason="sent"),
+        ) as dispatch,
+        _patch_notifier_client(),
+    ):
+        resp = await client.post(f"/api/v1/notifications/templates/{template_id}/test")
+
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+    dispatch.assert_called_once()
+
+
+@pytest.mark.integration
 async def test_notification_template_has_content_config_column(db_session):
     """ORM model exposes content_config field (defaults to SQL NULL)."""
     from src.core.models.notification_template import NotificationTemplate

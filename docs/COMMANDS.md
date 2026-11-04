@@ -390,8 +390,10 @@ restart below takes the operator's OK, and the window is attended end to end.
      `doing`), then 15 minutes with the audit count still `0`.
 5. **Then:** shred the #373 baseline and its re-runs
    (`sudo shred -u /root/archiver-export/watcher-export-*.json`), record the flip and
-   T on #368, and start part 2. That part removes the dispatch path and this gate together;
-   the operator removes `WATCHER_NOTIFY_CUTOVER_AT` from `/etc/watcher/.env`.
+   T on #368, and start part 2, which removes the dispatch path and this gate together.
+   **Keep `WATCHER_NOTIFY_CUTOVER_AT` in `/etc/watcher/.env` until part 2 is live:**
+   until then the gate is all that stops Watcher's dispatch, so a restart without T
+   double-sends. Remove the line only after part 2's deploy.
 
 ## Tailwind CSS
 

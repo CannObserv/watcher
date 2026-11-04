@@ -5,6 +5,7 @@ service is the only delivery path. Every candidate must carry a
 `remote_channel_id`; missing values are recorded as failures.
 """
 
+import os
 from dataclasses import dataclass
 
 from notifier_client import NotifierClient
@@ -33,6 +34,7 @@ from src.core.notifications.diff import ChangeDiff, diff_requested
 from src.core.notifications.diff_loader import load_change_diff
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifier_client import build_idempotency_key, get_notifier_client
+from src.core.notify_cutover import format_cutover, notify_cutover_at
 
 logger = get_logger(__name__)
 
@@ -137,7 +139,26 @@ async def dispatch_event_notifications(session: AsyncSession, event: WatchEvent)
     candidate whose options would show it, and reused for the rest — a
     recipient that never asks costs nothing. The loader never raises: an
     unavailable diff is said in the body, and the notification still goes out.
+
+    **The cutover gate (#376, F3).** With ``WATCHER_NOTIFY_CUTOVER_AT`` set, an
+    event at or after T is Archiver's: one ``notification suppressed: cutover``
+    line, then return — no template query, no client, no audit. Unset, it is
+    never consulted. The test-send routes call ``dispatch_via_notifier``
+    directly and are not gated (#379 deletes them).
     """
+    cutover = notify_cutover_at(os.environ)
+    if cutover is not None and event.occurred_at >= cutover:
+        logger.info(
+            "notification suppressed: cutover",
+            extra={
+                "event_type": event.event_type.value,
+                "watched_item_id": event.watched_item_id,
+                "occurred_at": format_cutover(event.occurred_at),
+                "cutover_at": format_cutover(cutover),
+            },
+        )
+        return
+
     # #191: the event identifies a WatchedItem (the single monitored entity).
     watched_item_id = ULID.from_str(event.watched_item_id)
     event_value = event.event_type.value

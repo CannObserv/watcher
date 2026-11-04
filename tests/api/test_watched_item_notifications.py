@@ -467,6 +467,29 @@ class TestTestItemNotification:
         assert data["success"] is True
         assert "reason" in data
 
+    async def test_test_is_not_gated_by_the_cutover(self, client, db_session, monkeypatch):
+        """#376: a test send bypasses ``dispatch_event_notifications``, so T
+        long past does not suppress it. #379 deletes this route."""
+        from unittest.mock import AsyncMock, patch
+
+        monkeypatch.setenv("WATCHER_NOTIFY_CUTOVER_AT", "2020-01-01T00:00:00Z")
+        watch_id = await _make_watched_item_id(db_session)
+        template_id = await self._make_template(client, watch_id)
+        with (
+            patch(
+                "src.api.routes.watched_item_notifications.dispatch_via_notifier",
+                new_callable=AsyncMock,
+                return_value=self._mock_result(True, "sent"),
+            ) as dispatch,
+            self._patch_notifier_client(),
+        ):
+            resp = await client.post(
+                f"/api/v1/watched-items/{watch_id}/notifications/{template_id}/test"
+            )
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+        dispatch.assert_called_once()
+
     async def test_test_returns_success_false_on_dispatch_failure(self, client, db_session):
         from unittest.mock import AsyncMock, patch
 

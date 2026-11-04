@@ -174,6 +174,15 @@ republishes watch-status (#264), carries `renotify: true` plus
 `previously_notified_at`, and says "Still failing". Why not `schedule_config`,
 and the backfill: `src/core/notifications/renotify.py`, migration `36358e2f5ad4`.
 
+**The cutover gate (#376, F3).** With `WATCHER_NOTIFY_CUTOVER_AT` set, `dispatch_event_notifications` returns at its first line for an event whose
+`occurred_at` is at or after T: one `notification suppressed: cutover` log line
+(event type, item id, both instants; never a URL), no template query, no client,
+no `notification.dispatched` audit. Archiver sends those (`≥ T`, archiver#369 D3)
+from the same instant the `info.watch-events` fact carries. A #71 reminder after
+T is suppressed like any event; its `last_error_notified_at` stamp still lands.
+Unset, nothing changes. The three test-send routes call `dispatch_via_notifier`
+directly and are not gated. Runbook: [COMMANDS.md](COMMANDS.md) → *F3 runbook*.
+
 Template mutations (create/update/delete/duplicate + their audit events) go
 through one service — `src/core/notifications/templates.py` (#228) — used by
 every surface below; routes stay transport adapters and own the commit.

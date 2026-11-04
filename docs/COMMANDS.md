@@ -327,6 +327,72 @@ WATCHER_ALLOW_PRODUCTION_DB=1 .venv/bin/python -m src.ops.suspend_domain HOST --
 WATCHER_ALLOW_PRODUCTION_DB=1 .venv/bin/python -m src.ops.inflight --env-file /etc/watcher/.env
 ```
 
+## F3 runbook: the notification cutover (#376)
+
+The flip that hands automatic notifications to Archiver. Watcher dispatches an
+event only when its `occurred_at` is before T (`WATCHER_NOTIFY_CUTOVER_AT`,
+[ENVIRONMENT.md](ENVIRONMENT.md)); Archiver sends those at or after it
+(`ARCHIVER_NOTIFY_CUTOVER_AT`). **One T, byte for byte, on both services, both
+restarted before it arrives:** a gap drops notifications, an overlap double-sends.
+The gate (part 1) ships inert; only setting T flips. Each production read and each
+restart below takes the operator's OK, and the window is attended end to end.
+
+1. **Parity (archiver#369 D6).** Export Watcher's dispatch audits from
+   **2026-10-22**, not the shadow window's start (2026-11-03T04:43:31Z): Archiver's
+   group was created at `0` and replayed earlier facts. The audit holds no
+   `event_id`, so the join is item + type + `created_at` within a small tolerance.
+   No URLs in the rows; the operator decides where they go (both repos are public).
+   Archiver's coordinator runs the join and reports parity on #376.
+
+   ```bash
+   sudo -u postgres psql -d watcher -v ON_ERROR_STOP=1 --csv <<'SQL'
+   BEGIN READ ONLY;
+   SELECT w.archiver_info_item_id, a.payload->>'watch_event_type' AS event_type,
+          a.created_at, r->>'source_id' AS template_id, (r->>'success')::boolean AS success
+   FROM audit_log a
+   LEFT JOIN watched_items w ON w.id = a.payload->>'watched_item_id'
+   CROSS JOIN LATERAL jsonb_array_elements(a.payload->'results') r
+   WHERE a.event_type = 'notification.dispatched' AND a.created_at >= '2026-10-22T00:00:00Z'
+   ORDER BY a.created_at;
+   ROLLBACK;
+   SQL
+   ```
+
+2. **#373's re-export,** diffed against the baseline (sha256 `10dcf6ef…7c52e`): only
+   `exported_at` should move. Command and steps under *Backup, restore and job
+   history* above.
+3. **Choose T** 30–60 minutes ahead, as `YYYY-MM-DDTHH:MM:SSZ`; anything outside
+   Archiver's grammar refuses startup on both. Post it on #368 before setting it.
+   - Watcher: add `WATCHER_NOTIFY_CUTOVER_AT=<T>` to `/etc/watcher/.env`, then
+     `sudo systemctl restart watcher`.
+   - Archiver: its unit's `Environment=` line, restarted in archiver's thread.
+   - Read back, before T: `/health` on each, and both journals' startup line.
+     Watcher's must read `notify cutover: <T as YYYY-MM-DDTHH:MM:SS.ffffffZ> (events
+     at or after it are Archiver's)` and match Archiver's `notify cutover:` instant:
+
+   ```bash
+   sudo journalctl -u watcher -b | grep 'notify cutover:'
+   ```
+
+4. **After T, the drain check.** No Watcher test sends from here on: the test-send
+   routes are not gated, and CannObserv/notifier#118 revokes Watcher's keys only
+   once the production key is unused since this drain.
+   - No dispatch audit at or after T (`0`):
+
+     ```bash
+     sudo -u postgres psql -d watcher -tA -c "BEGIN READ ONLY; SELECT count(*) FROM audit_log WHERE event_type = 'notification.dispatched' AND created_at >= '<T>'; ROLLBACK;"
+     ```
+
+   - Suppressions, if any event arrived (`--since` is local time unless told):
+     `sudo journalctl -u watcher --since '<T as YYYY-MM-DD HH:MM:SS> UTC' | grep 'notification suppressed: cutover'`.
+   - Archiver's read-back shows its first live dispatch for a fact at or after T.
+   - **Drained:** `src.ops.inflight` prints `0` (no job that began before T is still
+     `doing`), then 15 minutes with the audit count still `0`.
+5. **Then:** shred the #373 baseline and its re-runs
+   (`sudo shred -u /root/archiver-export/watcher-export-*.json`), record the flip and
+   T on #368, and start part 2. That part removes the dispatch path and this gate together;
+   the operator removes `WATCHER_NOTIFY_CUTOVER_AT` from `/etc/watcher/.env`.
+
 ## Tailwind CSS
 
 ```bash

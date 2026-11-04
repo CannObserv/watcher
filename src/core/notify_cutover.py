@@ -24,7 +24,7 @@ Temporary: part 2 deletes this module with Watcher's dispatch path.
 
 import re
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import UTC, datetime
 
 from src.core.logging import get_logger
 
@@ -66,8 +66,8 @@ def notify_cutover_at(environ: Mapping[str, str]) -> datetime | None:
 
 
 def format_cutover(cutover: datetime) -> str:
-    """T as ``YYYY-MM-DDTHH:MM:SS.ffffffZ`` — always six digits, as Archiver logs it."""
-    return cutover.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    """An aware instant as ``YYYY-MM-DDTHH:MM:SS.ffffffZ`` in UTC, as Archiver logs T."""
+    return cutover.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def assert_notify_cutover_at(environ: Mapping[str, str]) -> None:

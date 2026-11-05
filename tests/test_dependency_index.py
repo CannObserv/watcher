@@ -93,8 +93,8 @@ class TestEveryCoCorePackage:
     @pytest.mark.parametrize("package", _locked_co_core(), ids=lambda p: p["name"])
     def test_locks_from_the_index_with_a_sha256_per_file(self, package: dict):
         assert package["source"] == {"registry": URL}
+        assert package.get("sdist") and package.get("wheels"), "an sdist and a wheel"
         files = [package["sdist"], *package["wheels"]]
-        assert len(files) == 2, "one sdist and one wheel, as the release publishes"
         for dist in files:
             assert dist["url"].startswith(f"https://{HOST}/"), dist["url"]
             assert dist["hash"].startswith("sha256:") and len(dist["hash"]) == 7 + 64

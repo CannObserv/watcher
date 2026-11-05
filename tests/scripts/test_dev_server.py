@@ -484,8 +484,8 @@ def test_schema_apply_runs_after_the_migration() -> None:
     assert migrate < apply < text.index("exec uv run uvicorn")
 
 
-#: The unit's ExecStartPre form (deploy/watcher.service), run from REPO_ROOT.
-CHECK_ARGV = "run --no-project python scripts/check_wheelhouse.py"
+#: The unit's ExecStartPre form (deploy/watcher.service), run from REPO_ROOT (#358).
+CHECK_ARGV = "sync --locked --offline --check"
 
 
 def run_live(
@@ -495,8 +495,8 @@ def run_live(
 
     The dry run exits before the ``cd`` and every ``uv`` call, so only the
     executed path can show the check runs first (#401). Each stub appends its
-    argv to a log and exits 0; ``uv`` given the check prints the check's line
-    and exits *check_exit*, the way ``scripts/check_wheelhouse.py`` does.
+    argv to a log and exits 0; ``uv`` given the check prints uv's own last line
+    and exits *check_exit*, the way ``uv sync --check`` does (#358, measured).
     """
     stubs = tmp_path / "bin"
     stubs.mkdir()
@@ -504,9 +504,9 @@ def run_live(
     (stubs / "uv").write_text(
         "#!/bin/bash\n"
         f'echo "uv $*" >> {log}\n'
-        'if [[ "$*" == *check_wheelhouse.py* ]]; then\n'
-        f"  if [[ {check_exit} == 0 ]]; then echo 'wheelhouse pins hold: stub'; exit 0; fi\n"
-        "  echo 'error: wheelhouse check failed: stub.whl is missing' >&2\n"
+        'if [[ "$*" == *--check* ]]; then\n'
+        f"  if [[ {check_exit} == 0 ]]; then echo 'Would make no changes' >&2; exit 0; fi\n"
+        "  echo 'error: The environment is outdated; run `uv sync` to update the environment' >&2\n"
         f"  exit {check_exit}\n"
         "fi\n"
     )
@@ -528,16 +528,15 @@ def run_live(
 
 
 def test_check_argv_is_the_units_command() -> None:
-    """#401: one form of the check is in use. The unit runs it by absolute path;
-    the script runs it from REPO_ROOT, so only the path prefix may differ."""
+    """#401, #358: one form of the check is in use. The unit runs uv by absolute
+    path from its WorkingDirectory; the script runs it from REPO_ROOT."""
     unit = (SCRIPT.parents[1] / "deploy" / "watcher.service").read_text()
     pre = [line for line in unit.splitlines() if line.startswith("ExecStartPre=")]
-    want = CHECK_ARGV.replace("scripts/", "/home/exedev/watcher/scripts/")
-    assert f"ExecStartPre=/usr/local/bin/uv {want}" in pre
+    assert f"ExecStartPre=/usr/local/bin/uv {CHECK_ARGV}" in pre
 
 
-def test_dry_run_reports_the_wheelhouse_check() -> None:
-    """#401: the dry run says the check will run, with the rest of the resolution.
+def test_dry_run_reports_the_lock_check() -> None:
+    """#401, #358: the dry run says the check will run, with the rest of the resolution.
 
     It runs on every launch, migration skipped or not: the final ``uv run
     uvicorn`` syncs the venv too.
@@ -545,10 +544,10 @@ def test_dry_run_reports_the_wheelhouse_check() -> None:
     for extra in ({}, {"WATCHER_DEV_SKIP_MIGRATE": "1"}):
         result = run({"TEST_DATABASE_URL": TEST_URL, **extra})
         assert result.returncode == 0, result.stderr
-        assert "WHEELHOUSE_CHECK=run" in result.stdout.splitlines()
+        assert "LOCK_CHECK=run" in result.stdout.splitlines()
 
 
-def test_wheelhouse_check_runs_before_any_other_command(tmp_path: Path) -> None:
+def test_lock_check_runs_before_any_other_command(tmp_path: Path) -> None:
     """#401: every later ``uv run`` syncs the venv, which from the deploy
     checkout is the service's own, so the unit's check goes first: before the
     reset too, which a refusal would otherwise leave half done."""
@@ -557,17 +556,17 @@ def test_wheelhouse_check_runs_before_any_other_command(tmp_path: Path) -> None:
     assert calls[0] == f"uv {CHECK_ARGV}"
     assert [c.split()[0] for c in calls[1:]] == ["psql", "uv", "uv", "uv"]
     assert calls[-1].startswith("uv run uvicorn ")
-    assert result.stdout.index("wheelhouse pins hold:") < result.stdout.index("alembic")
+    assert "Would make no changes" in result.stderr
 
 
-def test_a_failing_wheelhouse_check_stops_the_launch(tmp_path: Path) -> None:
+def test_a_failing_lock_check_stops_the_launch(tmp_path: Path) -> None:
     """#401: a check that fails stops the script before anything else runs,
-    and the refusal names the fix (AGENTS.md's wheelhouse sync)."""
+    and the refusal names the fix: the sync through the token wrapper (#358)."""
     result, calls = run_live(tmp_path, 1, {"TEST_DATABASE_URL": TEST_URL})
     assert result.returncode != 0
     assert calls == [f"uv {CHECK_ARGV}"]
-    assert "error: wheelhouse check failed: stub.whl is missing" in result.stderr
-    assert "scripts/sync_wheelhouse.py" in result.stderr
+    assert "error: The environment is outdated" in result.stderr
+    assert "bash scripts/co-pypi.sh uv sync --locked" in result.stderr
     assert result.stdout == ""
 
 

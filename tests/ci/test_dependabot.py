@@ -6,11 +6,10 @@ missing schedule stops producing PRs without erroring anywhere a person looks,
 and a quiet bot reads like "no updates available". Notifier's pattern
 (notifier#33), cut to the half this repo can run today:
 
-* **``github-actions`` only.** The ``uv`` ecosystem waits on two things #283
-  names: co-core resolves only from the private wheelhouse, which
-  Dependabot's updater cannot sync, and its exact pins move when Processor
-  coordinates a contract change, not on a bot's schedule. A ``uv`` block here is a
-  decision for its own issue, so this file fails it.
+* **``github-actions`` only, until #358 part 2.** Part 1 put co-core on the
+  co-pypi index, which Dependabot's updater can read; its exact pins still move
+  when Processor coordinates a contract change, not on a bot's schedule. Part 2
+  adds the ``uv`` block and flips the test that fails one today.
 * **The open-PR limit outlasts a full batch.** Past the limit (default 5)
   Dependabot opens nothing and says so nowhere (notifier#103). One PR per
   action, so the bound is derived from the workflows rather than transcribed.
@@ -120,9 +119,8 @@ def test_config_is_version_2() -> None:
 def test_only_github_actions_is_configured() -> None:
     ecosystems = [u.get("package-ecosystem") for u in _updates()]
     assert ecosystems == ["github-actions"], (
-        f"ecosystems {ecosystems}: #283 ships github-actions alone. A `uv` block "
-        "needs the private wheelhouse reachable from Dependabot's updater and a "
-        "story for co-core's Processor-coordinated pins — its own issue, not this file's"
+        f"ecosystems {ecosystems}: github-actions alone until #358 part 2, which "
+        "adds the `uv` block with co-core's two names ignored and flips this test"
     )
 
 

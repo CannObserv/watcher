@@ -102,7 +102,7 @@ class TestCiJobs:
         assert _marker_expression(argv) == "integration"
 
     def test_the_integration_job_sets_up_like_the_test_job(self, jobs: dict) -> None:
-        """Same checkout, uv, Python, WIF auth, wheelhouse sync and ``uv sync``."""
+        """Same checkout, uv, Python, WIF auth and ``uv sync`` with the index token."""
         test_at, _ = _pytest_step(jobs["test"])
         integration_at, _ = _pytest_step(jobs["integration"])
         assert jobs["integration"]["steps"][:integration_at] == jobs["test"]["steps"][:test_at]

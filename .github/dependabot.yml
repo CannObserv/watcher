@@ -4,11 +4,12 @@
 # Each PR is gated by ci.yml like any other; a Dependabot run reads its own
 # credential context, so the WIF jobs' auth step is the first thing to read on
 # a red one. How one lands — fast-forwarded onto main locally, like every other
-# change — is docs/COMMANDS.md -> "Dependabot PRs".
+# change — is docs/DEPENDENCIES.md -> "Dependabot PRs".
 #
-# github-actions only. `uv` waits on #283's blocker 2 — co-core resolves only
-# from the private wheelhouse, which Dependabot's updater cannot sync — and
-# co-core's exact pins move when Processor coordinates a contract change.
+# github-actions only, until #358 part 2. Part 1 moved co-core to the co-pypi
+# index, which Dependabot's updater reads over OIDC; part 2 adds the `uv` block
+# and ignores both co-core names, whose exact pins move when Processor
+# coordinates a contract change.
 # Guarded by tests/ci/test_dependabot.py: a mistyped config stops producing
 # PRs without erroring anywhere a person looks.
 version: 2

@@ -24,8 +24,9 @@ jobs:
     name: lint
     runs-on: ubuntu-24.04
     # WIF: mint an OIDC token for google-github-actions/auth to impersonate the
-    # read-only co-pypi-reader SA and pull the cannobserv wheelhouse (#220).
-    # Job-scoped so no other job gains cloud access it doesn't need.
+    # read-only co-pypi-reader SA, whose access token reads the co-pypi index
+    # co-core resolves from (#358). Job-scoped so no other job gains cloud
+    # access it doesn't need.
     permissions:
       contents: read
       id-token: write
@@ -46,22 +47,25 @@ jobs:
       - name: Install Python
         run: uv python install 3.12
 
-      # co-core / co-core-aio resolve from a wheelhouse mirrored from the private
-      # GCS index (#220). Authenticate keyless via Workload Identity Federation —
-      # the read-scoped `github-ci` provider impersonating the objectViewer-only
-      # co-pypi-reader SA — then sync before `uv sync`.
+      # co-core / co-core-aio resolve from the co-pypi Artifact Registry index
+      # (#358). Authenticate keyless via Workload Identity Federation — the
+      # read-scoped `github-ci` provider impersonating the co-pypi-reader SA
+      # (artifactregistry.reader) — and mint its access token for `uv sync`.
       - name: Authenticate to Google Cloud (WIF, read-only)
+        id: auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: co-pypi-reader@co-gcs.iam.gserviceaccount.com
-
-      - name: Sync cannobserv wheelhouse
-        working-directory: watcher
-        run: uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_wheelhouse.py
+          token_format: access_token
 
       - name: uv sync
         working-directory: watcher
+        # The co-pypi pair, on this step alone (#358): later `uv run`s find the
+        # venv synced and download nothing. A masked output; never echo it.
+        env:
+          UV_INDEX_CO_PYPI_USERNAME: oauth2accesstoken
+          UV_INDEX_CO_PYPI_PASSWORD: ${{ steps.auth.outputs.access_token }}
         run: uv sync --group dev
 
       - name: ruff check
@@ -74,7 +78,7 @@ jobs:
 
   # output.css gate (#352): nothing else runs scripts/check-css.sh once a clone
   # skips `pre-commit install`. Node and the pinned CLI only — no OIDC token,
-  # no wheelhouse, no uv. Keep the pin equal to scripts/build-css.sh's.
+  # no index token, no uv. Keep the pin equal to scripts/build-css.sh's.
   css:
     name: css
     runs-on: ubuntu-24.04
@@ -122,17 +126,20 @@ jobs:
         run: uv python install 3.12
 
       - name: Authenticate to Google Cloud (WIF, read-only)
+        id: auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: co-pypi-reader@co-gcs.iam.gserviceaccount.com
-
-      - name: Sync cannobserv wheelhouse (watcher)
-        working-directory: watcher
-        run: uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_wheelhouse.py
+          token_format: access_token
 
       - name: uv sync
         working-directory: watcher
+        # The co-pypi pair, on this step alone (#358): later `uv run`s find the
+        # venv synced and download nothing. A masked output; never echo it.
+        env:
+          UV_INDEX_CO_PYPI_USERNAME: oauth2accesstoken
+          UV_INDEX_CO_PYPI_PASSWORD: ${{ steps.auth.outputs.access_token }}
         run: uv sync --group dev
 
       # This job builds no schema — it has no database (see above). The
@@ -191,17 +198,20 @@ jobs:
         run: uv python install 3.12
 
       - name: Authenticate to Google Cloud (WIF, read-only)
+        id: auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: co-pypi-reader@co-gcs.iam.gserviceaccount.com
-
-      - name: Sync cannobserv wheelhouse (watcher)
-        working-directory: watcher
-        run: uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_wheelhouse.py
+          token_format: access_token
 
       - name: uv sync
         working-directory: watcher
+        # The co-pypi pair, on this step alone (#358): later `uv run`s find the
+        # venv synced and download nothing. A masked output; never echo it.
+        env:
+          UV_INDEX_CO_PYPI_USERNAME: oauth2accesstoken
+          UV_INDEX_CO_PYPI_PASSWORD: ${{ steps.auth.outputs.access_token }}
         run: uv sync --group dev
 
       - name: pytest (integration)
@@ -266,17 +276,20 @@ jobs:
         run: uv python install 3.12
 
       - name: Authenticate to Google Cloud (WIF, read-only)
+        id: auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: co-pypi-reader@co-gcs.iam.gserviceaccount.com
-
-      - name: Sync cannobserv wheelhouse (watcher)
-        working-directory: watcher
-        run: uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_wheelhouse.py
+          token_format: access_token
 
       - name: uv sync
         working-directory: watcher
+        # The co-pypi pair, on this step alone (#358): later `uv run`s find the
+        # venv synced and download nothing. A masked output; never echo it.
+        env:
+          UV_INDEX_CO_PYPI_USERNAME: oauth2accesstoken
+          UV_INDEX_CO_PYPI_PASSWORD: ${{ steps.auth.outputs.access_token }}
         run: uv sync --group dev
 
       # Independent migration-chain smoke-check (#234): apply the full chain

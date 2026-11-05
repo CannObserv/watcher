@@ -27,7 +27,7 @@ processor's, now: bucket from the authority, key from the path **verbatim** — 
 flat (``blobs/<sha256>.bin``), and the ``file://`` shard rule must never be
 carried over. Identity comes from ``GCS_BLOB_CREDENTIALS`` (singular BLOB), a
 key file for the ``co-gcs-blob-reader`` SA — deliberately NOT
-``GOOGLE_APPLICATION_CREDENTIALS``, which names the wheelhouse identity; the
+``GOOGLE_APPLICATION_CREDENTIALS``, which names the co-pypi index identity; the
 two jobs must not share a principal. The client is built once per process (the
 SDK is blocking; a download inside ``asyncio.to_thread`` is beyond cancellation,
 so it lands in the shutdown budget). A 404 is the bucket lifecycle rule having
@@ -99,7 +99,7 @@ def _gcs_client() -> storage.Client:
     """The process's one GCS client, built lazily from ``GCS_BLOB_CREDENTIALS``.
 
     Explicitly constructed, never ADC: this process's
-    ``GOOGLE_APPLICATION_CREDENTIALS`` is the wheelhouse identity, and handing
+    ``GOOGLE_APPLICATION_CREDENTIALS`` is the co-pypi index identity, and handing
     the blob path a package-index principal (or vice versa) is exactly the
     conflation the separate variable exists to prevent.
 

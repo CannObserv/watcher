@@ -23,12 +23,12 @@
     {
       "name": "deployment-doc",
       "path": "./docs/DEPLOYMENT.md",
-      "description": "Production deployment guide. Systemd unit (watcher.service), port allocation (8000 live, 8001 dev), exe.dev proxy, restart procedure, install runbook, the disk-cleanup timer, and Archiver sync. The cannobserv wheelhouse and the notifier SDK's git-tag source moved to docs/DEPENDENCIES.md. Env files and variables moved to docs/ENVIRONMENT.md (#278). Host memory posture split out to docs/HOST-MEMORY.md (#309)."
+      "description": "Production deployment guide. Systemd unit (watcher.service), port allocation (8000 live, 8001 dev), exe.dev proxy, restart procedure, install runbook, the disk-cleanup timer, and Archiver sync. The co-pypi index (formerly the cannobserv wheelhouse) and the notifier SDK's git-tag source live in docs/DEPENDENCIES.md. Env files and variables moved to docs/ENVIRONMENT.md (#278). Host memory posture split out to docs/HOST-MEMORY.md (#309)."
     },
     {
       "name": "dependencies-doc",
       "path": "./docs/DEPENDENCIES.md",
-      "description": "Dependency sources outside PyPI. The cannobserv wheelhouse (#220): co-core and co-core-aio resolve from ./.wheelhouse, mirrored from the private GCS index by scripts/sync_wheelhouse.py with the co-pypi-reader identity (ADC on the VM, WIF in CI), their exact pins in lockstep with CannObserv/processor and the wheel-to-wheel diff history of each bump. The notifier-client SDK (#284): a pinned HTTPS git-tag source in [tool.uv.sources], how to upgrade it, and the guards in tests/test_dependency_sources.py."
+      "description": "Dependency sources outside PyPI. The co-pypi index (#358): co-core and co-core-aio resolve from the private Artifact Registry index with a per-command token (scripts/co-pypi.sh on the host, WIF in CI), the lock's sha256 per file, the unit's offline start check, their exact pins in lockstep with CannObserv/processor and the wheel-to-wheel diff history of each bump. The Dependabot PR runbook. The notifier-client SDK (#284): a pinned HTTPS git-tag source in [tool.uv.sources], how to upgrade it, and the guards in tests/test_dependency_sources.py."
     },
     {
       "name": "host-memory-doc",

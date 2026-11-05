@@ -50,15 +50,10 @@ gunicorn.ctl
 # tests/test_brainstorm_session_is_not_committable.py.
 .superpowers/
 
-# cannobserv package index mirror (#220) — populated by scripts/sync_wheelhouse.py.
-# Track an empty .gitkeep so the `[tool.uv] find-links` dir always exists at
-# checkout: every `uv` invocation reads that config before the sync can create
-# the dir, so a fresh clone/runner/deploy without it fails to resolve.
-# NB: `.wheelhouse/*`, not `.wheelhouse/` — git cannot re-include a file whose
-# parent directory is excluded, so a directory-level ignore makes the negation
-# below a no-op and leaves .gitkeep untracked (#239).
-.wheelhouse/*
-!.wheelhouse/.gitkeep
+# The retired cannobserv wheelhouse (#358). Nothing reads it; the deploy
+# checkout keeps its files until part 1 has been through a restart (the
+# rollback's refill). Drop this line when they go.
+.wheelhouse/
 
 # Tailwind
 src/dashboard/static/css/output.css

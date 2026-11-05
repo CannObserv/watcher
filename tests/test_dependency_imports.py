@@ -228,7 +228,7 @@ class TestImportsAreDeclared:
         [
             ("src.api.main", False),
             ("tests.conftest", False),
-            ("scripts.sync_wheelhouse", False),
+            ("scripts.co_pypi_token", False),
             ("json.decoder", False),
             ("alembic.op", True),
             ("pydantic", True),

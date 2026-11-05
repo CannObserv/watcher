@@ -241,7 +241,7 @@ class TestGcsArm:
 
     def test_unset_credential_is_permanent(self, monkeypatch):
         # The identity is GCS_BLOB_CREDENTIALS (singular BLOB) — deliberately
-        # NOT GOOGLE_APPLICATION_CREDENTIALS, which is the wheelhouse SA.
+        # NOT GOOGLE_APPLICATION_CREDENTIALS, which is the co-pypi index SA.
         # Unset, no gs:// blob is readable by this process until an operator
         # acts: permanent, zero re-issues.
         monkeypatch.delenv(GCS_BLOB_CREDENTIALS_ENV, raising=False)

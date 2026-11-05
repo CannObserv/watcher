@@ -12,7 +12,7 @@ below is one a later edit could quietly undo:
 * **Push as well as PR, path-filtered.** Watcher lands by a local merge and a
   push; only Dependabot opens PRs, and those move action pins. The filter is the
   files that change what the audit reads, plus the audit's own two.
-* **No secret, no OIDC token, no wheelhouse.** ``uv audit --frozen`` reads the
+* **No secret, no OIDC token, no index token.** ``uv audit --frozen`` reads the
   lock alone (measured from a bare ``git archive``, #397), so the job needs none
   of ``ci.yml``'s WIF steps, and ``contents: read`` is all it holds.
 * **No cache.** ``--frozen`` downloads no package.
@@ -105,7 +105,7 @@ def test_holds_no_secret_and_no_oidc_token(job: dict) -> None:
     assert "permissions" not in job, "the job widens nothing"
     assert "secrets." not in text
     assert "id-token" not in text
-    assert "sync_wheelhouse" not in text, "--frozen reads the lock without the wheelhouse"
+    assert "UV_INDEX_CO_PYPI" not in text, "--frozen reads the lock without the index (#358)"
     assert not _steps_using(job, "google-github-actions/auth")
 
 

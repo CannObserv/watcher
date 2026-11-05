@@ -191,9 +191,9 @@ def test_every_cli_install_hint_carries_the_one_pin():
 
 
 def test_ci_css_job_holds_no_cloud_credentials():
-    """The CSS job needs Node and the CLI only: no OIDC token, no wheelhouse."""
+    """The CSS job needs Node and the CLI only: no OIDC token, no index token."""
     job = _css_ci_job()
     assert job.get("permissions") == {"contents": "read"}
     text = yaml.safe_dump(job)
     assert "google-github-actions" not in text
-    assert "sync_wheelhouse" not in text
+    assert "UV_INDEX_CO_PYPI" not in text

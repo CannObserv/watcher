@@ -112,7 +112,7 @@ def test_every_exit_is_zero(tmp_path, uv_exit):
 
 def test_audits_runtime_then_dev_without_relocking(tmp_path):
     """``--frozen`` reads ``uv.lock`` as committed. A relock would need the
-    private wheelhouse, which the job has no credential to fetch. ``uv audit``
+    co-pypi index's token, which the job doesn't hold (#358). ``uv audit``
     is a preview command, so the flag goes first and a uv that knows it runs
     once per group."""
     _, calls, _ = _run(tmp_path, 0)

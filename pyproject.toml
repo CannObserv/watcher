@@ -26,8 +26,8 @@ dependencies = [
     # bus contract and the stdlib-only media-type rule. Exact, because watcher
     # resolves the essence Processor dispatches on and Processor never re-resolves
     # it: bumped when CannObserv/processor coordinates a contract change, not on a
-    # schedule (#366). The locked files' digests move with it:
-    # [tool.watcher.wheelhouse-sha256] (#393).
+    # schedule (#366). Both resolve from the co-pypi index alone ([tool.uv.sources],
+    # #358), and uv.lock holds each file's sha256.
     "co-core==0.37.0",
     "co-core-aio[bus]==0.37.0",
     # Imported directly by the bus layer; docs/BUS-CONNECTION-POLICY.md was
@@ -126,19 +126,28 @@ packages = ["src"]
 "co_core_aio-0.37.0.tar.gz" = "f19a9b874d96bd871480f5b9dac92762503e5e692fdc94dfb7edc62cd17b2521"
 
 [tool.uv]
-# cannobserv workspace packages (co-core, co-core-aio) resolve from the local
-# wheelhouse mirrored from the private GCS index gs://co-gcs-pypi (#220).
-# Populate it before any `uv` command: scripts/sync_wheelhouse.py. uv.lock pins the
-# exact resolved version to a named wheelhouse artifact; find-links locks by
-# filename, not hash: the content check is [tool.watcher.wheelhouse-sha256] (#393).
-find-links = ["./.wheelhouse"]
 # certifi is transitive (httpx, requests) and nothing imports it, so its floor is
 # a constraint, not a dependency: 2026.10.19 drops emSign ECC Root CA - G3, the
 # root the leaked eMudhra intermediates chain to (#391, GHSA-6q48-6c7w-9gw2).
 # Gate: tests/test_dependency_certifi_floor.py.
 constraint-dependencies = ["certifi>=2026.10.19"]
 
+# The cannobserv packages' index (#358; cannobserv RELEASING.md → Path C). The URL
+# is the org registry's byte for byte, trailing slash included, so Dependabot
+# matches it. Explicit: it serves only the names [tool.uv.sources] pins to it,
+# so co-core never comes from PyPI and nothing else comes from here. Auth is a
+# per-command token: `bash scripts/co-pypi.sh uv lock` (docs/DEPENDENCIES.md).
+# Guard: tests/test_dependency_index.py.
+[[tool.uv.index]]
+name = "co-pypi"
+url = "https://us-west1-python.pkg.dev/co-gcs/co-pypi/simple/"
+explicit = true
+
 [tool.uv.sources]
+# Every cannobserv package is declared directly and pinned here: uv binds a
+# source to a direct dependency only, so a transitive one would go to PyPI.
+co-core = { index = "co-pypi" }
+co-core-aio = { index = "co-pypi" }
 # Public repo over HTTPS, pinned by release tag (#284). The tag is the pin — uv
 # enforces no version floor against a git source. Adopt a release: change the
 # tag, `uv sync`. Procedure: CannObserv/notifier docs/RELEASING.md.

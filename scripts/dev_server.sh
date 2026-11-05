@@ -306,21 +306,21 @@ if [[ "${WATCHER_DEV_SERVER_DRY_RUN:-}" == "1" ]]; then
   echo "MIGRATE=$MIGRATE_REPORT"
   echo "RESET=$RESET_REPORT"
   echo "PROCRASTINATE_SCHEMA=$SCHEMA_REPORT"
-  echo "WHEELHOUSE_CHECK=run"
+  echo "LOCK_CHECK=run"
   exit 0
 fi
 
 cd "$REPO_ROOT"
 
-# Hold the wheelhouse to its pins before anything else (#401). Every `uv run`
+# Hold the venv to uv.lock before anything else (#401, #358). Every `uv run`
 # below syncs the project venv first, and from the deploy checkout that venv is
-# watcher.service's own: an unchecked sync could install an unverified co-core
-# into production. The unit's ExecStartPre command, so one form is in use
-# (#393); offline and stdlib-only. First, so a refusal leaves no half-done reset.
-# No bypass knob: the unit has none either.
-if ! uv run --no-project python scripts/check_wheelhouse.py; then
-  echo "dev_server: refusing to start — the wheelhouse misses its pins (above)." >&2
-  echo "  Populate it: uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_wheelhouse.py" >&2
+# watcher.service's own; a sync that has to download co-core fails without the
+# co-pypi token anyway. The unit's ExecStartPre command, so one form is in use;
+# offline, and it changes nothing. First, so a refusal leaves no half-done
+# reset. No bypass knob: the unit has none either.
+if ! uv sync --locked --offline --check; then
+  echo "dev_server: refusing to start — the venv does not match uv.lock (above)." >&2
+  echo "  Sync it: source scripts/load-env.sh; bash scripts/co-pypi.sh uv sync --locked" >&2
   exit 1
 fi
 

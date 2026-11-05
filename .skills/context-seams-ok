@@ -175,6 +175,8 @@ docs/CONTENT-REVISIONS.md :: A renewed blob reference is re-announced (#293)
 # above: COMMANDS.md's is this branch's own, the other three predate it and were
 # unjudged.
 docs/COMMANDS.md :: Dependabot PRs (#283)
+# #358 moved the runbook verbatim to DEPENDENCIES.md; COMMANDS.md keeps the heading as its pointer.
+docs/DEPENDENCIES.md :: Dependabot PRs (#283)
 docs/CONTENT-PIPELINE.md :: Shadow extraction on `content.process` (#325)
 docs/CONTENT-PIPELINE.md :: Processor-decided extraction (#326)
 docs/WATCHED-ITEMS.md :: Change diff (#222)

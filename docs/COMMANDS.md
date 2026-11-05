@@ -115,12 +115,12 @@ lacks a `_test`/`_dev` suffix. The same rule is enforced in-app by
 `src/core/db_safety.py`; only `deploy/watcher.service` opts into prod via
 `WATCHER_ALLOW_PRODUCTION_DB=1` (in the unit, never an env file).
 
-Before its first `uv run` the script runs the unit's wheelhouse check (#401,
-[DEPENDENCIES.md](DEPENDENCIES.md) → *Content check*) and refuses to start on
-a miss, naming the sync that fixes it. From the deploy checkout every `uv run`
-syncs `watcher.service`'s own `.venv`, so an unchecked launch could install an
-unverified co-core into production. No bypass knob, as in the unit. A fresh
-worktree has no wheel files, so it fails here first: run the sync.
+Before its first `uv run` the script runs the unit's start check, `uv sync
+--locked --offline --check` (#401, #358; [DEPENDENCIES.md](DEPENDENCIES.md) →
+*The start check*), and refuses to start on a miss, naming the sync that fixes
+it. From the deploy checkout every `uv run` syncs `watcher.service`'s own
+`.venv`. No bypass knob, as in the unit. A fresh worktree has no venv, so it
+fails here first: `bash scripts/co-pypi.sh uv sync`.
 
 No migration creates procrastinate's tables, so the script applies them too
 (#341): always after the `TEST_DATABASE_URL` branch's public-schema reset, and
@@ -283,8 +283,8 @@ uv run procrastinate --app=src.workers.app worker
 ## Backup, restore and job history (#296)
 
 Operator entry points in `src/ops/`, each with its runbook. A `uv run` below syncs
-the service's `.venv` without the wheelhouse check (#401,
-[DEPENDENCIES.md](DEPENDENCIES.md) → *Accepted limit*); `.venv/bin/python` doesn't sync:
+the service's `.venv` without the start check (#401,
+[DEPENDENCIES.md](DEPENDENCIES.md) → *Accepted limits*); `.venv/bin/python` doesn't sync:
 
 ```bash
 # The backup's read-only database role — once per cluster, before its first run
@@ -437,9 +437,9 @@ an
 upgrade head` from an empty `postgres:16` then `alembic check` for drift). No
 job checks out a sibling repo — #254 removed the `archiver-client` path dep
 that `lint` and `migrations` needed, and #311 the `test` job's archiver alembic
-run. The four Python jobs authenticate to GCS **keyless via WIF**
-(`vars.GCP_WIF_PROVIDER` → `co-pypi-reader` SA) and sync the wheelhouse before
-`uv sync`; `notifier-client` installs as written, from
+run. The four Python jobs authenticate **keyless via WIF**
+(`vars.GCP_WIF_PROVIDER` → `co-pypi-reader` SA), whose access token `uv sync`
+alone takes for the co-pypi index (#358); `notifier-client` installs as written, from
 its public HTTPS tag source — no URL rewrite (#284). The migrations job needs
 nothing from archiver either — the #234 squash collapsed the pre-existing
 chain into a self-contained genesis baseline (`2addddea0b03`) that references
@@ -475,50 +475,9 @@ generated, and it is outside the gate.
 job, `uv audit (report-only)`, runs `scripts/audit_lock.sh` weekly, on demand, and
 on a lock-touching push or PR. It always exits 0 — a finding is a warning and the
 job summary — so it never decides a merge; the gate is `ci.yml`'s jobs. No
-secret, no WIF, no wheelhouse: `uv audit --frozen` reads `uv.lock` alone. What to
+secret, no WIF, no index token: `uv audit --frozen` reads `uv.lock` alone. What to
 do with a finding: `docs/DEPENDENCIES.md` → *Advisory floors*.
 
 ### Dependabot PRs (#283)
 
-`.github/dependabot.yml` proposes **action bumps only** (`github-actions`, weekly,
-one PR per action); `tests/ci/test_dependabot.py` pins it, because a broken
-config goes quiet rather than red. `uv` is out until the private wheelhouse is
-reachable from Dependabot's updater and co-core's pins, bumped when Processor
-coordinates a contract change, have a story — #283 → *Two blockers*. Every
-`uses:` is `@<sha> # vX.Y.Z` (#360); the same test fails any other form.
-
-**A Dependabot run reads its own credential context.** Its `GITHUB_TOKEN` is
-read-only and only *Dependabot* secrets reach it, so the four WIF jobs depend on
-`vars.GCP_WIF_PROVIDER` resolving and on GitHub issuing the OIDC token there;
-`css` needs neither. Both held on the first batch (#354–#357, 2026-10-09: every
-job green, WIF auth and wheelhouse sync included, actor `dependabot[bot]`). On a red PR read the **Authenticate to Google Cloud** step
-first, and match its error. *"must specify exactly one of
-workload_identity_provider or credentials_json"* — the variable did not reach the
-run. *"did not inject $ACTIONS_ID_TOKEN_REQUEST_TOKEN"* — no OIDC token was
-granted. Past both, a token-exchange failure — the `github-ci` provider's
-attribute condition or the SA binding (*CI* above). None is the bump's fault.
-
-**How one lands — locally, like everything else.** Dependabot only opens PRs;
-watcher merges to `main` on the VM, behind the ship gate:
-
-```bash
-# Read the action's release notes, not just the diff: a major bump can change inputs.
-gh pr comment <N> --body "@dependabot rebase"  # only if main moved; wait for its force-push
-gh pr checks <N> --watch                       # every job green, on the commit that lands
-git fetch origin "$(gh pr view <N> --json headRefName -q .headRefName)"
-git merge --ff-only FETCH_HEAD
-bash scripts/pre-ship.sh
-git push origin main                           # GitHub marks the PR merged
-```
-
-Fast-forward only: the commit CI tested is the commit that lands, and its subject
-already takes the repo's form (`chore: bump …`, the `commit-message` prefix). One
-PR at a time — after each push the next may need `@dependabot rebase`. **Restart**
-(`sudo systemctl restart watcher`) only when the diff touches something outside
-`.github/`; an action bump never does.
-
-**`context-cadence.yml` is generated** (`install-cadence.sh`, vendored in
-`skills-vendor/`), and Dependabot bumps its `actions/checkout` with `ci.yml`'s.
-Take the bump; a later re-run of the generator reverts it to the generator's
-own `@v5` (gregoryfoster/skills#373), which the pin test fails — so after a
-regeneration, restore its `uses:` line before committing.
+**Moved to [DEPENDENCIES.md](DEPENDENCIES.md) → *Dependabot PRs*.**

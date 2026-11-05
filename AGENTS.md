@@ -14,12 +14,11 @@ TDD required. Red → Green → Refactor. No production code without a failing t
 
 Python ≥3.12, uv, pytest, ruff; Node.js + npm (Tailwind CLI — `sudo npm install -g @tailwindcss/cli@4.2.4`; the pin is load-bearing, another CLI builds a different `output.css`, so `check-css.sh` refuses it).
 
-**Cannobserv wheelhouse.** Populate it before any `uv` command — `[tool.uv]
-find-links` makes every invocation require the directory:
+**co-pypi index (#358).** co-core is private: a `uv lock`, or a `uv sync` that
+downloads, needs a per-command token — never in an env file:
 
 ```bash
-uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_wheelhouse.py
-uv sync
+source scripts/load-env.sh && bash scripts/co-pypi.sh uv sync
 ```
 
 Auth, upgrade procedure and the pinned version: [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).
@@ -192,7 +191,7 @@ A skill is symlinked, unforked, into both `skills/` and `.claude/skills/` (#413)
 - [docs/WATCH-CHECK.md](docs/WATCH-CHECK.md) — #371 `info.watch-check`: shared pre-flight, rejections, DLQ, the completion republish
 - [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md) — #269 validators: gate, snapshot, invalidation
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID errors, DB triggers
-- [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) — the private wheelhouse, the notifier SDK's git tag, the certifi and advisory floors: auth, pins, upgrades
+- [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) — the co-pypi index, the notifier SDK's git tag, the certifi and advisory floors, Dependabot PRs: auth, pins, upgrades
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, the install runbook, timers, OS patching (#382)
 - [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — every env file and variable, load order, the unit-only credentials
 - [docs/HOST-MEMORY.md](docs/HOST-MEMORY.md) — #307/#309: reservations, slices, earlyoom, the SocratiCode pin

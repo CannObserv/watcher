@@ -113,7 +113,9 @@ trap: the skill's `SKILL.md` → *The run*.
 ### Managing the Service
 
 ```bash
-# Restart after code changes
+# Restart after code changes. After a uv.lock change, sync first, through the
+# token wrapper — the unit's start check refuses a venv the lock doesn't match
+# (#358): source scripts/load-env.sh && bash scripts/co-pypi.sh uv sync --locked
 sudo systemctl restart watcher
 
 # After any PostgreSQL cluster restart (apt or manual) the embedded worker
@@ -141,10 +143,10 @@ sudo systemctl status watcher
 sudo journalctl -u watcher -f
 
 # Follow WARNING+ only (app records are JSON: timestamp/level/logger/message — #238).
-# `-R` + `fromjson?` is load-bearing: the ExecStartPre wheelhouse sync and check
-# write plain-text lines on every start (#247, #393), and bare `jq` aborts on the
+# `-R` + `fromjson?` is load-bearing: the ExecStartPre start check writes
+# plain-text lines on every start (#247, #358), and bare `jq` aborts on the
 # first with a parse error — killing the follow and hiding every record after
-# it. Non-JSON lines are tagged PLAIN rather than dropped, so a failed sync
+# it. Non-JSON lines are tagged PLAIN rather than dropped, so a failed check
 # still surfaces here.
 # Needs jq (present on this VM at /bin/jq); the grep below is the no-jq fallback.
 sudo journalctl -u watcher -f -o cat | jq -R 'fromjson? // {level: "PLAIN", message: .} | select(.level | IN("WARNING","ERROR","CRITICAL","PLAIN"))'
@@ -163,11 +165,10 @@ the flag and the `jq` filter above silently skips the access/boot lines, which c
 back as plain text. Same flag is baked into `scripts/dev_server.sh`.
 
 The unit's `ExecStartPre` steps are the exception (#247): they run before the
-project is importable, so their output is plain text by design — the wheelhouse
-sync writes `wheelhouse in sync: …` on every start and `error: could not sync
-gs://…` when it fails, the digest check after it writes `wheelhouse pins hold: …`
-or `error: wheelhouse check failed: …` (#393), and the BUILD_ID stamp writes plain
-text on failure. Any pipeline that `json.loads` every `MESSAGE` must tolerate
+project is importable, so their output is plain text by design — the start
+check writes uv's `Checked N packages …` / `Would make no changes` on every start
+and `error: The environment is outdated; …` when it stops one (#358), and the
+BUILD_ID stamp writes plain text on failure. Any pipeline that `json.loads` every `MESSAGE` must tolerate
 them; reading journald's own fields (`_SYSTEMD_UNIT`, `SYSLOG_IDENTIFIER`,
 `MESSAGE`) is unaffected. See
 [CONVENTIONS.md](CONVENTIONS.md) → *`ExecStartPre` output is plain text*.
@@ -387,7 +388,7 @@ compact either way — 1.7 MB after the prune.
 
 ## Cannobserv wheelhouse
 
-**Moved to [DEPENDENCIES.md](DEPENDENCIES.md).**
+**Retired by #358:** co-core comes from the co-pypi index, [DEPENDENCIES.md](DEPENDENCIES.md) → *The co-pypi index*.
 
 ## notifier-client
 

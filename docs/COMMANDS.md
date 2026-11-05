@@ -3,8 +3,8 @@
 ## Setup
 
 ```bash
-# Install dependencies (creates .venv automatically)
-uv sync
+# Install dependencies (creates .venv; co-core needs the co-pypi token, #358)
+source scripts/load-env.sh && bash scripts/co-pypi.sh uv sync
 
 # Install the git pre-commit hook — once per clone; worktrees share .git/hooks
 uv run pre-commit install

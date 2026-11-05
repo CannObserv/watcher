@@ -100,7 +100,7 @@ source scripts/load-env.sh
 ## Common Commands
 
 ```bash
-uv sync                                      # install deps
+bash scripts/co-pypi.sh uv sync              # install deps (token: above)
 uv run pre-commit install                    # once per clone: ruff + check-css.sh hook
 uv run pytest                                # tests
 uv run pytest -m integration                 # integration tests (test DB only; CI + pre-ship run them)

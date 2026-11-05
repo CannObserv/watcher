@@ -65,6 +65,11 @@ class TestTheIndex:
         assert "find-links" not in _uv(), "#358 retired the wheelhouse; one source per name"
         assert [i["name"] for i in _uv()["index"]] == [INDEX]
 
+    def test_no_digest_table(self):
+        """#393's table is the lock's job now. Its 0.37.0 rows equalled the
+        index's sha256 (#358's one-shot proof, commit 94ed99e) before it went."""
+        assert "wheelhouse-sha256" not in _PYPROJECT.get("tool", {}).get("watcher", {})
+
 
 class TestEveryCoCorePackage:
     def test_the_sweep_finds_both(self):
@@ -102,19 +107,3 @@ def test_nothing_else_resolves_from_the_index():
         if not _is_co_core(p["name"]) and p.get("source", {}).get("registry") == URL
     ]
     assert others == []
-
-
-class TestTheDigestTableAgrees:
-    """One-shot proof for the swap (#358): the index's sha256 for each 0.37.0
-    file equals #393's ``[tool.watcher.wheelhouse-sha256]`` pin. It goes with
-    the table, in the commit that deletes both."""
-
-    def test_the_lock_hashes_equal_the_table(self):
-        table = _PYPROJECT["tool"]["watcher"]["wheelhouse-sha256"]
-        locked = {
-            dist["url"].rsplit("/", 1)[1]: dist["hash"].removeprefix("sha256:")
-            for package in _locked_co_core()
-            for dist in [package["sdist"], *package["wheels"]]
-        }
-        assert len(table) == 4
-        assert locked == table

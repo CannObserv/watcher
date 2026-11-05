@@ -39,6 +39,7 @@ On the host, after the merge, run `bash scripts/co-pypi.sh uv sync --locked`, th
 
 **Accepted limits:**
 - **The check runs only where it's wired in,** the unit and the dev server. A hand-run `uv run` in the deploy checkout still syncs the service's venv. Since #358 it can't download co-core without the wrapper, so it fails rather than installing something unchecked.
+- **The token reaches whatever the wrapped `uv` spawns:** `git`, and the build backends for `notifier-client` and the editable project. CI's `uv sync` step is the same. The bound is `co-pypi-reader`'s read-only role and the token's hour.
 - **Dependabot's version lookup asks PyPI before the index,** where the co-core names are unclaimed. Who registers them is CannObserv/replicator#169's open decision. Part 2 of #358 ignores both names.
 - **Rollback:** reverting #358 restores `find-links`, and the wheelhouse needs refilling before a restart. The deploy checkout keeps its `.wheelhouse/` files until part 1 has been through a restart, and `.gitignore` keeps them out of `git status` until they go.
 

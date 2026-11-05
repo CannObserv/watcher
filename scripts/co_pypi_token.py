@@ -18,6 +18,11 @@ exists in this process's memory and in the wrapped ``uv``'s environment, and
 dies with it (an hour's lifetime at most). Only ``uv`` is wrapped: anything else
 is refused before a token is minted. ``VIRTUAL_ENV``, set by the ``uv run``
 this runs under, is dropped, so the wrapped ``uv`` sees the project's ``.venv``.
+**Accepted limit:** whatever that ``uv`` spawns inherits its environment, the
+pair included: ``git``, and the PEP 517 build backends for the git-sourced
+``notifier-client`` and the editable project. uv has no per-index credential
+scoping short of a keyring or netrc file; the bound is the identity's
+read-only role and the token's hour.
 
 Only a command that downloads from the index needs this: ``uv lock``, and a
 ``uv sync`` whose venv lacks a locked co-core file. ``uv sync --locked

@@ -30,16 +30,19 @@ ExecStartPre=+/bin/bash -c 'mkdir -p /run/watcher && chown exedev:exedev /run/wa
 # Write current git SHA to a runtime env file before starting
 ExecStartPre=/bin/bash -c 'echo BUILD_ID=$(git rev-parse --short HEAD) > /run/watcher/build-id'
 
-# Hold the venv to uv.lock before `uv run` syncs it (#358). co-core resolves
-# from the co-pypi index, and this unit holds no token for it, so a sync that
-# has to download fails; this check fails first, and names the drift. Fail
-# CLOSED (no - prefix). --check changes nothing; --locked also fails a
-# pyproject.toml the lock no longer matches; --offline makes no network call,
-# so a boot that starts before the network can't trip it (#393's property,
-# measured under `unshare -n`). Exact: an extraneous package fails it too.
-# The fix is the deploy's sync: `bash scripts/co-pypi.sh uv sync --locked`
-# (docs/DEPENDENCIES.md). Plain-text output, like every ExecStartPre (#247).
-ExecStartPre=/usr/local/bin/uv sync --locked --offline --check
+# Sync the venv to uv.lock, offline, before `uv run` does (#358). co-core
+# resolves from the co-pypi index and this unit holds no token for it, so
+# anything this would have to download fails it, naming the file: a co-core
+# file neither installed nor in uv's cache. Fail CLOSED (no - prefix).
+# --locked also fails a pyproject.toml the lock no longer matches; --offline
+# makes no network call, so a boot that starts before the network can't trip
+# it (#393's property, measured under `unshare -n`). Not --check: that cannot
+# rebuild the project, which every pyproject.toml edit needs. This rebuilds it,
+# removes extraneous packages and reinstalls cached files against the lock's
+# sha256. The fix for a miss is the deploy's sync:
+# `bash scripts/co-pypi.sh uv sync --locked` (docs/DEPENDENCIES.md).
+# Plain-text output, like every ExecStartPre (#247).
+ExecStartPre=/usr/local/bin/uv sync --locked --offline
 
 # Load BUILD_ID, then the service's own configuration.
 #

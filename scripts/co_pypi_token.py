@@ -25,8 +25,8 @@ scoping short of a keyring or netrc file; the bound is the identity's
 read-only role and the token's hour.
 
 Only a command that downloads from the index needs this: ``uv lock``, and a
-``uv sync`` whose venv lacks a locked co-core file. ``uv sync --locked
---offline --check`` (the unit's start check) and ``uv audit --frozen`` don't.
+``uv sync`` that needs a co-core file neither installed nor cached. ``uv sync
+--locked --offline`` (the unit's start check) and ``uv audit --frozen`` don't.
 
 Exit codes: the wrapped command's own · ``2`` usage, a refused command or no
 key variable · ``1`` the mint failed · ``127`` the command could not be run.

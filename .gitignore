@@ -50,11 +50,6 @@ gunicorn.ctl
 # tests/test_brainstorm_session_is_not_committable.py.
 .superpowers/
 
-# The retired cannobserv wheelhouse (#358). Nothing reads it; the deploy
-# checkout keeps its files until part 1 has been through a restart (the
-# rollback's refill). Drop this line when they go.
-.wheelhouse/
-
 # Tailwind
 src/dashboard/static/css/output.css
 

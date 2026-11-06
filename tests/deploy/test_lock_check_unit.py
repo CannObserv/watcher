@@ -1,18 +1,23 @@
-"""The unit's start check: the venv matches uv.lock, offline, fail closed (#358).
+"""The unit's start step: the venv synced to uv.lock, offline, fail closed (#358).
 
 ``ExecStart`` is ``uv run uvicorn …``, and ``uv run`` syncs first. Since #358
 co-core resolves from the co-pypi index, and a sync that has to download from
 it fails without a token, which the unit never holds. So one ``ExecStartPre``
 stands in front of it:
 
-    uv sync --locked --offline --check
+    uv sync --locked --offline
 
-* **``--check``**: it changes nothing, and exits 1 when the venv differs from
-  the lock, a locked package missing or an extraneous one present.
-* **``--locked``**: a ``pyproject.toml`` the lock no longer matches fails too.
 * **``--offline``**: no network call, so a boot that starts before the network
-  can't trip it (#393's property, kept). Measured under ``unshare -n``.
-* **No ``-`` prefix**: a miss stops the start, at the check rather than at
+  can't trip it (#393's property, kept). Anything it would have to download
+  fails it, exit 1, naming the file: a co-core file neither installed nor in
+  uv's cache. Measured under ``unshare -n``.
+* **``--locked``**: a ``pyproject.toml`` the lock no longer matches fails too.
+* **It syncs, it does not ``--check``.** It rebuilds the project itself and
+  removes extraneous packages, offline, and reinstalls a cached locked file
+  against the lock's sha256. ``--check`` failed every start after *any*
+  ``pyproject.toml`` edit, a comment included, until a manual sync: uv keys
+  the project's own install on that file (measured on the #358 merge).
+* **No ``-`` prefix**: a miss stops the start, at this step rather than at
   uvicorn's first import. The fix is the deploy's ``uv sync --locked``
   through ``scripts/co-pypi.sh``.
 
@@ -24,7 +29,7 @@ from pathlib import Path
 from tests.deploy.systemd_units import directive_values
 
 UNIT = Path(__file__).resolve().parents[2] / "deploy" / "watcher.service"
-CHECK = "/usr/local/bin/uv sync --locked --offline --check"
+CHECK = "/usr/local/bin/uv sync --locked --offline"
 
 
 def _pre_steps() -> list[str]:
@@ -33,7 +38,13 @@ def _pre_steps() -> list[str]:
 
 def test_the_check_is_fail_closed_and_offline():
     found = [line for line in _pre_steps() if "sync" in line and "uv" in line]
-    assert found == [CHECK], "one uv step: the check, with no `-` prefix"
+    assert found == [CHECK], "one uv step: the offline sync, with no `-` prefix"
+
+
+def test_the_step_syncs_rather_than_checks():
+    """``--check`` cannot rebuild the project, so a ``pyproject.toml`` edit alone
+    left every unplanned restart failing until the deploy's sync (#358)."""
+    assert not any("--check" in line for line in _pre_steps())
 
 
 def test_the_check_is_the_last_step_before_exec_start():

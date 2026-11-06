@@ -485,7 +485,7 @@ def test_schema_apply_runs_after_the_migration() -> None:
 
 
 #: The unit's ExecStartPre form (deploy/watcher.service), run from REPO_ROOT (#358).
-CHECK_ARGV = "sync --locked --offline --check"
+CHECK_ARGV = "sync --locked --offline"
 
 
 def run_live(
@@ -495,8 +495,9 @@ def run_live(
 
     The dry run exits before the ``cd`` and every ``uv`` call, so only the
     executed path can show the check runs first (#401). Each stub appends its
-    argv to a log and exits 0; ``uv`` given the check prints uv's own last line
-    and exits *check_exit*, the way ``uv sync --check`` does (#358, measured).
+    argv to a log and exits 0; ``uv`` given the check prints uv's own error
+    and exits *check_exit*, the way an offline ``uv sync`` that needs a download
+    does (#358, measured under ``unshare -n``).
     """
     stubs = tmp_path / "bin"
     stubs.mkdir()
@@ -504,9 +505,9 @@ def run_live(
     (stubs / "uv").write_text(
         "#!/bin/bash\n"
         f'echo "uv $*" >> {log}\n'
-        'if [[ "$*" == *--check* ]]; then\n'
-        f"  if [[ {check_exit} == 0 ]]; then echo 'Would make no changes' >&2; exit 0; fi\n"
-        "  echo 'error: The environment is outdated; run `uv sync` to update the environment' >&2\n"
+        f'if [[ "$*" == "{CHECK_ARGV}" ]]; then\n'
+        f"  if [[ {check_exit} == 0 ]]; then echo 'Checked 83 packages' >&2; exit 0; fi\n"
+        "  echo 'error: Failed to download `co-core-aio==0.37.0`' >&2\n"
         f"  exit {check_exit}\n"
         "fi\n"
     )
@@ -556,7 +557,7 @@ def test_lock_check_runs_before_any_other_command(tmp_path: Path) -> None:
     assert calls[0] == f"uv {CHECK_ARGV}"
     assert [c.split()[0] for c in calls[1:]] == ["psql", "uv", "uv", "uv"]
     assert calls[-1].startswith("uv run uvicorn ")
-    assert "Would make no changes" in result.stderr
+    assert "Checked 83 packages" in result.stderr
 
 
 def test_a_failing_lock_check_stops_the_launch(tmp_path: Path) -> None:
@@ -565,7 +566,7 @@ def test_a_failing_lock_check_stops_the_launch(tmp_path: Path) -> None:
     result, calls = run_live(tmp_path, 1, {"TEST_DATABASE_URL": TEST_URL})
     assert result.returncode != 0
     assert calls == [f"uv {CHECK_ARGV}"]
-    assert "error: The environment is outdated" in result.stderr
+    assert "error: Failed to download" in result.stderr
     assert "bash scripts/co-pypi.sh uv sync --locked" in result.stderr
     assert result.stdout == ""
 

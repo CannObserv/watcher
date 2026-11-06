@@ -371,7 +371,7 @@ async def _fail_processor_fault(
     or dead-lettered the command (#386).
 
     The fetch row fails under ``reason``, which is also the item's health
-    reason; ERROR + ``WATCH_ERROR`` as any failed check. No re-fetch — the
+    reason; ERROR + its ``watch_error`` fact as any failed check. No re-fetch — the
     bytes were never the problem. Audited ``CHECK_PROCESSING_FAILED``, so the
     activity trail never reads a processor fault as a bad spec; ``reason``
     says which fault.
@@ -561,7 +561,7 @@ async def reap_process_commands(
             )
         if delayed:
             # Delay, never failure: the items stay as they were — no ERROR, no
-            # WATCH_ERROR — until the processor answers or the hard limit ends
+            # watch_error fact — until the processor answers or the hard limit ends
             # the wait. This line is the per-item signal.
             logger.warning(
                 "processing delayed — checks are waiting on the processor",

@@ -595,7 +595,7 @@ async def apply_fetch_failure(command_id: str) -> dict:
     Mirrors the local fetch-failure path exactly: ERROR health, fresh
     ``last_checked_at`` (stops schedule_tick re-enqueueing every minute),
     ``CHECK_FETCH_FAILED`` audit carrying the reason token, and one
-    ``WATCH_ERROR`` on the OK→ERROR transition.
+    ``watch_error`` fact on the OK→ERROR transition.
     """
     async with get_session_factory()() as session:
         row = await session.get(FetchCommand, command_id)
@@ -613,7 +613,7 @@ async def apply_fetch_failure(command_id: str) -> dict:
             # #269's one loop hazard. This refusal happens BEFORE any request
             # goes out, so an unsendable stored validator would be re-snapshotted
             # and refused on every cycle, forever — each one an ERROR health
-            # transition and a WATCH_ERROR. Forgetting the pair makes the next
+            # transition and a watch_error fact. Forgetting the pair makes the next
             # command unconditional, which is self-healing; every other reason
             # says nothing about our validators and leaves them alone.
             logger.warning(
@@ -651,7 +651,7 @@ async def apply_fetch_not_modified(command_id: str) -> dict:
     that is not a failure. The origin was asked a conditional question and
     answered "your bytes are current" — the most useful answer it can give. Sent
     down ``apply_fetch_failure`` instead, it would set ERROR health, write
-    ``CHECK_FETCH_FAILED``, and fire one ``WATCH_ERROR`` on the OK→ERROR
+    ``CHECK_FETCH_FAILED``, and stage one ``watch_error`` fact on the OK→ERROR
     transition, on *every* successful no-change check.
 
     Two decisions this path records, both left open by the issue:
@@ -676,7 +676,7 @@ async def apply_fetch_not_modified(command_id: str) -> dict:
     ``ChangeRevision``, no ``PendingArchiverSync``, no ``content.revisions``
     frame. So the check is recorded through ``_record_check_success`` with an
     empty result — unchanged, no baseline — which yields ``CHECK_NO_CHANGE``,
-    OK health, a fresh ``last_checked_at``, and ``WATCH_RECOVERED`` if the item
+    OK health, a fresh ``last_checked_at``, and a ``watch_recovered`` fact if the item
     was in ERROR. ``last_observed_at`` is stamped (#264 semantics: the content
     *was* verified current, which is more than "we tried").
 
@@ -728,7 +728,7 @@ async def reap_fetch_commands(
     bytes exist — refetching would waste an origin request), anything else is
     expired and **re-issued** under a fresh ``command_id``, same intent. At
     ``WATCHER_FETCH_MAX_REISSUES`` (default 3) the intent stops: ERROR health +
-    WATCH_ERROR, and the item re-enters normal scheduling — the gate lifts, so
+    its ``watch_error`` fact, and the item re-enters normal scheduling — the gate lifts, so
     recovery is automatic when the origin or Replicator heals.
     """
     timeout = fetch_command_timeout_seconds()

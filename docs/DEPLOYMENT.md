@@ -114,8 +114,8 @@ trap: the skill's `SKILL.md` → *The run*.
 
 ```bash
 # Restart after code changes. After a uv.lock change, sync first, through the
-# token wrapper — the unit's start check refuses a venv the lock doesn't match
-# (#358): source scripts/load-env.sh && bash scripts/co-pypi.sh uv sync --locked
+# token wrapper — the unit's offline start check fails on any file it would
+# have to download (#358): source scripts/load-env.sh && bash scripts/co-pypi.sh uv sync --locked
 sudo systemctl restart watcher
 
 # After any PostgreSQL cluster restart (apt or manual) the embedded worker
@@ -166,8 +166,8 @@ back as plain text. Same flag is baked into `scripts/dev_server.sh`.
 
 The unit's `ExecStartPre` steps are the exception (#247): they run before the
 project is importable, so their output is plain text by design — the start
-check writes uv's `Checked N packages …` / `Would make no changes` on every start
-and `error: The environment is outdated; …` when it stops one (#358), and the
+check writes uv's `Resolved N packages …` / `Checked N packages …` on every start
+and `error: Failed to download …` when it stops one (#358), and the
 BUILD_ID stamp writes plain text on failure. Any pipeline that `json.loads` every `MESSAGE` must tolerate
 them; reading journald's own fields (`_SYSTEMD_UNIT`, `SYSLOG_IDENTIFIER`,
 `MESSAGE`) is unaffected. See

@@ -56,10 +56,10 @@ their filters, so a filter on the parent `uvicorn` alone never sees a
 
 **One exception — `ExecStartPre` output is plain text (#247).** The JSON claim
 above scopes to the *application's* records. `deploy/watcher.service` runs the
-start check `uv sync --locked --offline --check` as a fail-closed `ExecStartPre`
+start check `uv sync --locked --offline` as a fail-closed `ExecStartPre`
 (#358), so journald also gets uv's plain-text lines on every service start
-(`Checked N packages …`, `Would make no changes`), and `error: The environment is
-outdated; …` when it stops the start. That is by design, not drift: uv writes
+(`Resolved N packages …`, `Checked N packages …`), and `error: Failed to
+download …` when it stops the start. That is by design, not drift: uv writes
 them before the project runs, and emitting JSON would mean a
 second hand-maintained copy of the key schema. The unit's other `ExecStartPre`
 lines are silent on success but plain-text on failure the same way (`git rev-parse`

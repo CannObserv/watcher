@@ -116,11 +116,11 @@ lacks a `_test`/`_dev` suffix. The same rule is enforced in-app by
 `WATCHER_ALLOW_PRODUCTION_DB=1` (in the unit, never an env file).
 
 Before its first `uv run` the script runs the unit's start check, `uv sync
---locked --offline --check` (#401, #358; [DEPENDENCIES.md](DEPENDENCIES.md) →
+--locked --offline` (#401, #358; [DEPENDENCIES.md](DEPENDENCIES.md) →
 *The start check*), and refuses to start on a miss, naming the sync that fixes
 it. From the deploy checkout every `uv run` syncs `watcher.service`'s own
-`.venv`. No bypass knob, as in the unit. A fresh worktree has no venv, so it
-fails here first: `bash scripts/co-pypi.sh uv sync`.
+`.venv`. No bypass knob, as in the unit. A fresh worktree fails here unless
+uv's cache holds every locked file: `bash scripts/co-pypi.sh uv sync`.
 
 No migration creates procrastinate's tables, so the script applies them too
 (#341): always after the `TEST_DATABASE_URL` branch's public-schema reset, and

@@ -97,9 +97,9 @@ async def record_check_failure(
     check_command_id: str | None = None,
 ) -> None:
     """Record a failed check: ERROR health + stamped ``last_checked_at`` + audit,
-    and on the transition into ERROR the ``watch_error`` fact Archiver notifies
-    from (#369). Watcher sends nothing itself since F3 (#376); a failure inside
-    an episode is no edge, and its reminder cadence is Archiver's.
+    plus the edge fact on the transition into ERROR (below). Watcher sends
+    nothing itself since F3 (#376): Archiver notifies from the fact, and owns
+    the reminder cadence of an episode.
 
     ``health_reason`` / ``health_status_code`` say why, as levels (#370): a
     ``WatchHealthReason`` token — Watcher's own, or Replicator's fetch reason
@@ -113,9 +113,10 @@ async def record_check_failure(
     health signal and a fresh ``last_checked_at`` — the latter stops a persistent
     failure from being re-enqueued every ``schedule_tick`` (#168).
 
-    The transition also opens the episode (#369): ``error_since`` is stamped
-    and a ``watch_error`` fact staged in that same commit, its reason the
-    ``health_reason`` above.
+    The transition opens the episode (#369): ``error_since`` is stamped and a
+    ``watch_error`` fact staged in that same commit, its reason the
+    ``health_reason`` above. A failure inside the episode is no edge and stages
+    nothing.
 
     ``check_command_id`` is the fetch row's: a commanded check republishes
     whatever the outcome (``republish_status``).

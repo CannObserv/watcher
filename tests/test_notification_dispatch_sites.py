@@ -22,7 +22,11 @@ from pathlib import Path
 from src.core.notifications.events import EVENT_TITLES
 from src.dashboard.forms import ALL_EVENT_TYPE_VALUES
 
-_SRC = Path(__file__).resolve().parent.parent / "src"
+_ROOT = Path(__file__).resolve().parent.parent
+_SRC = _ROOT / "src"
+# Where a retired knob could come back: read by code, set by a script, or set
+# on the unit (an ``Environment=`` line).
+_KNOB_TREES = ("src", "scripts", "deploy")
 _DISPATCH = "dispatch_event_notifications"
 _RETIRED_KNOBS = ("WATCHER_NOTIFY_CUTOVER_AT", "WATCHER_ERROR_RENOTIFY_INTERVAL")
 
@@ -57,8 +61,28 @@ def test_no_module_names_the_dispatcher():
     assert not offenders, f"{offenders} name {_DISPATCH}: Watcher's dispatch is Archiver's (#376)"
 
 
-def test_no_module_reads_a_retired_knob():
-    offenders = [(p, k) for p, text in _sources() for k in _RETIRED_KNOBS if k in text]
+def _knob_files() -> dict[str, list[Path]]:
+    return {
+        tree: sorted(
+            p for p in (_ROOT / tree).rglob("*") if p.is_file() and "__pycache__" not in p.parts
+        )
+        for tree in _KNOB_TREES
+    }
+
+
+def test_the_knob_scan_sees_every_tree():
+    """Non-vacuity: each tree the knob scan reads has files in it."""
+    assert all(_knob_files().values()), {t: len(f) for t, f in _knob_files().items()}
+
+
+def test_no_file_names_a_retired_knob():
+    offenders = [
+        (str(p.relative_to(_ROOT)), k)
+        for files in _knob_files().values()
+        for p in files
+        for k in _RETIRED_KNOBS
+        if k in p.read_text(errors="ignore")
+    ]
     assert not offenders, f"{offenders}: retired with Watcher's dispatch (#376 part 2)"
 
 

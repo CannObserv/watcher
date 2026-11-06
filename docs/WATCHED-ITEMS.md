@@ -144,44 +144,28 @@ that controls where it fires:
 
 ## Notification templates
 
+**Watcher dispatches nothing since F3 (#376).** Archiver has sent every
+notification for an event at or after T = `2026-11-06T21:00:00Z`, from the
+`info.watch-events` facts Watcher stages (#369); part 2 deleted Watcher's
+dispatcher, its three sites, #71's error reminder (the `last_error_notified_at`
+clock, dropped by migration `e2eab993d615`) and the T gate.
+`tests/test_notification_dispatch_sites.py` fails on a dispatch site that comes
+back. What remains below — templates, previews, test sends — is the operator
+surface #379 deletes; a test send still calls `dispatch_via_notifier` directly.
+
 A CHECK constraint (`ck_notification_templates_visibility_refs`) enforces that
 exactly the ref column implied by `visibility` is set. There is **no separate
 "configuration" object** and no junction tables — the five legacy sources
 (`is_global_default` flag, `domain_nc_refs`, `watch_nc_refs`,
 `watched_item_notification_templates`, `watch_notification_configs`) were
-collapsed in #200. `dispatch_event_notifications` runs **one** visibility-scoped
-query; **dedup is by template id** (each row fires once — one query returns each
-row once), and multiple templates may target the same `remote_channel_id` with
-no suppression (ratified F2). `channel_hint` is display-only; `remote_channel_id`
-is the notifier-owned delivery handle — nothing dispatches off the hint.
+collapsed in #200. `channel_hint` is display-only; `remote_channel_id` is the
+notifier-owned delivery handle — nothing dispatches off the hint.
 
-**Subscribable events (#166).** Three: `change_detected` (`src/workers/pipeline.py`),
-`watch_error` and `watch_recovered` (`src/workers/fetch_commands.py`) — each
-`WatchEventType` member is a Subscribe checkbox, so each must have a
-`dispatch_event_notifications` site, and `tests/test_notification_dispatch_sites.py`
-fails on one that does not. Created, paused, resumed, archived and deleted were
-subscribable and never fired; #166 dropped them and migration `78606286a887`
-stripped them from saved templates. Their **audits** (`EventType.WATCHED_ITEM_*`)
-are a separate enum and stay. Pause is registry-owned in production
-(the reconcile writes `is_active` directly), so if anyone notifies on it, Archiver does.
-
-**Persistent errors re-notify (#71).** `watch_error` fires on the OK→ERROR
-transition, then on the first failed check at least
-`WATCHER_ERROR_RENOTIFY_INTERVAL` (default `24h`) after the last one.
-`last_error_notified_at` is stamped in the failure's commit, before the dispatch
-(a retried apply cannot re-send); recovery clears it. A reminder never
-republishes watch-status (#264), carries `renotify: true` plus
-`previously_notified_at`, and says "Still failing". Why not `schedule_config`,
-and the backfill: `src/core/notifications/renotify.py`, migration `36358e2f5ad4`.
-
-**The cutover gate (#376, F3).** With `WATCHER_NOTIFY_CUTOVER_AT` set, `dispatch_event_notifications` returns at its first line for an event whose
-`occurred_at` is at or after T: one `notification suppressed: cutover` log line
-(event type, item id, both instants; never a URL), no template query, no client,
-no `notification.dispatched` audit. Archiver sends those (`≥ T`, archiver#369 D3)
-from the same instant the `info.watch-events` fact carries. A #71 reminder after
-T is suppressed like any event; its `last_error_notified_at` stamp still lands.
-Unset, nothing changes. The three test-send routes call `dispatch_via_notifier`
-directly and are not gated. Runbook: [COMMANDS.md](COMMANDS.md) → *F3 runbook*.
+**Subscribable events (#166).** Three: `change_detected`, `watch_error` and
+`watch_recovered` — the three `info.watch-events` facts. Created, paused,
+resumed, archived and deleted were subscribable and never fired; #166 dropped
+them and migration `78606286a887` stripped them from saved templates. Their
+**audits** (`EventType.WATCHED_ITEM_*`) are a separate enum and stay.
 
 Template mutations (create/update/delete/duplicate + their audit events) go
 through one service — `src/core/notifications/templates.py` (#228) — used by

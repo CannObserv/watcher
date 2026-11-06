@@ -114,8 +114,8 @@ async def list_effective_notifications(
 
     Returns every template whose visibility matches the item (global, the item's
     domain, and the item itself), regardless of ``is_active`` so the caller can
-    show the complete picture. The per-event ``events`` filter and ``is_active``
-    still gate actual dispatch (see ``dispatch_event_notifications``).
+    show the complete picture. Watcher dispatches none of them since F3 (#376):
+    Archiver notifies, and #379 deletes this surface.
     """
     wi = await get_watched_item_or_404(watched_item_id, session)
     clauses = [

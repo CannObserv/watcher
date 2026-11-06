@@ -81,7 +81,7 @@ class TestTemplatesPartial:
 class TestInheritedNotificationSections:
     """#199/#200: global + domain templates that fire for an item are surfaced read-only.
 
-    These sources dispatch for the item (``dispatch_event_notifications``) but
+    These sources applied to the item (Watcher dispatched them until F3, #376) but
     are not item-owned, so the panel shows them above the item-template table
     with no assign/remove — Edit/Test link back to the global library. Post-#200
     they are simply ``NotificationTemplate`` rows with ``visibility='global'`` /

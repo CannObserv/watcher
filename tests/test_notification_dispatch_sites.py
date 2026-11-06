@@ -1,171 +1,78 @@
-"""Guard: every subscribable notification event has a dispatch site (#166).
+"""Guard: Watcher dispatches no notification of its own (#376, F3 part 2).
 
-Five of eight ``WatchEventType`` members were tickable in the template form,
-carried default bodies and preview fixtures, and never fired: nothing tied the
-subscribable list to the code that emits. This test is that tie.
+F3 handed notifications to Archiver at T = 2026-11-06T21:00:00Z. Archiver
+notifies from the ``info.watch-events`` facts Watcher stages (#369), so
+Watcher's three dispatch sites — ``CHANGE_DETECTED`` in the pipeline,
+``WATCH_ERROR`` (with #71's reminder) and ``WATCH_RECOVERED`` in the fetch
+apply — are gone, and with them the dispatcher, the T gate and the reminder
+knob. A site that came back would send beside Archiver: every notification
+twice.
 
-It reads ``src/`` statically. A *dispatch site* is a function that calls
-``dispatch_event_notifications``; the events it emits are the ``WatchEventType``
-members that function names. Every subscribable value must be emitted by some
-site, and every site must name the member it emits — one that dispatches an
-event handed to it from elsewhere cannot be attributed, so it fails here until
-this guard learns to follow it.
+It reads ``src/`` statically. Until #379 deletes the subsystem, the operator's
+test-send routes still call ``dispatch_via_notifier`` directly; that is not
+an automatic send and is not this guard's.
 
-"Names" means the ``event_type`` of a ``WatchEvent(...)`` built in that
-function, keyword or first positional — not any mention: a member compared
-against (``prev == WatchEventType.X``) is not emitted, and counting it would
-let a never-firing event pass.
+This file replaced #166's guard, which tied every subscribable event to a
+dispatch site. Archiver owns that tie now.
 """
 
 import ast
 from pathlib import Path
 
-from src.core.notifications.events import EVENT_TITLES, WatchEventType
+from src.core.notifications.events import EVENT_TITLES
 from src.dashboard.forms import ALL_EVENT_TYPE_VALUES
 
 _SRC = Path(__file__).resolve().parent.parent / "src"
 _DISPATCH = "dispatch_event_notifications"
+_RETIRED_KNOBS = ("WATCHER_NOTIFY_CUTOVER_AT", "WATCHER_ERROR_RENOTIFY_INTERVAL")
 
 
-def _calls_dispatch(node: ast.AST) -> bool:
-    for sub in ast.walk(node):
-        if isinstance(sub, ast.Call):
-            func = sub.func
-            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
-            if name == _DISPATCH:
-                return True
-    return False
+def _sources() -> list[tuple[str, str]]:
+    return [(str(p.relative_to(_SRC.parent)), p.read_text()) for p in sorted(_SRC.rglob("*.py"))]
 
 
-def _event_type_arg(call: ast.Call) -> ast.expr | None:
-    """The ``event_type`` argument of a ``WatchEvent(...)`` call, else None."""
-    func = call.func
-    name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
-    if name != "WatchEvent":
-        return None
-    for kw in call.keywords:
-        if kw.arg == "event_type":
-            return kw.value
-    return call.args[0] if call.args else None
-
-
-def _emitted_members(node: ast.AST) -> set[str]:
-    """Members passed as a ``WatchEvent``'s ``event_type`` anywhere under ``node``."""
-    emitted = set()
-    for sub in ast.walk(node):
-        arg = _event_type_arg(sub) if isinstance(sub, ast.Call) else None
-        if (
-            isinstance(arg, ast.Attribute)
-            and isinstance(arg.value, ast.Name)
-            and arg.value.id == "WatchEventType"
-        ):
-            emitted.add(arg.attr)
-    return emitted
-
-
-def _sites_in(tree: ast.AST, module: str) -> dict[str, set[str]]:
-    """``module:function`` → emitted member names, for each dispatching function.
-
-    Same-named functions in one module (methods of two classes) share a key, so
-    their sets merge rather than the later overwriting the earlier.
-    """
-    sites: dict[str, set[str]] = {}
+def _names(tree: ast.AST) -> set[str]:
+    """Every identifier a module calls, defines, imports or reads by attribute."""
+    names: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and _calls_dispatch(node):
-            sites.setdefault(f"{module}:{node.name}", set()).update(_emitted_members(node))
-    return sites
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.add(node.attr)
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            names.add(node.name)
+        elif isinstance(node, ast.alias):
+            names.add(node.name.rsplit(".", 1)[-1])
+    return names
 
 
-def _dispatch_sites() -> dict[str, set[str]]:
-    """``module:function`` → the WatchEventType member names it emits, over ``src/``."""
-    sites: dict[str, set[str]] = {}
-    for path in sorted(_SRC.rglob("*.py")):
-        tree = ast.parse(path.read_text(), filename=str(path))
-        for site, names in _sites_in(tree, str(path.relative_to(_SRC.parent))).items():
-            sites.setdefault(site, set()).update(names)
-    return sites
+def test_the_scan_sees_the_source_tree():
+    """Non-vacuity: the scan reads the real tree, not an empty one."""
+    paths = {path for path, _ in _sources()}
+    assert {"src/workers/pipeline.py", "src/workers/fetch_commands.py"} <= paths
 
 
-def _dispatched_values() -> set[str]:
-    """Values of the emitted members; non-members are ``test_every_emitted_name_is_a_member``'s."""
-    return {
-        WatchEventType[name].value
-        for names in _dispatch_sites().values()
-        for name in names
-        if name in WatchEventType.__members__
-    }
+def test_no_module_names_the_dispatcher():
+    offenders = [p for p, text in _sources() if _DISPATCH in _names(ast.parse(text, filename=p))]
+    assert not offenders, f"{offenders} name {_DISPATCH}: Watcher's dispatch is Archiver's (#376)"
 
 
-def test_dispatch_sites_are_found():
-    """Non-vacuity: the scan sees the real call sites, not an empty tree."""
-    sites = _dispatch_sites()
-    modules = {site.split(":", 1)[0] for site in sites}
-    assert {"src/workers/fetch_commands.py", "src/workers/pipeline.py"} <= modules, sites
+def test_no_module_reads_a_retired_knob():
+    offenders = [(p, k) for p, text in _sources() for k in _RETIRED_KNOBS if k in text]
+    assert not offenders, f"{offenders}: retired with Watcher's dispatch (#376 part 2)"
 
 
-def test_every_dispatch_site_names_its_event():
-    unattributable = [site for site, names in _dispatch_sites().items() if not names]
-    assert not unattributable, (
-        f"{unattributable} dispatch without naming a WatchEventType member; "
-        "teach this guard where their event comes from"
-    )
-
-
-def test_every_subscribable_event_is_dispatched():
-    never_fires = set(ALL_EVENT_TYPE_VALUES) - _dispatched_values()
-    assert not never_fires, (
-        f"{sorted(never_fires)} are subscribable but no code dispatches them (#166): "
-        "add a dispatch site, or take them off WatchEventType"
-    )
-
-
-def test_every_dispatched_event_is_subscribable():
-    assert _dispatched_values() <= set(ALL_EVENT_TYPE_VALUES)
+def test_the_scanner_finds_a_call_an_import_and_a_definition():
+    """The scanner itself, on synthetic source: each form a site could take."""
+    for source in (
+        "async def f(s, e):\n    await dispatch_event_notifications(session=s, event=e)\n",
+        "from src.core.notifications.notify import dispatch_event_notifications\n",
+        "async def dispatch_event_notifications(session, event):\n    pass\n",
+        "async def f(s, e):\n    await notify.dispatch_event_notifications(s, e)\n",
+    ):
+        assert _DISPATCH in _names(ast.parse(source)), source
 
 
 def test_subscribe_checkboxes_offer_exactly_the_subscribable_events():
-    """``EVENT_TITLES`` drives the checkboxes; it may not offer more or fewer."""
+    """``EVENT_TITLES`` drives the template form's checkboxes (#166); #379 deletes both."""
     assert set(EVENT_TITLES) == set(ALL_EVENT_TYPE_VALUES)
-
-
-# The scanner itself, on synthetic source: a guard that over-counts would pass
-# an event that is only compared against — the #166 defect again.
-
-_SITE = """
-async def emit(session, prev):
-    if prev == WatchEventType.WATCH_RECOVERED:
-        pass
-    await dispatch_event_notifications(
-        session=session, event=WatchEvent(event_type=WatchEventType.CHANGE_DETECTED)
-    )
-"""
-
-
-def test_a_compared_member_is_not_counted_as_emitted():
-    assert _sites_in(ast.parse(_SITE), "m.py") == {"m.py:emit": {"CHANGE_DETECTED"}}
-
-
-def test_a_positional_event_type_is_counted():
-    source = """
-async def emit(session):
-    event = WatchEvent(WatchEventType.WATCH_ERROR, "id", "n", "u", now)
-    await dispatch_event_notifications(session=session, event=event)
-"""
-    assert _sites_in(ast.parse(source), "m.py") == {"m.py:emit": {"WATCH_ERROR"}}
-
-
-def test_same_named_sites_in_one_module_merge():
-    source = f"""
-class A:
-{_SITE.replace(chr(10), chr(10) + "    ")}
-class B:
-{_SITE.replace("CHANGE_DETECTED", "WATCH_ERROR").replace(chr(10), chr(10) + "    ")}
-"""
-    assert _sites_in(ast.parse(source), "m.py") == {"m.py:emit": {"CHANGE_DETECTED", "WATCH_ERROR"}}
-
-
-def test_every_emitted_name_is_a_member():
-    unknown = {n for names in _dispatch_sites().values() for n in names} - set(
-        WatchEventType.__members__
-    )
-    assert not unknown, f"WatchEvent(event_type=...) names non-members: {sorted(unknown)}"

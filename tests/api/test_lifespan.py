@@ -18,8 +18,10 @@ from src.core.notifier_client import (
     NotifierCredentialMissing,
     NotifierNotEnabled,
 )
-from src.core.notify_cutover import NOTIFY_CUTOVER_AT_ENV, NotifyCutoverInvalid
 from src.core.public_base_url import PUBLIC_BASE_URL_ENV, PublicBaseUrlInvalid
+
+# Named here, not imported: the module that read it is gone (#376 part 2).
+_NOTIFY_CUTOVER_AT_ENV = "WATCHER_NOTIFY_CUTOVER_AT"
 
 
 @pytest.mark.asyncio
@@ -314,35 +316,6 @@ async def test_lifespan_refuses_a_malformed_public_base_url(monkeypatch, caplog,
     get_app.assert_not_called()
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "value", ["2026-11-06", "2026-11-06T21:00:00", "2026-11-06T13:00:00-08:00"]
-)
-async def test_lifespan_refuses_a_malformed_notify_cutover(monkeypatch, caplog, value):
-    """#376: a T this process could misread is a double send or a silent gap at
-    F3, so it refuses the start — CRITICAL, naming the variable, before any
-    consumer or worker exists."""
-    monkeypatch.setenv(NOTIFY_CUTOVER_AT_ENV, value)
-
-    with (
-        patch("src.api.main.get_app") as get_app,
-        patch("src.api.main.get_shared_bus_client") as get_client,
-    ):
-        from src.api.main import lifespan
-
-        with caplog.at_level("CRITICAL", logger="src.api.main"):
-            with pytest.raises(NotifyCutoverInvalid):
-                async with lifespan(MagicMock()):
-                    pass
-
-    assert any(
-        record.levelname == "CRITICAL" and NOTIFY_CUTOVER_AT_ENV in record.getMessage()
-        for record in caplog.records
-    )
-    get_client.assert_not_called()
-    get_app.assert_not_called()
-
-
 def _idle_proc_app():
     fake_proc_app = MagicMock()
     fake_proc_app.open_async = AsyncMock()
@@ -361,23 +334,12 @@ def _idle_proc_app():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("value", "line"),
-    [
-        (None, "notify cutover: unset (Watcher dispatches every event)"),
-        (
-            "2026-11-06T21:00:00Z",
-            "notify cutover: 2026-11-06T21:00:00.000000Z (events at or after it are Archiver's)",
-        ),
-    ],
-)
-async def test_lifespan_starts_and_says_which_cutover(monkeypatch, caplog, value, line):
-    """Unset starts exactly as today; a valid T starts too. Either way the
-    journal carries the line flip step 3 compares with Archiver's."""
-    if value is None:
-        monkeypatch.delenv(NOTIFY_CUTOVER_AT_ENV, raising=False)
-    else:
-        monkeypatch.setenv(NOTIFY_CUTOVER_AT_ENV, value)
+@pytest.mark.parametrize("value", ["2026-11-06T21:00:00Z", "2026-11-06", "not-an-instant"])
+async def test_a_leftover_notify_cutover_line_is_ignored(monkeypatch, caplog, value):
+    """#376 part 2: the T gate is gone with Watcher's dispatch. The line stays in
+    ``/etc/watcher/.env`` until the operator removes it after this deploy, so
+    whatever it holds starts the process and says nothing."""
+    monkeypatch.setenv(_NOTIFY_CUTOVER_AT_ENV, value)
 
     with (
         patch("src.api.main.get_app", return_value=_idle_proc_app()),
@@ -386,11 +348,11 @@ async def test_lifespan_starts_and_says_which_cutover(monkeypatch, caplog, value
     ):
         from src.api.main import app
 
-        with caplog.at_level("INFO", logger="src.core.notify_cutover"):
+        with caplog.at_level("INFO"):
             async with app.router.lifespan_context(app):
                 pass
 
-    assert [r.getMessage() for r in caplog.records if r.name == "src.core.notify_cutover"] == [line]
+    assert not [r for r in caplog.records if "notify cutover" in r.getMessage()]
 
 
 class TestBusReachabilityProbe:

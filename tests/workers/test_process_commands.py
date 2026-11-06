@@ -38,14 +38,11 @@ from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.pending_watch_event import PendingWatchEvent
 from src.core.models.process_command import ProcessCommand, ProcessCommandStatus
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
-from src.core.notifications.events import WatchEventType
-from src.core.notifications.renotify import ERROR_RENOTIFY_INTERVAL_ENV
 from src.core.process_commands import (
     PROCESS_COMMAND_HARD_LIMIT_ENV,
     PROCESS_COMMAND_TIMEOUT_ENV,
     create_process_command,
 )
-from src.core.utils import format_utc_iso
 from src.core.validators import (
     CONDITIONAL_GET_ENV,
     replayable_validators,
@@ -443,11 +440,14 @@ async def _decisive(
     return row
 
 
-def _quiet(monkeypatch) -> AsyncMock:
-    """Stub every notification the decisive path can send; returns the change spy."""
-    monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
-    change = AsyncMock(return_value=0)
-    monkeypatch.setattr(pipeline_mod, "dispatch_event_notifications", change)
+def _spy_change_fact(monkeypatch) -> MagicMock:
+    """Spy on the ``change_detected`` fact the decisive path stages (#369).
+
+    Watcher sends nothing since F3 (#376): a detected change is the fact
+    Archiver notifies from, so the fact is what these tests count.
+    """
+    change = MagicMock(wraps=pipeline_mod.enqueue_change_detected)
+    monkeypatch.setattr(pipeline_mod, "enqueue_change_detected", change)
     return change
 
 
@@ -509,7 +509,7 @@ class TestDecisiveApply:
             db_session, fetch_over={"etag": '"v1"'}, **_completed(spec_fingerprint="spec1:x")
         )
         _wire(db_session, monkeypatch)
-        change = _quiet(monkeypatch)
+        change = _spy_change_fact(monkeypatch)
 
         result = await apply_process_fact(row.command_id)
 
@@ -545,7 +545,7 @@ class TestDecisiveApply:
         assert sync.blob_fingerprint == RAW_DIGEST
         assert sync.source_media_type == "text/html"
         assert sync.spec_fingerprint == "spec1:x"
-        change.assert_not_awaited()
+        change.assert_not_called()
         (event,) = await _audits(db_session, EventType.CHECK_SNAPSHOT_CREATED)
         assert event.payload["source"] == "processor"
 
@@ -558,7 +558,7 @@ class TestDecisiveApply:
             **_completed(),
         )
         _wire(db_session, monkeypatch)
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
 
         await apply_process_fact(row.command_id)
 
@@ -570,7 +570,7 @@ class TestDecisiveApply:
         # #264: a health transition defers a watch-status republish.
         row = await _decisive(db_session, **_completed())
         _wire(db_session, monkeypatch)
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
         republish = AsyncMock()
         monkeypatch.setattr(fc_mod, "defer_status_republish", republish)
 
@@ -601,7 +601,7 @@ class TestDecisiveApply:
             )
         await db_session.flush()
         _wire(db_session, monkeypatch)
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
 
         assert (await apply_process_fact(renewed.command_id))["renewal_enqueued"] is True
         assert (await apply_process_fact(plain.command_id))["renewal_enqueued"] is False
@@ -629,12 +629,12 @@ class TestDecisiveApply:
         item.processor_version = "0.19.7+1"
         await db_session.flush()
         _wire(db_session, monkeypatch)
-        change = _quiet(monkeypatch)
+        change = _spy_change_fact(monkeypatch)
 
         result = await apply_process_fact(row.command_id)
 
         assert result["changed"] is True
-        change.assert_awaited_once()
+        change.assert_called_once()
         sync = (
             await db_session.execute(
                 select(PendingArchiverSync).where(PendingArchiverSync.watched_item_id == item.id)
@@ -663,12 +663,12 @@ class TestDecisiveApply:
         item.processor_version = "0.19.7+1"
         await db_session.flush()
         _wire(db_session, monkeypatch)
-        change = _quiet(monkeypatch)
+        change = _spy_change_fact(monkeypatch)
 
         result = await apply_process_fact(row.command_id)
 
         assert result["rebaselined"] is True
-        change.assert_not_awaited()
+        change.assert_not_called()
         assert len(await _audits(db_session, EventType.CHECK_REBASELINED)) == 1
         (event,) = await _audits(db_session, EventType.CHECK_SNAPSHOT_CREATED)
         assert event.payload["rebaselined"] is True
@@ -681,7 +681,7 @@ class TestDecisiveApply:
             **_empty(),
         )
         _wire(db_session, monkeypatch)
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
 
         result = await apply_process_fact(row.command_id)
 
@@ -695,35 +695,6 @@ class TestDecisiveApply:
         assert item.etag is None  # #269: the next fetch is in full
         assert await _revisions(db_session, item.id) == []
         assert len(await _audits(db_session, EventType.CHECK_EXTRACTION_FAILED)) == 1
-
-    async def test_a_persistent_failure_re_notifies_without_republishing(
-        self, db_session, monkeypatch
-    ):
-        """#71 on the path production runs: a processor-decided failure of an
-        item already in ERROR past the window reminds, and is no transition."""
-        monkeypatch.delenv(ERROR_RENOTIFY_INTERVAL_ENV, raising=False)
-        told = datetime.now(UTC) - timedelta(hours=25)
-        row = await _decisive(
-            db_session,
-            specs=(SPEC_A,),
-            item_over={"health_status": WatchHealthStatus.ERROR, "last_error_notified_at": told},
-            **_empty(),
-        )
-        _wire(db_session, monkeypatch)
-        _quiet(monkeypatch)
-        dispatch = AsyncMock(return_value=0)
-        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", dispatch)
-        republish = AsyncMock()
-        monkeypatch.setattr(fc_mod, "defer_status_republish", republish)
-
-        await apply_process_fact(row.command_id)
-
-        event = dispatch.await_args.kwargs["event"]
-        assert event.event_type == WatchEventType.WATCH_ERROR
-        assert event.metadata["renotify"] is True
-        assert event.metadata["previously_notified_at"] == format_utc_iso(told)
-        assert (await self._item(db_session, row)).last_error_notified_at == event.occurred_at
-        republish.assert_not_awaited()
 
     @pytest.mark.parametrize(
         "reason", ["extraction_error", "unsupported_media_type", "invalid_input"]
@@ -741,7 +712,7 @@ class TestDecisiveApply:
             failure_detail="dead-lettered: parser blew up",
         )
         _wire(db_session, monkeypatch)
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
         client = fakeredis.FakeAsyncRedis()
 
         result = await apply_process_fact(row.command_id, bus_client=client)
@@ -763,7 +734,7 @@ class TestDecisiveApply:
             failure_detail="blob gone",
         )
         _wire(db_session, monkeypatch)
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
         client = fakeredis.FakeAsyncRedis()
 
         result = await apply_process_fact(row.command_id, bus_client=client)
@@ -793,7 +764,7 @@ class TestDecisiveApply:
         )
         await _seed_replayable_pair(db_session, monkeypatch, row)
         _wire(db_session, monkeypatch)
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
         return row
 
     async def test_input_unreadable_re_fetches_without_validators(self, db_session, monkeypatch):
@@ -837,7 +808,7 @@ class TestDecisiveApply:
             reissue_count=2,
         )
         _wire(db_session, monkeypatch)
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
         client = fakeredis.FakeAsyncRedis()
 
         result = await apply_process_fact(row.command_id, bus_client=client)
@@ -880,7 +851,7 @@ class TestDecisiveApply:
         newer.applied_at = newer.issued_at
         await db_session.flush()
         _wire(db_session, monkeypatch)
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
 
         result = await apply_process_fact(row.command_id)
 
@@ -905,7 +876,7 @@ class TestDecisiveReaper:
 
     async def test_held_items_wait_without_error(self, db_session, monkeypatch, caplog):
         row = await _decisive(db_session, issued_at=self._stale())
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
 
         with caplog.at_level(logging.WARNING):
             result = await reap_process_commands(
@@ -922,7 +893,7 @@ class TestDecisiveReaper:
     async def test_the_hard_limit_fails_the_check(self, db_session, monkeypatch):
         monkeypatch.setenv(PROCESS_COMMAND_HARD_LIMIT_ENV, "7200")
         row = await _decisive(db_session, issued_at=datetime.now(UTC) - timedelta(hours=3))
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
 
         result = await reap_process_commands(
             session=db_session, bus_client=fakeredis.FakeAsyncRedis()
@@ -948,7 +919,7 @@ class TestDecisiveReaper:
         monkeypatch.setenv(PROCESS_COMMAND_HARD_LIMIT_ENV, "7200")
         row = await _decisive(db_session, issued_at=datetime.now(UTC) - timedelta(hours=3))
         item = await _seed_replayable_pair(db_session, monkeypatch, row)
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
 
         result = await reap_process_commands(
             session=db_session, bus_client=fakeredis.FakeAsyncRedis()
@@ -965,7 +936,7 @@ class TestDecisiveReaper:
         monkeypatch.setenv(FETCH_MAX_REISSUES_ENV, "2")
         await _command(db_session, issued_at=datetime.now(UTC), **_completed())  # read past
         row = await _decisive(db_session, issued_at=self._stale(), reissue_count=2)
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
 
         result = await reap_process_commands(
             session=db_session, bus_client=fakeredis.FakeAsyncRedis()
@@ -1009,7 +980,7 @@ class TestHealthReasons:
             **fields,
         )
         _wire(db_session, monkeypatch)
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
 
         await apply_process_fact(row.command_id, bus_client=fakeredis.FakeAsyncRedis())
 
@@ -1020,7 +991,7 @@ class TestHealthReasons:
         monkeypatch.setenv(FETCH_MAX_REISSUES_ENV, "1")
         row = await _decisive(db_session, reissue_count=1, **_failed("input_unreadable"))
         _wire(db_session, monkeypatch)
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
 
         await apply_process_fact(row.command_id, bus_client=fakeredis.FakeAsyncRedis())
 
@@ -1029,7 +1000,7 @@ class TestHealthReasons:
     async def test_a_give_up_is_processing_timeout(self, db_session, monkeypatch):
         monkeypatch.setenv(PROCESS_COMMAND_HARD_LIMIT_ENV, "7200")
         row = await _decisive(db_session, issued_at=datetime.now(UTC) - timedelta(hours=3))
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
 
         await reap_process_commands(session=db_session, bus_client=fakeredis.FakeAsyncRedis())
 
@@ -1046,7 +1017,7 @@ class TestHealthReasons:
             **_completed(),
         )
         _wire(db_session, monkeypatch)
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
 
         await apply_process_fact(row.command_id)
 
@@ -1076,9 +1047,7 @@ class TestDeadLettered:
             **fields,
         )
         _wire(db_session, monkeypatch)
-        _quiet(monkeypatch)
-        self.dispatch = AsyncMock(return_value=0)
-        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", self.dispatch)
+        _spy_change_fact(monkeypatch)
         self.client = fakeredis.FakeAsyncRedis()
         result = await apply_process_fact(row.command_id, bus_client=self.client)
         fetch = await db_session.get(FetchCommand, row.fetch_command_id)
@@ -1122,9 +1091,6 @@ class TestDeadLettered:
         (event,) = await _audits(db_session, EventType.CHECK_PROCESSING_FAILED)
         assert (event.payload["reason"], event.payload["detail"]) == ("dead_lettered", detail)
         assert await _audits(db_session, EventType.CHECK_EXTRACTION_FAILED) == []
-        (error,) = [c.kwargs["event"] for c in self.dispatch.await_args_list]
-        assert error.event_type == WatchEventType.WATCH_ERROR
-        assert error.metadata["reason"] == "dead_lettered"
 
 
 class TestUnpublishedPastTheHardLimit:
@@ -1142,7 +1108,7 @@ class TestUnpublishedPastTheHardLimit:
             issued_at=datetime.now(UTC) - timedelta(hours=3),
             status=ProcessCommandStatus.PENDING_PUBLISH,
         )
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
 
         result = await reap_process_commands(
             session=db_session, bus_client=fakeredis.FakeAsyncRedis()
@@ -1235,7 +1201,7 @@ class TestProcessorEndToEnd:
     def _wired(self, db_session, monkeypatch):
         _wire(db_session, monkeypatch)
         monkeypatch.setattr(fc_mod, "get_session_factory", pc_mod.get_session_factory)
-        return _quiet(monkeypatch)
+        return _spy_change_fact(monkeypatch)
 
     async def test_baseline_then_a_change(self, db_session, monkeypatch):
         change = self._wired(db_session, monkeypatch)
@@ -1255,7 +1221,7 @@ class TestProcessorEndToEnd:
             f"sha256:{hashlib.sha256(b'Board meets Thursday').hexdigest()}"
         )
         assert wi.health_status == WatchHealthStatus.OK
-        change.assert_awaited_once()
+        change.assert_called_once()
         assert await get_open_command(db_session, wi.id) is None
 
     async def test_a_probe_resolves_and_keys_the_pair_to_the_final_url(
@@ -1308,7 +1274,7 @@ class TestWatchEventFacts:
             item.processor_version = "0.19.7+1"
             await db_session.flush()
         _wire(db_session, monkeypatch)
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
         await apply_process_fact(row.command_id, bus_client=fakeredis.FakeAsyncRedis())
         await db_session.refresh(item)
         return row, item
@@ -1375,7 +1341,7 @@ class TestWatchEventFacts:
     async def test_a_give_up_is_processing_timeout(self, db_session, monkeypatch):
         monkeypatch.setenv(PROCESS_COMMAND_HARD_LIMIT_ENV, "7200")
         await _decisive(db_session, issued_at=datetime.now(UTC) - timedelta(hours=3))
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
 
         await reap_process_commands(session=db_session, bus_client=fakeredis.FakeAsyncRedis())
 
@@ -1413,7 +1379,7 @@ class TestCommandedCheckRepublish:
             **fields,
         )
         _wire(db_session, monkeypatch)
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
         republish = AsyncMock()
         monkeypatch.setattr(fc_mod, "defer_status_republish", republish)
         await apply_process_fact(row.command_id, bus_client=fakeredis.FakeAsyncRedis())
@@ -1462,7 +1428,7 @@ class TestCommandedCheckRepublish:
             fetch_over={"check_command_id": "01CHECK"},
             item_over={"health_status": WatchHealthStatus.ERROR},
         )
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
         republish = AsyncMock()
         monkeypatch.setattr(fc_mod, "defer_status_republish", republish)
 
@@ -1485,7 +1451,7 @@ class TestCommandedCheckRepublish:
         newer.applied_at = newer.issued_at
         await db_session.flush()
         _wire(db_session, monkeypatch)
-        _quiet(monkeypatch)
+        _spy_change_fact(monkeypatch)
         republish = AsyncMock()
         monkeypatch.setattr(fc_mod, "defer_status_republish", republish)
 

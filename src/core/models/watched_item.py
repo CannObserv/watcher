@@ -215,15 +215,6 @@ class WatchedItem(Base, TimestampMixin):
     error_since: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
-    # When anyone was last told this item is failing (#71): stamped on every
-    # WATCH_ERROR dispatch, the transition's and each re-notify's, and cleared
-    # on ERROR→OK. Watcher-owned, so it survives reconciliation like
-    # health and timings. The re-notify gate measures
-    # WATCHER_ERROR_RENOTIFY_INTERVAL from it; parked #63 (digests) is the
-    # other reader it was named for.
-    last_error_notified_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, default=None
-    )
 
     # Plain unique index since #251 — the column is NOT NULL, so the partial
     # predicate that used to exempt bare rows has nothing left to exempt.

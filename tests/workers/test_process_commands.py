@@ -1091,6 +1091,10 @@ class TestDeadLettered:
         (event,) = await _audits(db_session, EventType.CHECK_PROCESSING_FAILED)
         assert (event.payload["reason"], event.payload["detail"]) == ("dead_lettered", detail)
         assert await _audits(db_session, EventType.CHECK_EXTRACTION_FAILED) == []
+        # The edge Archiver notifies from carries the processor's reason (#376).
+        (fact,) = (await db_session.execute(select(PendingWatchEvent))).scalars().all()
+        assert fact.event_type == "watch_error"
+        assert WatchErrorEmit.model_validate(fact.payload).reason == "dead_lettered"
 
 
 class TestUnpublishedPastTheHardLimit:

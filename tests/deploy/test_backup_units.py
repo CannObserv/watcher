@@ -141,8 +141,7 @@ class TestServiceCredentials:
     def test_loads_its_own_configuration_and_nothing_of_the_services(self) -> None:
         """One file, required — no bucket is a failed start, not a quiet one.
         Not /etc/watcher/.env — it carries the database URLs and the bus URL,
-        which a job that holds no database credential must not have — and never
-        notifier.env, which is watcher.service's alone (#278)."""
+        which a job that holds no database credential must not have."""
         assert _values(SERVICE.read_text(), "EnvironmentFile") == ["/etc/watcher/backup.env"]
 
     @pytest.mark.parametrize("key", [GCS_KEY, CHECKIN_KEY], ids=["gcs", "checkin-key"])

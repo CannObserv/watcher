@@ -5,17 +5,15 @@ file in place and left ``.env.bak-precutover-*`` beside it — a byte-for-byte
 copy holding every token the real file holds, matching no pattern, and showing
 up as an untracked file one ``git add -A`` away from being published.
 
-This is the third guard on the same boundary and the only one that acts before
-the fact. ``tests/deploy/test_notifier_credential_is_unit_only.py`` asserts
-that nothing *shell-readable* holds the production notifier pair, and
-``scripts/load-env.sh`` decides what a shell inherits; both operate on files
-that already exist. Git's ignore rules are what stop a copy of one from
-reaching a remote, where deletion does not undo publication.
+This is the guard on that boundary that acts before the fact:
+``scripts/load-env.sh`` decides what a shell inherits from files that already
+exist, and git's ignore rules are what stop a copy of one from reaching a
+remote, where deletion does not undo publication.
 
-The two guards share ``ENV_FILE_PREFIXES`` deliberately: a filename family the
-credential sweep knows to *read* is one git must know to *ignore*, and letting
-those lists drift is how ``notifier.env.bak`` ended up detectable but
-committable.
+``notifier.env`` stays a family after #379 retired the file: until
+CannObserv/notifier#118 revokes the production key, a stray copy of it is
+still a live credential. ``ENV_FILE_PREFIXES`` was shared with #278's
+credential sweep, which #379 deleted with the credential.
 """
 
 import shutil
@@ -23,8 +21,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
-from tests.deploy.test_notifier_credential_is_unit_only import ENV_FILE_PREFIXES
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,6 +31,9 @@ pytestmark = pytest.mark.skipif(
     not (REPO_ROOT / ".git").exists() or shutil.which("git") is None,
     reason="not a git checkout, or git is unavailable",
 )
+
+#: Filename families git must ignore: anything named like an env file.
+ENV_FILE_PREFIXES = (".env", "notifier.env")
 
 #: Every family in ``ENV_FILE_PREFIXES``, several names deep. One member per
 #: family is what CR-11 caught: ``.env.*`` needs a literal dot, so ``.envrc``

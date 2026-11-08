@@ -929,16 +929,6 @@ wheels = [
 ]
 
 [[package]]
-name = "notifier-client"
-version = "0.3.1"
-source = { git = "https://github.com/CannObserv/notifier.git?subdirectory=clients%2Fpython&tag=v0.3.1#36537f730bb597d646a46677638646a2404350cc" }
-dependencies = [
-    { name = "attrs" },
-    { name = "httpx" },
-    { name = "python-ulid" },
-]
-
-[[package]]
 name = "packaging"
 version = "26.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1652,7 +1642,6 @@ dependencies = [
     { name = "google-cloud-storage" },
     { name = "httpx" },
     { name = "jinja2" },
-    { name = "notifier-client" },
     { name = "procrastinate" },
     { name = "pydantic" },
     { name = "python-json-logger" },
@@ -1688,7 +1677,6 @@ requires-dist = [
     { name = "google-cloud-storage", specifier = ">=2,<4" },
     { name = "httpx", specifier = ">=0.28.0,<1" },
     { name = "jinja2", specifier = ">=3.1.6,<4" },
-    { name = "notifier-client", git = "https://github.com/CannObserv/notifier.git?subdirectory=clients%2Fpython&tag=v0.3.1" },
     { name = "procrastinate", specifier = ">=3.0,<4" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "python-json-logger", specifier = ">=4.0.0,<5" },

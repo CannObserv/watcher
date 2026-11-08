@@ -11,8 +11,8 @@ Description=Watcher — Cannabis Observer monitoring service
 # What changes is that the dependency is now a network hop carrying an
 # explicit connection policy (src/core/bus.py, #287) rather than a local unit.
 #
-# tailscaled is ORDERING ONLY (#296): the broker and notifier are MagicDNS
-# names on the tailnet, so starting first only buys connection failures. No
+# tailscaled is ORDERING ONLY (#296): the broker is a MagicDNS name on the
+# tailnet, so starting first only buys connection failures. No
 # Wants=/Requires=: a Tailscale upgrade restarts the agent, and that must not
 # take the dashboard down with it. Ordering does not close the cold-boot race
 # on its own — MagicDNS answers after the address (replicator#88) — which is
@@ -50,31 +50,13 @@ ExecStartPre=/usr/local/bin/uv sync --locked --offline
 # store — ANTHROPIC_API_KEY and a GH_TOKEN_* per sibling repo — and loading it
 # here handed every one of them to the process serving the dashboard. None of
 # it is production configuration. A production setting goes in
-# /etc/watcher/.env; a production credential goes in a unit-only file like
-# notifier.env below.
+# /etc/watcher/.env; a production credential goes in a file only this unit
+# loads (#278's rule; its file retired with the notifier client, #379).
 EnvironmentFile=-/run/watcher/build-id
 EnvironmentFile=/etc/watcher/.env
 
-# The production notifier credential, loaded by this unit and nothing else
-# (#278). /etc/watcher/.env is exported into every agent shell by
-# scripts/load-env.sh, so while WATCHER_NOTIFIER_BASE_URL and
-# WATCHER_NOTIFIER_API_KEY lived there, every process on this VM *held* the
-# production tenant's key — the #277 flag below stopped it being used by
-# accident, but notifier's audit had already found ~1289 watcher fixture
-# notifications delivered on it to the real Slack and Mailgun channels.
-# This file is 600 root:root: systemd parses EnvironmentFile= as root before
-# User= takes effect, so the exedev account never needs to read it.
-#
-# Last, deliberately: env files apply in order, so any env file added after
-# it could let a stray value redirect production's notifications. And
-# required, not optional (no `-`): an absent file must
-# fail the start rather than leave the service up and quietly un-notifying.
-# src/core/notifier_client makes the same combination fatal in-app, which
-# covers the case systemd cannot see — a file present but empty.
-EnvironmentFile=/etc/watcher/notifier.env
-
 # Production-database opt-in for src/core/db_safety (#233). Must live HERE,
-# never in an EnvironmentFile — env files are sourced by hand-run servers,
+# never in an EnvironmentFile — env files are loaded by hand-run servers,
 # which are exactly what the guard exists to stop.
 Environment=WATCHER_ALLOW_PRODUCTION_DB=1
 
@@ -102,17 +84,6 @@ UnsetEnvironment=WATCHER_MIGRATION_DATABASE_URL
 # Dropping it does NOT silently disable publishing — the lifespan refuses to
 # start on a URL held without it.
 Environment=WATCHER_BUS_ENABLED=1
-
-# Notifier opt-in for src/core/notifier_client (#277), unit-only on the same
-# principle and with the largest blast radius of the three: the EnvironmentFile
-# above carries WATCHER_NOTIFIER_BASE_URL and WATCHER_NOTIFIER_API_KEY, so anything that sources
-# /etc/watcher/.env holds the production tenant's credentials. A stray database
-# row is recoverable and a stray bus frame is inert; a stray notification is
-# delivered to real subscribers and cannot be recalled — and it *succeeds*, so
-# it leaves no error behind to notice.
-# Dropping this line does NOT silently disable notifications — the lifespan
-# refuses to start on a URL held without it.
-Environment=WATCHER_NOTIFIER_ENABLED=1
 
 # --log-config routes uvicorn's own loggers (uvicorn, uvicorn.access,
 # uvicorn.error — all propagate=False with plain-text handlers by default)

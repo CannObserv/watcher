@@ -339,23 +339,10 @@ class TestDetailPage:
         assert b"Danger Zone" in response.content
         assert b"Archive" in response.content
 
-    async def test_notification_templates_panel_renders_item_template(self, client, db_session):
-        """#200: the item-template panel renders an item-scoped template's title + badge.
-
-        Post-#200 item notifications are NotificationTemplate rows with
-        visibility='watched_item'; the detail page surfaces them in the
-        "Notification Templates" panel (the separate "Notification Configs" panel
-        is gone — the per-Watch tier folded in #191, the model unified in #200).
-        """
-
-        item_id = ULID()
-        wi = WatchedItem(
-            archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item_id,
-            name="WithConfig",
-        )
-        db_session.add(wi)
-        await db_session.flush()
+    async def test_no_notification_templates_panel(self, client, db_session):
+        """#379: the detail page shows no template panel, even for an item that
+        still has an (inert) item-scoped row; the panel's partial route is gone."""
+        wi = await _make_wi(db_session, name="WithTemplate")
         db_session.add(
             NotificationTemplate(
                 visibility=VISIBILITY_WATCHED_ITEM,
@@ -367,12 +354,12 @@ class TestDetailPage:
             )
         )
         await db_session.commit()
-        response = await client.get(f"/watched-items/{wi.id}")
-        body = response.content
-        assert b"Notification Templates" in body
-        # Label uses title and the active badge renders.
-        assert b"Ops Slack" in body
-        assert b"badge-active" in body
+        body = (await client.get(f"/watched-items/{wi.id}")).content
+        assert b"Notification Templates" not in body
+        assert b"Ops Slack" not in body
+        assert b"/partials/watched-item-templates/" not in body
+        partial = await client.get(f"/partials/watched-item-templates/{wi.id}")
+        assert partial.status_code == 404
 
     async def test_temporal_profile_panel_renders(self, client, db_session):
         """#191 CR-5: the detail page still shows a stored profile, read-only and
@@ -718,12 +705,6 @@ class TestDetailPage:
         body = (await client.get(f"/watched-items/{wi.id}")).content
 
         assert b"/effective-url/field?mode=edit" in body
-
-    async def test_detail_activity_after_notification_templates(self, client, db_session):
-        """#202: Recent Activity renders below the Notification Templates panel."""
-        wi = await _make_wi(db_session, name="OrderCheck")
-        body = (await client.get(f"/watched-items/{wi.id}")).content.decode()
-        assert body.index("Notification Templates") < body.index("Recent Activity")
 
     async def test_detail_activity_pager_anchored_in_card(self, client, db_session):
         """Recent Activity table + pager sit in the standard bordered card (parity

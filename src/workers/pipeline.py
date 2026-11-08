@@ -22,7 +22,7 @@ from src.core.models.audit_log import EventType, audit
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.watched_item import WatchedItem
-from src.core.notifications.diff_loader import stored_text_location
+from src.core.stored_text import stored_text_location
 from src.core.utils import format_utc_iso
 from src.core.watch_events import enqueue_change_detected
 
@@ -408,8 +408,8 @@ async def apply_extraction_outcome(
     watched_item.last_changed_at = now
 
     # #369: the fact Archiver will notify from, staged beside the revision so
-    # the caller's commit records both or neither. The previous text is found
-    # the way the diff finds it; one stored before shadow mode has no location.
+    # the caller's commit records both or neither. The previous text's location
+    # is the processor's answer; one stored before shadow mode has none.
     previous_text = await stored_text_location(session, last_rev.content_fingerprint)
     enqueue_change_detected(
         session,

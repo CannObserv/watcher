@@ -1,4 +1,4 @@
-"""Domain dashboard routes — list, detail, lifecycle, cadence, notification defaults."""
+"""Domain dashboard routes — list, detail, lifecycle, cadence."""
 
 import html as html_lib
 from collections.abc import Awaitable, Callable
@@ -11,9 +11,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_db_session, get_probe_fn
-from src.api.routes.helpers import parse_ulid
-from src.api.schemas.content_config import ContentConfig
-from src.api.schemas.validators import validate_event_list
 from src.core.domains import (
     DomainArchived,
     DomainNotFound,
@@ -23,13 +20,7 @@ from src.core.domains import (
 from src.core.egress import DestinationRefused
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
-from src.core.models.notification_template import (
-    VISIBILITY_DOMAIN,
-    VISIBILITY_GLOBAL,
-    NotificationTemplate,
-)
 from src.core.models.watched_item import WatchedItem
-from src.core.notifications.templates import create_template
 from src.core.probe import ProbeResult
 from src.core.scheduling.cadence import (
     validate_optional_schedule_config,
@@ -42,7 +33,6 @@ from src.dashboard.context import (
     get_domains_with_watched_item_counts,
 )
 from src.dashboard.deps import clamp_pagination, is_htmx
-from src.dashboard.forms import parse_content_config_from_form
 from src.dashboard.templating import templates
 
 # NOTE (F1, #374): Watcher no longer publishes content.fetch-policy — Archiver
@@ -578,160 +568,6 @@ async def domain_detail_page(
     return await _render_domain_detail(
         request, domain, session, q=q, status=status, sort=sort, order=order
     )
-
-
-async def _render_domain_templates(request: Request, domain_name: str, session: AsyncSession):
-    """Render the domain_domain_templates partial for *domain_name* (#200).
-
-    Post-#200 a domain's templates are ``NotificationTemplate`` rows with
-    ``visibility='domain'`` — there is no assign-existing flow (a template has one
-    intrinsic scope). Globals are shown read-only as inherited context.
-    """
-    assigned_result = await session.execute(
-        select(NotificationTemplate)
-        .where(
-            NotificationTemplate.visibility == VISIBILITY_DOMAIN,
-            NotificationTemplate.domain_name == domain_name,
-        )
-        .order_by(NotificationTemplate.title)
-    )
-    assigned = assigned_result.scalars().all()
-
-    global_result = await session.execute(
-        select(NotificationTemplate)
-        .where(NotificationTemplate.visibility == VISIBILITY_GLOBAL)
-        .order_by(NotificationTemplate.title)
-    )
-    global_templates = global_result.scalars().all()
-
-    return templates.TemplateResponse(
-        request,
-        "partials/domain_templates.html",
-        {
-            "domain_name": domain_name,
-            "assigned": assigned,
-            "global_templates": global_templates,
-        },
-    )
-
-
-@router.get("/domains/{domain_name}/notifications/new")
-async def domain_notification_new_page(
-    request: Request,
-    domain_name: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Full page: create a new notification template for a domain."""
-    domain = await session.scalar(select(Domain).where(Domain.name == domain_name))
-    if not domain:
-        raise HTTPException(status_code=404, detail="Domain not found")
-    return templates.TemplateResponse(
-        request,
-        "pages/domain_notification_new.html",
-        {
-            "domain_name": domain_name,
-            "title": None,
-            "events": None,
-            "content_config": None,
-            "error": None,
-        },
-    )
-
-
-@router.post("/domains/{domain_name}/notifications/new")
-async def domain_notification_create(
-    request: Request,
-    domain_name: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Create a NotificationTemplate and link to domain. Redirects on success."""
-    domain = await session.scalar(select(Domain).where(Domain.name == domain_name))
-    if not domain:
-        raise HTTPException(status_code=404, detail="Domain not found")
-
-    form = await request.form()
-    title = str(form.get("title") or "").strip()
-    events = form.getlist("events")
-    remote_channel_id = str(form.get("remote_channel_id") or "").strip()
-    channel_hint = str(form.get("channel_hint") or "").strip() or "remote"
-
-    _cc = parse_content_config_from_form(form)
-    _parsed_config = ContentConfig.model_validate(_cc) if _cc else None
-
-    def _page_error(msg: str):
-        return templates.TemplateResponse(
-            request,
-            "pages/domain_notification_new.html",
-            {
-                "domain_name": domain_name,
-                "title": title,
-                "events": events,
-                "content_config": _parsed_config,
-                "error": msg,
-            },
-        )
-
-    if not title:
-        return _page_error("Title is required.")
-    if not remote_channel_id:
-        return _page_error("Remote channel ID is required.")
-
-    try:
-        validate_event_list(events)
-    except ValueError as exc:
-        return _page_error(str(exc))
-
-    await create_template(
-        session,
-        visibility=VISIBILITY_DOMAIN,
-        domain_name=domain_name,
-        title=title,
-        channel_hint=channel_hint,
-        events=events,
-        content_config=_cc,
-        remote_channel_id=remote_channel_id,
-        audit_fields={
-            "title": title,
-            "channel_hint": channel_hint,
-            "source": "domain_dashboard",
-            "domain_name": domain_name,
-        },
-    )
-    await session.commit()
-    return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
-
-
-@router.get("/domains/{domain_name}/domain-templates")
-async def domain_templates_partial(
-    request: Request,
-    domain_name: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """HTMX partial: notification defaults assigned to a domain."""
-    return await _render_domain_templates(request, domain_name, session)
-
-
-@router.post("/domains/{domain_name}/domain-templates/remove/{template_id}")
-async def domain_template_remove(
-    request: Request,
-    domain_name: str,
-    template_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Delete a domain-scoped notification template (#200: removal = delete the row)."""
-    if not is_htmx(request):
-        return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
-    tpl = await session.get(NotificationTemplate, parse_ulid(template_id, "Template"))
-    if tpl and tpl.visibility == VISIBILITY_DOMAIN and tpl.domain_name == domain_name:
-        await session.delete(tpl)
-        audit(
-            session,
-            EventType.NOTIFICATION_TEMPLATE_DELETED,
-            domain_name=domain_name,
-            template_id=template_id,
-        )
-        await session.commit()
-    return await _render_domain_templates(request, domain_name, session)
 
 
 @router.get("/partials/domain-watched-items/{name}")

@@ -11,15 +11,11 @@ from src.dashboard.routes import (
     audit,
     domains,
     home,
-    notifications,
-    watched_item_templates,
     watched_items,
 )
 
 router = APIRouter(tags=["dashboard"], dependencies=[Depends(get_dashboard_user)])
 router.include_router(home.router)
 router.include_router(watched_items.router)
-router.include_router(watched_item_templates.router)
 router.include_router(domains.router)
 router.include_router(audit.router)
-router.include_router(notifications.router)

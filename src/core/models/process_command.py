@@ -84,7 +84,7 @@ class ProcessCommand(Base, TimestampMixin):
             "published_at",
             postgresql_where=text("fact_at IS NOT NULL"),
         ),
-        # Serves the change diff's text lookup (#345, ``stored_text_location``):
+        # Serves the stored-text lookup (#345, ``src.core.stored_text``):
         # partial on that query's own predicate, so it holds only answers it
         # can return.
         Index(

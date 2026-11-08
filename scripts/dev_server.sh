@@ -32,9 +32,6 @@
 #   WATCHER_DEV_PORT                     default 8001 (8000 is systemd's, refused)
 #   WATCHER_DEV_SKIP_MIGRATE=1           skip the alembic upgrade
 #   WATCHER_DEV_SERVER_DRY_RUN=1         print resolution, do not exec uvicorn
-#   WATCHER_DEV_NOTIFIER_BASE_URL        scratch notifier; opts in, needs the key below
-#   WATCHER_DEV_NOTIFIER_API_KEY         scratch notifier key ('development'-marked); required with the URL
-#   WATCHER_DEV_PUBLIC_BASE_URL          base for this server's notification links (e.g. its :8001 URL)
 #   WATCHER_DEV_SERVER_SKIP_ENV_FILES=1  skip loading the env files (tests)
 set -euo pipefail
 
@@ -188,60 +185,6 @@ else
   BUS_ENABLED_REPORT="(cleared)"
 fi
 
-# Same guard again for the notifier (#277), and this is the one whose stray
-# output cannot be recalled: this server runs the embedded worker against a real
-# check pipeline, so a production key here delivers real notifications to real
-# subscribers as the production tenant, and *succeeds*, leaving no error to
-# notice. WATCHER_NOTIFIER_ENABLED is the unit-only opt-in the app now requires beside
-# the URL; as with the bus, this script sets it in the branch that points at a
-# scratch notifier and clears it in the branch that has none.
-#
-# Since #278 the production credential lives in /etc/watcher/notifier.env, which
-# only deploy/watcher.service loads — so the env files loaded above no longer
-# supply WATCHER_NOTIFIER_BASE_URL or WATCHER_NOTIFIER_API_KEY at all. The clearing below
-# stays regardless: it is what makes this script's guarantee independent of the
-# VM's file layout, and it still catches a shell that exported the pair by hand
-# before invoking it.
-#
-# Both halves or neither: a dev base URL falling back to whatever key happened
-# to be in the environment would be the exact hazard this clears, so a URL
-# without its key refuses rather than guesses. Point both at notifier's
-# development tenant — a key it marks `development`, which a production notifier
-# refuses with 403 (notifier#22).
-if [[ -n "${WATCHER_DEV_NOTIFIER_BASE_URL:-}" ]]; then
-  if [[ -z "${WATCHER_DEV_NOTIFIER_API_KEY:-}" ]]; then
-    echo "dev_server: WATCHER_DEV_NOTIFIER_BASE_URL is set without WATCHER_DEV_NOTIFIER_API_KEY." >&2
-    echo "  Refusing to fall back to an inherited WATCHER_NOTIFIER_API_KEY — that would be the" >&2
-    echo "  production tenant's credential (#277). Set both in .env, or neither; use a key" >&2
-    echo "  notifier marks 'development' (#278)." >&2
-    exit 1
-  fi
-  export WATCHER_NOTIFIER_BASE_URL="$WATCHER_DEV_NOTIFIER_BASE_URL"
-  export WATCHER_NOTIFIER_API_KEY="$WATCHER_DEV_NOTIFIER_API_KEY"
-  export WATCHER_NOTIFIER_ENABLED=1
-  NOTIFIER_REPORT="$WATCHER_NOTIFIER_BASE_URL"
-  NOTIFIER_ENABLED_REPORT="1"
-else
-  unset WATCHER_NOTIFIER_BASE_URL
-  unset WATCHER_NOTIFIER_API_KEY
-  unset WATCHER_NOTIFIER_ENABLED
-  NOTIFIER_REPORT="(cleared)"
-  NOTIFIER_ENABLED_REPORT="(cleared)"
-fi
-
-# And for the dashboard's public base URL (#296 D6). /etc/watcher/.env carries
-# production's, and a dev worker that inherited it would send notifications
-# linking readers into the live dashboard — at item ids that exist only in this
-# server's database. Cleared, links are omitted; WATCHER_DEV_PUBLIC_BASE_URL
-# points them at this server instead.
-if [[ -n "${WATCHER_DEV_PUBLIC_BASE_URL:-}" ]]; then
-  export WATCHER_PUBLIC_BASE_URL="$WATCHER_DEV_PUBLIC_BASE_URL"
-  PUBLIC_BASE_REPORT="$WATCHER_PUBLIC_BASE_URL"
-else
-  unset WATCHER_PUBLIC_BASE_URL
-  PUBLIC_BASE_REPORT="(cleared)"
-fi
-
 # pytest builds watcher_test with Base.metadata.create_all, not alembic, so
 # its alembic_version (if any) never matches the actual tables and a plain
 # `upgrade head` fails mid-history. The test DB is disposable by definition,
@@ -291,9 +234,6 @@ if [[ "${WATCHER_DEV_SERVER_DRY_RUN:-}" == "1" ]]; then
   echo "PROCRASTINATE_DATABASE_URL=(cleared)"
   echo "WATCHER_BUS_REDIS_URL=$BUS_REPORT"
   echo "WATCHER_BUS_ENABLED=$BUS_ENABLED_REPORT"
-  echo "WATCHER_NOTIFIER_BASE_URL=$NOTIFIER_REPORT"
-  echo "WATCHER_NOTIFIER_ENABLED=$NOTIFIER_ENABLED_REPORT"
-  echo "WATCHER_PUBLIC_BASE_URL=$PUBLIC_BASE_REPORT"
   echo "PORT=$PORT"
   echo "MIGRATE=$MIGRATE_REPORT"
   echo "RESET=$RESET_REPORT"

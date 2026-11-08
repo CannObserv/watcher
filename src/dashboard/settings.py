@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import get_db_session
 from src.core.models.api_key import ApiKey
 from src.core.models.app_user import AppUser
-from src.core.models.notification_template import NotificationTemplate
 from src.dashboard.deps import generate_api_key, get_dashboard_user, is_htmx
 from src.dashboard.templating import templates
 
@@ -25,17 +24,10 @@ async def settings_landing(
     user: AppUser = Depends(get_dashboard_user),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Render settings landing page with API key count and active notification template count."""
+    """Render settings landing page with the API key count."""
     key_count = (
         await session.execute(
             select(func.count()).select_from(ApiKey).where(ApiKey.user_id == user.id)
-        )
-    ).scalar_one()
-    tpl_count = (
-        await session.execute(
-            select(func.count())
-            .select_from(NotificationTemplate)
-            .where(NotificationTemplate.is_active == True)  # noqa: E712
         )
     ).scalar_one()
     return templates.TemplateResponse(
@@ -45,7 +37,6 @@ async def settings_landing(
             "active_page": "settings",
             "user": user,
             "api_key_count": key_count,
-            "notification_template_count": tpl_count,
         },
     )
 

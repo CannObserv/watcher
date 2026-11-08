@@ -178,20 +178,6 @@
 </section>
 
 <section class="mb-8">
-  {# "+ Add" lives in the partial's "This Item" section header (it adds an
-     item-owned template); keeping it here would dissociate it from its target
-     and read as adding a Global template (#199 CR-2). #}
-  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Notification Templates</h3>
-  <div
-    id="wi-templates"
-    hx-get="/partials/watched-item-templates/{{ watched_item.id }}"
-    hx-trigger="load"
-    hx-swap="innerHTML">
-    {% include "partials/watched_item_templates.html" %}
-  </div>
-</section>
-
-<section class="mb-8">
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Activity</h3>
   {% include "partials/audit_filter_chips.html" %}
   {# Card wrapper (parity with the sibling detail panels). It lives outside the

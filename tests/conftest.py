@@ -113,53 +113,6 @@ os.environ.pop("PROCRASTINATE_DATABASE_URL", None)
 os.environ.pop("WATCHER_BUS_REDIS_URL", None)
 os.environ.pop("WATCHER_DEV_BUS_REDIS_URL", None)
 
-# The same hazard again, and the one with the largest blast radius (#277):
-# /etc/watcher/.env carried WATCHER_NOTIFIER_BASE_URL and WATCHER_NOTIFIER_API_KEY
-# until #278 moved them to a unit-only file, and AGENTS.md tells every agent to
-# `source scripts/load-env.sh` before pytest. A stray database row is
-# recoverable and a stray bus frame is inert; a stray notification is
-# *delivered*, to real subscribers on real channels, and cannot be recalled.
-# Worse, it succeeds — so unlike the two above it leaves no error behind to
-# notice.
-#
-# Kept after the move, and not redundantly: the scrub is what makes this suite
-# indifferent to where the credential lives. A developer who exports the pair by
-# hand, a future env file that reacquires it, a `.env` holding a scratch
-# notifier — all of them stop here, and the guarantee this module owns ("no test
-# can dispatch") stays a property of the suite rather than of the VM's file
-# layout. Tests that want a client set both vars via monkeypatch.setenv, which
-# restores itself on teardown.
-#
-# WATCHER_NOTIFIER_ENABLED joins them under #278, which made the flag-without-a-URL
-# combination a startup failure in its own right: an exported flag would
-# otherwise turn every lifespan test into an environment failure.
-#
-# The WATCHER_DEV_NOTIFIER_* pair goes too (CR-3), matching the dev variable the
-# bus block above already pops. Nothing in src/ reads either — they are
-# scripts/dev_server.sh's — but they live in the repo .env that load-env.sh
-# exports before every pytest run, and #278 asked notifier for a development
-# key that belongs in exactly that file. All five cleared means the session's
-# answer to "is there a notifier?" is a flat no, whatever the launching shell
-# was holding.
-#
-# USE_REMOTE_NOTIFY is deliberately NOT cleared: nothing in src/ has read it
-# since the local Apprise path was removed, and clearing it would advertise a
-# switch that does not exist. See tests/test_notifier_isolation.py.
-#
-# At import, for the same reason as the four above, and never restored.
-os.environ.pop("WATCHER_NOTIFIER_BASE_URL", None)
-os.environ.pop("WATCHER_NOTIFIER_API_KEY", None)
-os.environ.pop("WATCHER_NOTIFIER_ENABLED", None)
-os.environ.pop("WATCHER_DEV_NOTIFIER_BASE_URL", None)
-os.environ.pop("WATCHER_DEV_NOTIFIER_API_KEY", None)
-
-# The dashboard's public base URL (#296 D6) lives in /etc/watcher/.env, so a
-# suite launched from a loaded shell would inherit production's host and every
-# expected link would silently depend on which VM ran it. Unset is "no link";
-# tests that render one set a host of their own.
-os.environ.pop("WATCHER_PUBLIC_BASE_URL", None)
-os.environ.pop("WATCHER_DEV_PUBLIC_BASE_URL", None)
-
 
 def _make_mock_probe():
     """Return a mock probe that resolves URLs without real HTTP calls."""
@@ -186,7 +139,7 @@ def anyio_backend():
 def network_guard(request, monkeypatch):
     """Refuse every connect that leaves this machine, except to the test database.
 
-    The scrubs above stop a test *finding* the bus, the notifier or production;
+    The scrubs above stop a test *finding* the bus or production;
     this stops one *reaching* anything external whatever URL it found, and
     makes the #353 mark contract continuous — ``integration`` is the test
     database and nothing else, the default suite is less. A refused connect

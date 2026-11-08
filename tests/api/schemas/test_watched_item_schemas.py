@@ -8,7 +8,6 @@ from pydantic import ValidationError
 from ulid import ULID
 
 from src.api.main import app
-from src.api.schemas.notification_template import ItemNotificationTemplateCreate
 from src.api.schemas.types import ULID_PATTERN
 from src.api.schemas.watched_item import (
     WatchedItemCreate,
@@ -229,40 +228,6 @@ class TestIssue188IsActive:
     def test_patch_rejects_explicit_null_is_active(self):
         with pytest.raises(ValidationError):
             WatchedItemPatch(is_active=None)
-
-
-class TestTemplateSchemas:
-    """#200 — WatchedItemTemplate* schemas folded into ItemNotificationTemplateCreate.
-
-    The watched-item-scoped create body moved out of src.api.schemas.watched_item into
-    src.api.schemas.notification_template.ItemNotificationTemplateCreate. ``visibility`` and
-    ``watched_item_id`` are pinned by the route path, so the body omits them; ``title`` and
-    ``remote_channel_id`` are now required and there is no body-level ``is_active``.
-    """
-
-    def test_template_create_defaults(self):
-        c = ItemNotificationTemplateCreate(
-            title="Item Template",
-            remote_channel_id="01HV0000000000000000000099",
-        )
-        assert c.events == ["change_detected"]
-        assert c.channel_hint == "remote"
-
-    def test_template_create_rejects_empty_channel_hint(self):
-        with pytest.raises(ValidationError):
-            ItemNotificationTemplateCreate(
-                title="Item Template",
-                remote_channel_id="01HV0000000000000000000099",
-                channel_hint="",
-            )
-
-    def test_template_create_requires_title(self):
-        with pytest.raises(ValidationError):
-            ItemNotificationTemplateCreate(remote_channel_id="01HV0000000000000000000099")
-
-    def test_template_create_requires_remote_channel_id(self):
-        with pytest.raises(ValidationError):
-            ItemNotificationTemplateCreate(title="Item Template")
 
 
 class TestIssue260SourceSpecsRequired:

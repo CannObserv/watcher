@@ -4,8 +4,9 @@
 excluded from every gate, so about 40% of the suite ran only when someone typed
 ``-m integration`` by hand. Run with nothing but ``TEST_DATABASE_URL`` and no
 outbound network, every integration test but one passed: the mark means
-*connects to the test database*. The one exception reads real GCS, so it carries
-``live`` instead — excluded by default and from CI.
+*connects to the test database*. The one exception read real GCS, so it carried
+``live`` instead — excluded by default and from CI. It went with the blob reader
+(#379); the mark stays registered for the next test that needs a real service.
 
 So: CI runs ``integration`` in its own job against a ``postgres:16`` service,
 with the same setup as the ``test`` job, and fails on a skip as well as a
@@ -20,9 +21,6 @@ from urllib.parse import urlsplit
 
 import pytest
 import yaml
-
-# The module, not the class: a Test* name imported here would be collected twice.
-from tests.core import test_blobs
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CI_YML = REPO_ROOT / ".github" / "workflows" / "ci.yml"
@@ -67,13 +65,6 @@ class TestMarkers:
         argv = shlex.split(_pytest_ini()["addopts"])
         expression = _marker_expression(argv)
         assert "not integration" in expression and "not live" in expression
-
-    def test_the_gcs_proof_is_live_not_integration(self) -> None:
-        """It skips without ``GCS_BLOB_CREDENTIALS``: under ``integration`` it would
-        either fail the no-skips gate in CI or need a cloud credential there."""
-        names = {m.name for m in test_blobs.TestGcsLive.pytestmark}
-        assert "live" in names
-        assert "integration" not in names
 
 
 class TestCiJobs:

@@ -21,7 +21,7 @@ from src.ops import checkin
 
 MONITOR = "01M24A8CA2GT0M7WE57NEMD0EW"
 #: RFC 2606's reserved TLD: never resolves, so never stale, and it keeps this
-#: file clean under tests/test_notifier_isolation.py's sweep (#280).
+#: file clean under tests/test_no_resolvable_service_hosts.py's sweep (#280).
 BASE = "http://status.invalid:9000"
 KEY = "nk_backup"
 

@@ -10,11 +10,7 @@ from src.api.deps import require_api_key
 from src.api.routes.audit_log import router as audit_router
 from src.api.routes.domains import router as domains_router
 from src.api.routes.health import router as health_router
-from src.api.routes.notification_templates import router as notification_templates_router
 from src.api.routes.probe import router as probe_router
-from src.api.routes.watched_item_notifications import (
-    router as watched_item_notifications_router,
-)
 from src.api.routes.watched_items import router as watched_items_router
 from src.core.bus import (
     BUS_REDIS_URL_ENV,
@@ -27,12 +23,6 @@ from src.core.bus import (
 from src.core.database import get_session_factory
 from src.core.db_safety import ProductionDatabaseRefused, assert_environment_db_allowed
 from src.core.logging import configure_logging, get_logger
-from src.core.notifier_client import (
-    NotifierCredentialMissing,
-    NotifierNotEnabled,
-    assert_environment_notifier_allowed,
-)
-from src.core.public_base_url import PublicBaseUrlInvalid, assert_public_base_url
 from src.dashboard import register_dashboard
 
 # Worker imports are safe at module top: src.workers.__init__ defers task-module
@@ -60,13 +50,8 @@ async def lifespan(application: FastAPI):
     refused process never starts the consumer or the worker.
 
     Refuses the same way for a bus URL held without WATCHER_BUS_ENABLED=1
-    (#262), for a notifier URL held without WATCHER_NOTIFIER_ENABLED=1 (#277), and
-    for that flag held without a URL (#278) — which means the unit's
-    /etc/watcher/notifier.env did not load — and for a malformed
-    WATCHER_PUBLIC_BASE_URL (#296 D6), which would otherwise ship every
-    notification with its dashboard link silently dropped. The
-    enforcement point is here rather than at import of src.core.bus or
-    src.core.notifier_client: an import-time check would abort alembic,
+    (#262). The enforcement point is here rather than at import of
+    src.core.bus: an import-time check would abort alembic,
     everything under scripts/, and anything else that transitively imports the
     module — including the tooling used to deploy the fix.
 
@@ -77,15 +62,7 @@ async def lifespan(application: FastAPI):
     try:
         assert_environment_db_allowed(os.environ)
         assert_environment_bus_allowed(os.environ)
-        assert_environment_notifier_allowed(os.environ)
-        assert_public_base_url(os.environ)
-    except (
-        ProductionDatabaseRefused,
-        BusNotEnabled,
-        NotifierNotEnabled,
-        NotifierCredentialMissing,
-        PublicBaseUrlInvalid,
-    ) as e:
+    except (ProductionDatabaseRefused, BusNotEnabled) as e:
         # Log before re-raising: under systemd the bare exception surfaces in
         # journalctl as a lifespan traceback, burying the actionable text.
         logger.critical("Refusing to start: %s", e)
@@ -203,8 +180,6 @@ async def lifespan(application: FastAPI):
 app = FastAPI(title="watcher", version="0.1.0", lifespan=lifespan)
 
 v1_router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_api_key)])
-v1_router.include_router(watched_item_notifications_router)
-v1_router.include_router(notification_templates_router)
 v1_router.include_router(audit_router)
 v1_router.include_router(domains_router)
 v1_router.include_router(probe_router)

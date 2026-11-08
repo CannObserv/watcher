@@ -87,6 +87,12 @@ _NEEDED_WITHOUT_IMPORT: dict[str, tuple[str, str, str]] = {
         "Form(",
         "FastAPI parses every dashboard `Form(...)` body with it.",
     ),
+    "jinja2": (
+        "src/dashboard/templating.py",
+        "Jinja2Templates(",
+        "fastapi.templating imports it; the dashboard renders every page with it. "
+        "Imported directly until the notification renderer went (#379).",
+    ),
 }
 
 

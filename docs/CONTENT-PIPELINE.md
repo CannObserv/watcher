@@ -67,8 +67,8 @@ load-bearing: a re-issue publishes immediately, so the scheduling gate never
 sees it, and an uncapped loop runs at Replicator's round-trip, each turn a real
 origin request. At the cap the check ends `FAILED`,
 `failure_reason="blob_unreadable"` (the remedy is the blob store, not the
-origin), `CHECK_FETCH_FAILED`, ERROR health, one `WATCH_ERROR` (reminders per
-#71), and the gate lifts. `clear_validators` fires (#362).
+origin), `CHECK_FETCH_FAILED`, ERROR health, one `watch_error` fact (reminders are
+Archiver's, #376), and the gate lifts. `clear_validators` fires (#362).
 Watcher reads no blob at all since #379: the change diff, the last reader of
 the processor's stored canonical text, went with the notification renderer.
 

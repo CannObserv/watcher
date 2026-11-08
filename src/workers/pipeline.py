@@ -1,11 +1,11 @@
-"""Per-WatchedItem history: compare an outcome, record it, dispatch the change.
+"""Per-WatchedItem history: compare an outcome, record it, stage the change.
 
 The processor extracts and fingerprints (#326, #350); this module holds what
 happens to its answer. ChangeRevision rows serve as the local fingerprint
 history; the first row is a baseline (announced to Archiver, no
-notification, #367); subsequent changes dispatch CHANGE_DETECTED once for the
-WatchedItem (the single monitored entity, #191) and stage its
-``change_detected`` fact for ``info.watch-events`` (#369).
+notification, #367); each subsequent change stages one ``change_detected``
+fact for ``info.watch-events`` (#369), which Archiver notifies from. Watcher
+sends nothing itself since F3 (#376).
 """
 
 import enum
@@ -23,9 +23,7 @@ from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.watched_item import WatchedItem
 from src.core.notifications.diff_loader import stored_text_location
-from src.core.notifications.events import WatchEvent, WatchEventType
-from src.core.notifications.notify import dispatch_event_notifications
-from src.core.utils import format_utc_iso, watched_item_event_base_metadata
+from src.core.utils import format_utc_iso
 from src.core.watch_events import enqueue_change_detected
 
 logger = get_logger(__name__)
@@ -120,7 +118,6 @@ class WatchedItemResult:
     baseline_established: bool = False
     cache_hit: bool = False
     changed: bool = False
-    notifications_dispatched: int = 0
     errors: list[str] = field(default_factory=list)
     # `changed` implies an outbox row since #251 (a detected change always
     # enqueues one), and `baseline_established` since #367. This is the third
@@ -283,12 +280,12 @@ async def apply_extraction_outcome(
        Archiver's first observation of it, under a fresh reference.
     c. Changed: insert a new ChangeRevision, enqueue PendingArchiverSync, then
        Option A (``extraction_change``): an extractor-only move writes
-       ``CHECK_REBASELINED`` and notifies nobody; anything else dispatches
-       CHANGE_DETECTED once for the WatchedItem, labelled when the spec moved,
-       and stages one ``change_detected`` fact (#369). Only this branch stages
-       one: a baseline, a cache hit and a re-baseline are not content changes.
+       ``CHECK_REBASELINED`` and stages nothing; anything else stages one
+       ``change_detected`` fact (#369), labelled when the spec moved, for
+       Archiver to notify from (#376). Only this branch stages one: a
+       baseline, a cache hit and a re-baseline are not content changes.
 
-    ``last_changed_at`` is updated on a notified change; ``last_checked_at``
+    ``last_changed_at`` is updated on a content change; ``last_checked_at``
     and ``health_status`` are the caller's (``close_succeeded``). ``blob``
     carries the correlated ``content.blobs`` fact onto the outbox row (#253).
 
@@ -404,28 +401,11 @@ async def apply_extraction_outcome(
         )
         return WatchedItemResult(rebaselined=True)
 
-    # #349: the change before this one, for the email's PREVIOUS CHANGE —
+    # #349: the change before this one, the fact's ``previous_changed_at`` —
     # read before it is overwritten, since `last_changed_at` is about to be
     # this change. None on an item's first change: a baseline never sets it.
     previous_changed_at = watched_item.last_changed_at
     watched_item.last_changed_at = now
-
-    # #191: dispatch CHANGE_DETECTED once for the WatchedItem (the monitored entity).
-    # No registry id in the metadata: Archiver allocates it on its side of
-    # content.revisions and never tells us, so the key was permanently null
-    # (#253; the column it mirrored was dropped in #261). `extraction_changed`
-    # is Option A's label: "spec" when the bound spec moved, else None — a
-    # "processor" change never reaches a notification. The two fingerprints
-    # are the two texts' storage addresses (#222): the diff reads them back.
-    change_meta: dict = {
-        "change_revision_id": str(rev.id),
-        "previous_fingerprint": last_rev.content_fingerprint,
-        "current_fingerprint": outcome.content_fingerprint,
-        "extraction_changed": change.value if change is not None else None,
-        **watched_item_event_base_metadata(watched_item),
-    }
-    if previous_changed_at is not None:
-        change_meta["previous_changed_at"] = format_utc_iso(previous_changed_at)
 
     # #369: the fact Archiver will notify from, staged beside the revision so
     # the caller's commit records both or neither. The previous text is found
@@ -443,14 +423,4 @@ async def apply_extraction_outcome(
         previous_changed_at=previous_changed_at,
     )
 
-    event = WatchEvent(
-        event_type=WatchEventType.CHANGE_DETECTED,
-        watched_item_id=str(watched_item.id),
-        item_name=watched_item.name,
-        item_url=watched_item.effective_url,
-        occurred_at=now,
-        metadata=change_meta,
-    )
-    await dispatch_event_notifications(session=session, event=event)
-
-    return WatchedItemResult(changed=True, notifications_dispatched=1)
+    return WatchedItemResult(changed=True)

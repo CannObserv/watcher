@@ -119,8 +119,6 @@ pattern — see [BUS.md](BUS.md).
 | `WATCHER_PROCESS_COMMAND_TIMEOUT_SECONDS` | env | no | How long an in-flight process command may go without a fact before the reaper may re-issue it (default `1800`) — **only once the processor has read past it** (answered a command published after it); otherwise it is held. Unparseable → the default |
 | `WATCHER_PROCESS_COMMAND_HARD_LIMIT_SECONDS` | env | no | How long a process command may stay in flight (or unpublished) at all before its lineage ends, consuming or not (default `86400`): the check fails `processing_timeout` and the item goes ERROR (#326). The command whose failure fact was refused never gets one (processor#17) |
 | `WATCHER_DIFF_MAX_INPUT_BYTES` | env | no | Largest canonical text either side of a change diff may be (default `1048576`, #222); over it the notification says `DIFF: unavailable (content too large)`. Checked against the processor's recorded size before any download. `0` makes every diff unavailable without touching templates (the notice line still renders) |
-| `WATCHER_ERROR_RENOTIFY_INTERVAL` | env | no | Minimum gap between `WATCH_ERROR`s while an item stays in ERROR (default `24h`, cadence vocabulary, #71; [WATCHED-ITEMS.md](WATCHED-ITEMS.md) → *Persistent errors re-notify*). Service-wide, never `schedule_config`. Unparseable → the default with a warning; `0s` reminds on every failed check (logged at INFO) |
-| `WATCHER_NOTIFY_CUTOVER_AT` | `/etc/watcher/.env` | F3 only | The notification cutover instant T (#376), Archiver's `ARCHIVER_NOTIFY_CUTOVER_AT` mirrored: `dispatch_event_notifications` sends an event only when its `occurred_at` is **before** T, and Archiver sends the rest (`≥ T`). Unset or blank → no gate, every event dispatches as before F3. Archiver's grammar exactly (`YYYY-MM-DDTHH:MM:SS[.ffffff]` then `Z` or `+00:00`); anything else — a date alone, a naive time, another offset — **refuses startup**, since a misread T is a double send or a silent gap. Startup logs `notify cutover: …` either way, the read-back compared with Archiver's journal. Configuration, not a credential, so it lives in the shared file; `tests/conftest.py` pops it and `scripts/dev_server.sh` clears it, so neither inherits production's T. The test-send routes are not gated. Set by the operator at the flip, and removed only once #376 part 2 (which deletes the gate with the dispatch path) is live — a restart without it before then double-sends: [COMMANDS.md](COMMANDS.md) → *F3 runbook* |
 | `WATCHER_DEV_BUS_REDIS_URL` | `.env` | no | Scratch-bus opt-in for `scripts/dev_server.sh`; without it the dev server **clears** an inherited `WATCHER_BUS_REDIS_URL` (and `WATCHER_BUS_ENABLED`) so it cannot publish policy onto the production stream. With it, the script exports both, since the flag is otherwise unit-only |
 | `WATCHER_DEV_NOTIFIER_BASE_URL` | `.env` | no | Scratch-notifier opt-in for `scripts/dev_server.sh`; without it the dev server **clears** `WATCHER_NOTIFIER_BASE_URL`, `WATCHER_NOTIFIER_API_KEY` and `WATCHER_NOTIFIER_ENABLED` so it cannot notify the production tenant (#277) — kept after #278 moved the pair out of the loaded env files, because it also catches a shell that exported them by hand. Requires `WATCHER_DEV_NOTIFIER_API_KEY` beside it — a URL without its key refuses to start rather than fall back to whatever key is in the environment |
 | `WATCHER_DEV_NOTIFIER_API_KEY` | `.env` | no | The scratch notifier's tenant key. Required whenever `WATCHER_DEV_NOTIFIER_BASE_URL` is set; meaningless without it. Use a key notifier marks **`development`** (notifier#22), so a dev server pointed at a production notifier is refused instead of delivering |
@@ -151,14 +149,13 @@ co-watcher, only *reachability* has been re-checked (2026-09-16: `:9000` and
   misdirected dev server; the refusal is what matters, not its code.
 
 The dev tenant currently has **no channels and no templates**, so a dev server
-can authenticate and construct a client but has nothing to dispatch *to*:
-`dispatch_event_notifications` skips a candidate with no `remote_channel_id`
-and records it as a failed audit result. That is fine for the isolation #278
-asked for, and not yet enough to exercise the notification path end to end —
-sink channels are requested on that issue.
+can authenticate and construct a client but has nothing to send *to*. Since F3
+(#376) Watcher dispatches no event of its own anyway; the client serves only
+the operator's test sends, which #379 deletes.
 
-**Retired variables.** Removed from `/etc/watcher/.env` under #277 after each
-was confirmed to have no reader in `src/`, `scripts/` or `tests/`. Historical
+**Retired variables.** Removed from `/etc/watcher/.env` (under #277, and #376
+for the last two) after each was confirmed to have no reader in `src/` or
+`scripts/` (`tests/test_notification_dispatch_sites.py` pins #376's two). Historical
 plan documents under `docs/plans/` still describe them and are left as written
 — they are a record of what was true then, not instructions:
 
@@ -168,6 +165,8 @@ plan documents under `docs/plans/` still describe them and are left as written
 | `ARCHIVER_BASE_URL` | Watcher makes no HTTP calls to Archiver since #254; the SDK went with them |
 | `ARCHIVER_API_KEY` | Same. Removing it from this file does **not** revoke it — the key is presumably still valid on Archiver's side, where revocation is tracked as [CannObserv/archiver#186](https://github.com/CannObserv/archiver/issues/186). Until that closes, treat the credential as live |
 | `APPRISE_SECRET_KEY` | The Fernet key for encrypted Apprise URLs. Verified no ciphertext column survives in the schema before deletion |
+| `WATCHER_ERROR_RENOTIFY_INTERVAL` | #71's reminder gap. Watcher sends no reminder since F3 (#376): Archiver owns the cadence. Never set in production, so nothing to remove |
+| `WATCHER_NOTIFY_CUTOVER_AT` | F3's gate (#376), set to `2026-11-06T21:00:00Z` at the flip. Part 2 deleted the gate with the dispatch path, so nothing reads it; the operator removes the line **after** part 2 is live (before, a restart without it double-sent): [MIGRATIONS.md](MIGRATIONS.md) → *Restart-before-migrate — one-time, `e2eab993d615`* |
 
 The notifier pair was **renamed** rather than retired in the same pass:
 `NOTIFIER_BASE_URL` → `WATCHER_NOTIFIER_BASE_URL`, `NOTIFIER_API_KEY` →

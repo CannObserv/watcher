@@ -109,7 +109,7 @@ def sendable_validator(value: str | None) -> str | None:
 
     Refuse-before-minting, mirroring Replicator's own posture. A command whose
     headers are refused closes as a terminal ``invalid_request_options``, which
-    on this side is ERROR health plus one ``WATCH_ERROR`` — paid for a header we
+    on this side is ERROR health plus one ``watch_error`` fact — paid for a header we
     could have declined to send. Nothing *inside* the value is touched: a
     repaired validator is a fetch the operator cannot account for, and a
     truncated ETag is one that can never match.

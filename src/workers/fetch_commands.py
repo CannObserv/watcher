@@ -8,8 +8,8 @@
 * ``apply_fetch_blob`` / ``apply_fetch_failure`` / ``apply_fetch_not_modified``
   — deferred by the content.blobs consumer (``src/workers/fetch_facts.py``)
   after it upserts a fact; they restore the exact bookkeeping the local fetch
-  path performed (health, ``last_checked_at``, audits, WATCH_ERROR/RECOVERED,
-  and #71's re-notify of a persistent ERROR). The blob apply hands the check to
+  path performed (health, ``last_checked_at``, audits, and the
+  ``watch_error`` / ``watch_recovered`` edge facts). The blob apply hands the check to
   the processor (#326), and the derived leg closes it through
   ``close_succeeded`` / ``fail_extraction`` here. A 304 is a check that found
   no change, not a failed check (#249).
@@ -47,18 +47,10 @@ from src.core.models.watched_item import (
     WatchedItem,
     WatchHealthStatus,
 )
-from src.core.notifications.events import WatchEvent, WatchEventType
-from src.core.notifications.renotify import (
-    error_renotify_due,
-    error_renotify_interval,
-    error_renotify_metadata,
-)
 from src.core.process_commands import UnsendableProcessCommand
-from src.core.utils import watched_item_event_base_metadata
 from src.core.validators import clear_validators, record_validators, stamp_full_fetch
 from src.core.watch_events import enqueue_watch_error, enqueue_watch_recovered
 from src.workers import bp
-from src.workers.notify import dispatch_event_notifications
 from src.workers.pipeline import WatchedItemResult
 from src.workers.process_issue import issue_process_command
 from src.workers.retry import APPLY_RETRY
@@ -98,18 +90,16 @@ async def record_check_failure(
     watched_item: WatchedItem,
     *,
     now: datetime,
-    url: str,
     audit_event: str,
     audit_kwargs: dict,
-    error_metadata: dict,
     health_reason: str | None,
     health_status_code: int | None = None,
     check_command_id: str | None = None,
 ) -> None:
     """Record a failed check: ERROR health + stamped ``last_checked_at`` + audit,
-    and dispatch ``WATCH_ERROR`` on the OK→ERROR transition — and again, as a
-    reminder, once per ``WATCHER_ERROR_RENOTIFY_INTERVAL`` while it stays in
-    ERROR (#71).
+    plus the edge fact on the transition into ERROR (below). Watcher sends
+    nothing itself since F3 (#376): Archiver notifies from the fact, and owns
+    the reminder cadence of an episode.
 
     ``health_reason`` / ``health_status_code`` say why, as levels (#370): a
     ``WatchHealthReason`` token — Watcher's own, or Replicator's fetch reason
@@ -123,69 +113,37 @@ async def record_check_failure(
     health signal and a fresh ``last_checked_at`` — the latter stops a persistent
     failure from being re-enqueued every ``schedule_tick`` (#168).
 
-    ``last_error_notified_at`` is stamped in the same commit as the failure,
-    *before* the dispatch: a dispatch that raises, or an apply that is retried,
-    must not re-send inside the window — #269's wedged item fails every cycle.
-
-    The transition also opens the episode (#369): ``error_since`` is stamped
-    and a ``watch_error`` fact staged in that same commit, its reason the
-    ``health_reason`` above. A reminder is not an edge and stages nothing.
+    The transition opens the episode (#369): ``error_since`` is stamped and a
+    ``watch_error`` fact staged in that same commit, its reason the
+    ``health_reason`` above. A failure inside the episode is no edge and stages
+    nothing.
 
     ``check_command_id`` is the fetch row's: a commanded check republishes
     whatever the outcome (``republish_status``).
     """
     audit(session, audit_event, watched_item_id=str(watched_item.id), **audit_kwargs)
     previous_health = watched_item.health_status
-    previously_notified_at = watched_item.last_error_notified_at
     transition = previous_health != WatchHealthStatus.ERROR
-    renotify = not transition and error_renotify_due(
-        previously_notified_at, now=now, interval=error_renotify_interval()
-    )
     watched_item.health_status = WatchHealthStatus.ERROR
     watched_item.health_reason = health_reason
     watched_item.health_status_code = health_status_code
     watched_item.last_checked_at = now
     if transition:
         # The edge into error (#369): the episode starts, and its fact is
-        # staged in this commit. A failure inside the episode — a #71 reminder
-        # included — is no edge: re-notify cadence is Archiver's.
+        # staged in this commit. A failure inside the episode is no edge:
+        # reminder cadence is Archiver's.
         watched_item.error_since = now
         enqueue_watch_error(
             session, watched_item, now=now, reason=health_reason, status_code=health_status_code
         )
     # last_observed_at deliberately NOT stamped: a failure is an attempt, never
     # an observation (#264) — the registry must not claim content was verified.
-    if transition or renotify:
-        # The same `now` as last_checked_at, deliberately: the next check is due
-        # at last_checked_at + cadence, so on a 1d cadence the next failure lands
-        # >= 24h after this stamp. A different clock could miss the default
-        # window by seconds and push every reminder to 48h.
-        watched_item.last_error_notified_at = now
     await session.commit()
 
     # Health transition: level signal changed, so the watch-status stream
     # republishes (#264). Post-commit, best-effort; steady-state failures
     # never publish — that keeps the stream off the activity-rate curve.
-    # A re-notify is not a transition and stays outside this guard.
     await republish_status(watched_item, transition=transition, check_command_id=check_command_id)
-
-    if transition or renotify:
-        error_event = WatchEvent(
-            event_type=WatchEventType.WATCH_ERROR,
-            watched_item_id=str(watched_item.id),
-            item_name=watched_item.name,
-            item_url=watched_item.effective_url or url,
-            occurred_at=now,
-            metadata={
-                **error_metadata,
-                **watched_item_event_base_metadata(watched_item),
-                **error_renotify_metadata(
-                    repeat=renotify, previously_notified_at=previously_notified_at
-                ),
-            },
-        )
-        await dispatch_event_notifications(session=session, event=error_event)
-        await session.commit()
 
 
 async def _record_check_success(
@@ -194,12 +152,11 @@ async def _record_check_success(
     result,
     *,
     now: datetime,
-    url: str,
     audit_extra: dict | None = None,
     check_command_id: str | None = None,
 ) -> None:
     """Record a successful check: audit trail + OK health + ``last_checked_at``,
-    and dispatch ``WATCH_RECOVERED`` once on the ERROR→OK transition.
+    and on the ERROR→OK transition the ``watch_recovered`` fact (#369).
 
     Shared by the succeeding apply paths (``apply_fetch_blob`` /
     ``apply_fetch_not_modified``) so every outcome leaves identical bookkeeping —
@@ -248,8 +205,6 @@ async def _record_check_success(
     # audit's `source` key is what keeps those two apart downstream.
     # Published on info.watch-status; Archiver records it durably.
     watched_item.last_observed_at = now
-    # Recovery ends the episode (#71): a later failure is a first alert again.
-    watched_item.last_error_notified_at = None
     await session.commit()
 
     # Health transition (#264): post-commit, best-effort. A steady OK cycle
@@ -259,20 +214,6 @@ async def _record_check_success(
         transition=previous_health != WatchHealthStatus.OK,
         check_command_id=check_command_id,
     )
-
-    # Recovery: dispatch WATCH_RECOVERED once when the WatchedItem
-    # transitions ERROR → OK (#191).
-    if previous_health == WatchHealthStatus.ERROR:
-        recovery_event = WatchEvent(
-            event_type=WatchEventType.WATCH_RECOVERED,
-            watched_item_id=str(watched_item.id),
-            item_name=watched_item.name,
-            item_url=watched_item.effective_url or url,
-            occurred_at=now,
-            metadata=watched_item_event_base_metadata(watched_item),
-        )
-        await dispatch_event_notifications(session=session, event=recovery_event)
-        await session.commit()
 
 
 @bp.periodic(cron="* * * * *", periodic_id="publish_pending_fetch_commands")
@@ -411,10 +352,8 @@ async def fail_blob_unreadable(
         session,
         watched_item,
         now=now,
-        url=row.url,
         audit_event=EventType.CHECK_FETCH_FAILED,
         audit_kwargs={"reason": BLOB_UNREADABLE_REASON, "reissues": reissues},
-        error_metadata={"reason": BLOB_UNREADABLE_REASON},
         health_reason=BLOB_UNREADABLE_REASON,
         check_command_id=row.check_command_id,
     )
@@ -457,10 +396,8 @@ async def fail_extraction(
         session,
         watched_item,
         now=now,
-        url=row.url,
         audit_event=EventType.CHECK_EXTRACTION_FAILED,
         audit_kwargs=audit_kwargs,
-        error_metadata={"error": "extraction_failed"},
         # The vocabulary's token for this path, whatever the row records.
         health_reason=PROCESSING_FAILED_REASON,
         check_command_id=row.check_command_id,
@@ -507,7 +444,6 @@ async def close_succeeded(
         watched_item,
         result,
         now=now,
-        url=row.url,
         audit_extra=extra or None,
         check_command_id=row.check_command_id,
     )
@@ -660,7 +596,7 @@ async def apply_fetch_failure(command_id: str) -> dict:
     Mirrors the local fetch-failure path exactly: ERROR health, fresh
     ``last_checked_at`` (stops schedule_tick re-enqueueing every minute),
     ``CHECK_FETCH_FAILED`` audit carrying the reason token, and one
-    ``WATCH_ERROR`` on the OK→ERROR transition.
+    ``watch_error`` fact on the OK→ERROR transition.
     """
     async with get_session_factory()() as session:
         row = await session.get(FetchCommand, command_id)
@@ -678,7 +614,7 @@ async def apply_fetch_failure(command_id: str) -> dict:
             # #269's one loop hazard. This refusal happens BEFORE any request
             # goes out, so an unsendable stored validator would be re-snapshotted
             # and refused on every cycle, forever — each one an ERROR health
-            # transition and a WATCH_ERROR. Forgetting the pair makes the next
+            # transition and a watch_error fact. Forgetting the pair makes the next
             # command unconditional, which is self-healing; every other reason
             # says nothing about our validators and leaves them alone.
             logger.warning(
@@ -693,18 +629,14 @@ async def apply_fetch_failure(command_id: str) -> dict:
             )
             clear_validators(watched_item)
         audit_kwargs: dict = {"reason": row.failure_reason}
-        error_metadata: dict = {"reason": row.failure_reason}
         if row.status_code is not None:
             audit_kwargs["status_code"] = row.status_code
-            error_metadata["status_code"] = row.status_code
         await record_check_failure(
             session,
             watched_item,
             now=now,
-            url=row.url,
             audit_event=EventType.CHECK_FETCH_FAILED,
             audit_kwargs=audit_kwargs,
-            error_metadata=error_metadata,
             health_reason=row.failure_reason,
             health_status_code=row.status_code,
             check_command_id=row.check_command_id,
@@ -720,7 +652,7 @@ async def apply_fetch_not_modified(command_id: str) -> dict:
     that is not a failure. The origin was asked a conditional question and
     answered "your bytes are current" — the most useful answer it can give. Sent
     down ``apply_fetch_failure`` instead, it would set ERROR health, write
-    ``CHECK_FETCH_FAILED``, and fire one ``WATCH_ERROR`` on the OK→ERROR
+    ``CHECK_FETCH_FAILED``, and stage one ``watch_error`` fact on the OK→ERROR
     transition, on *every* successful no-change check.
 
     Two decisions this path records, both left open by the issue:
@@ -745,7 +677,7 @@ async def apply_fetch_not_modified(command_id: str) -> dict:
     ``ChangeRevision``, no ``PendingArchiverSync``, no ``content.revisions``
     frame. So the check is recorded through ``_record_check_success`` with an
     empty result — unchanged, no baseline — which yields ``CHECK_NO_CHANGE``,
-    OK health, a fresh ``last_checked_at``, and ``WATCH_RECOVERED`` if the item
+    OK health, a fresh ``last_checked_at``, and a ``watch_recovered`` fact if the item
     was in ERROR. ``last_observed_at`` is stamped (#264 semantics: the content
     *was* verified current, which is more than "we tried").
 
@@ -771,7 +703,6 @@ async def apply_fetch_not_modified(command_id: str) -> dict:
             watched_item,
             WatchedItemResult(),
             now=now,
-            url=row.url,
             # Keeps a 304 distinguishable from an unchanged extraction in the
             # audit trail — same outcome for the item, different evidence.
             audit_extra={"source": "not_modified"},
@@ -798,7 +729,7 @@ async def reap_fetch_commands(
     bytes exist — refetching would waste an origin request), anything else is
     expired and **re-issued** under a fresh ``command_id``, same intent. At
     ``WATCHER_FETCH_MAX_REISSUES`` (default 3) the intent stops: ERROR health +
-    WATCH_ERROR, and the item re-enters normal scheduling — the gate lifts, so
+    its ``watch_error`` fact, and the item re-enters normal scheduling — the gate lifts, so
     recovery is automatic when the origin or Replicator heals.
     """
     timeout = fetch_command_timeout_seconds()
@@ -851,10 +782,8 @@ async def reap_fetch_commands(
                     db,
                     watched_item,
                     now=now,
-                    url=row.url,
                     audit_event=EventType.CHECK_FETCH_FAILED,
                     audit_kwargs={"reason": "fetch_timeout", "reissues": row.reissue_count},
-                    error_metadata={"reason": "fetch_timeout"},
                     health_reason="fetch_timeout",
                     check_command_id=row.check_command_id,
                 )

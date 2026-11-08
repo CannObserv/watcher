@@ -1,81 +1,48 @@
-"""Tests for the remote dispatch path in dispatch_event_notifications.
+"""Tests for ``dispatch_via_notifier`` — one candidate, one notifier call.
 
-After Phase 5 (#137), this is the only dispatch path — there is no local
-Apprise fallback. Post-#200 every target is one ``NotificationTemplate`` row
-selected by a single visibility-scoped query. These tests assert notifier-API
-integration behaviour (idempotency keys, FAILED-status handling, error catching,
-missing-channel handling) per candidate.
+After Phase 5 (#137) the notifier service is the only delivery path. Since F3
+(#376) Watcher dispatches no event of its own; this call serves the operator's
+test-send routes until #379 deletes them. These tests assert the notifier-API
+contract per candidate: channel, idempotency key, metadata, FAILED-status
+reasons, and a ``NotifierError`` caught rather than raised.
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from notifier_client.errors import NotifierError
 from notifier_client.generated.models.dispatch_out_status import DispatchOutStatus
-from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
-from src.core.notifications.diff import ChangeDiff
 from src.core.notifications.events import WatchEvent, WatchEventType
-from src.core.notifications.notify import dispatch_event_notifications
+from src.core.notifications.notify import DispatchCandidate, dispatch_via_notifier
 
 
-def _make_event(event_type=WatchEventType.CHANGE_DETECTED, *, change_revision_id=None):
-    metadata = {}
-    if change_revision_id:
-        metadata["change_revision_id"] = change_revision_id
+def _make_event(event_type=WatchEventType.CHANGE_DETECTED):
     return WatchEvent(
         event_type=event_type,
         watched_item_id=str(ULID()),
         item_name="Test Watch",
         item_url="https://example.com",
         occurred_at=datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC),
-        metadata=metadata,
+        metadata={},
     )
 
 
-def _result_with(*items):
-    r = MagicMock()
-    r.scalars.return_value.all.return_value = list(items)
-    return r
+def _candidate(source="watched_item"):
+    return DispatchCandidate(source=source, source_id=str(ULID()), remote_channel_id=str(ULID()))
 
 
-def _wi(domain_name=None):
-    wi = MagicMock()
-    wi.domain_name = domain_name
-    return wi
-
-
-def _setup_session(*, domain=None, templates=()):
-    """Build an AsyncMock session: ``session.get(WatchedItem)`` then one ``execute``."""
-    session = AsyncMock(spec=AsyncSession)
-    session.get = AsyncMock(return_value=_wi(domain))
-    session.execute = AsyncMock(return_value=_result_with(*templates))
-    return session
-
-
-def _fake_template(visibility="watched_item", *, remote_channel_id=None):
-    t = MagicMock()
-    t.id = ULID()
-    t.visibility = visibility
-    t.content_config = None
-    t.remote_channel_id = remote_channel_id
-    return t
-
-
-def _make_dispatch_out(status="succeeded"):
+def _make_dispatch_out(status="succeeded", attempt_reasons=()):
     out = MagicMock()
     out.id = str(ULID())
     out.status = DispatchOutStatus.SUCCEEDED if status == "succeeded" else DispatchOutStatus.FAILED
-    out.attempts = []
+    out.attempts = [MagicMock(reason=r) for r in attempt_reasons]
     return out
 
 
-def _mock_notifier_client(dispatch_return=None, dispatch_side_effect=None):
-    """Return an AsyncMock that satisfies `async with get_notifier_client() as client:`."""
+def _client(dispatch_return=None, dispatch_side_effect=None):
     client = AsyncMock()
-    client.__aenter__ = AsyncMock(return_value=client)
-    client.__aexit__ = AsyncMock(return_value=False)
     if dispatch_side_effect is not None:
         client.dispatch = AsyncMock(side_effect=dispatch_side_effect)
     else:
@@ -83,284 +50,62 @@ def _mock_notifier_client(dispatch_return=None, dispatch_side_effect=None):
     return client
 
 
-def _make_audit_capture():
-    """Return (side_effect_fn, results_list) for patching audit in failure-mode tests."""
-    captured = []
-
-    def _capture(session, event_type, **kwargs):
-        captured.extend(kwargs.get("results", []))
-
-    return _capture, captured
+async def _send(client, candidate=None, event=None):
+    return await dispatch_via_notifier(
+        client, candidate or _candidate(), event or _make_event(), "title", "body"
+    )
 
 
-class TestRemoteDispatchPath:
-    async def test_uses_notifier_when_remote_channel_id_set(self, monkeypatch):
-        """With remote_channel_id set, calls the notifier API."""
-        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://notifier.invalid:9000")
-        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
+class TestDispatchViaNotifier:
+    async def test_success_sends_to_the_candidates_channel(self):
+        candidate = _candidate()
+        out = _make_dispatch_out("succeeded")
+        client = _client(dispatch_return=out)
 
-        remote_id = str(ULID())
-        template = _fake_template(remote_channel_id=remote_id)
-        event = _make_event(change_revision_id=str(ULID()))
+        result = await _send(client, candidate)
 
-        session = _setup_session(templates=[template])
-        mock_client = _mock_notifier_client(dispatch_return=_make_dispatch_out("succeeded"))
+        assert result.success is True
+        assert result.reason == f"notifier:{out.id}"
+        kwargs = client.dispatch.call_args.kwargs
+        assert kwargs["channel_ids"] == [candidate.remote_channel_id]
+        assert "watcher:change_detected:" in kwargs["idempotency_key"]
+        assert (kwargs["title_template"], kwargs["body_template"]) == ("title", "body")
 
-        with (
-            patch("src.core.notifications.notify.get_notifier_client", return_value=mock_client),
-            patch("src.core.notifications.notify.audit"),
-        ):
-            await dispatch_event_notifications(session=session, event=event)
+    async def test_metadata_includes_event_type_and_source(self):
+        client = _client()
 
-        mock_client.dispatch.assert_called_once()
-        call_kwargs = mock_client.dispatch.call_args.kwargs
-        assert call_kwargs["channel_ids"] == [remote_id]
-        assert "watcher:change_detected:" in call_kwargs["idempotency_key"]
+        await _send(client, _candidate("global"), _make_event(WatchEventType.WATCH_ERROR))
 
-    async def test_no_remote_channel_id_records_failure(self, monkeypatch):
-        """A candidate without a remote_channel_id is logged as failed.
-
-        Previously this fell back to local Apprise; that path is gone in #137.
-        """
-        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://notifier.invalid:9000")
-        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
-
-        template = _fake_template(remote_channel_id=None)
-        event = _make_event()
-
-        session = _setup_session(templates=[template])
-        mock_client = _mock_notifier_client()
-        capture_audit, results_captured = _make_audit_capture()
-
-        with (
-            patch("src.core.notifications.notify.get_notifier_client", return_value=mock_client),
-            patch("src.core.notifications.notify.audit", side_effect=capture_audit),
-        ):
-            await dispatch_event_notifications(session=session, event=event)
-
-        mock_client.dispatch.assert_not_called()
-        assert len(results_captured) == 1
-        assert results_captured[0]["success"] is False
-        assert "remote_channel_id" in results_captured[0]["reason"]
-
-    async def test_notifier_error_recorded_as_failure(self, monkeypatch):
-        """NotifierError from the API is caught and logged as a failed attempt."""
-        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://notifier.invalid:9000")
-        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
-
-        template = _fake_template(remote_channel_id=str(ULID()))
-        event = _make_event()
-
-        session = _setup_session(templates=[template])
-        mock_client = _mock_notifier_client(
-            dispatch_side_effect=NotifierError(
-                "server error", status_code=500, response=MagicMock()
-            )
-        )
-        capture_audit, results_captured = _make_audit_capture()
-
-        with (
-            patch("src.core.notifications.notify.get_notifier_client", return_value=mock_client),
-            patch("src.core.notifications.notify.audit", side_effect=capture_audit),
-        ):
-            await dispatch_event_notifications(session=session, event=event)
-
-        assert len(results_captured) == 1
-        assert results_captured[0]["success"] is False
-        assert "notifier" in results_captured[0]["reason"].lower()
-
-    async def test_metadata_includes_event_type_and_source(self, monkeypatch):
-        """dispatch() is called with metadata containing event_type and the visibility source."""
-        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://notifier.invalid:9000")
-        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
-
-        template = _fake_template("watched_item", remote_channel_id=str(ULID()))
-        event = _make_event(WatchEventType.WATCH_ERROR)
-
-        session = _setup_session(templates=[template])
-        mock_client = _mock_notifier_client(dispatch_return=_make_dispatch_out("succeeded"))
-
-        with (
-            patch("src.core.notifications.notify.get_notifier_client", return_value=mock_client),
-            patch("src.core.notifications.notify.audit"),
-        ):
-            await dispatch_event_notifications(session=session, event=event)
-
-        call_kwargs = mock_client.dispatch.call_args.kwargs
-        metadata = call_kwargs["metadata"]
+        metadata = client.dispatch.call_args.kwargs["metadata"]
         assert metadata["event_type"] == "watch_error"
-        assert metadata["source"] == "watched_item"
+        assert metadata["source"] == "global"
 
-    async def test_notifier_failed_status_recorded_as_failure(self, monkeypatch):
-        """FAILED status from notifier API is success=False; reason taken from attempts."""
-        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://notifier.invalid:9000")
-        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
+    async def test_notifier_error_is_a_failure_not_a_raise(self):
+        error = NotifierError("server error", status_code=500, response=MagicMock())
+        client = _client(dispatch_side_effect=error)
 
-        template = _fake_template(remote_channel_id=str(ULID()))
-        event = _make_event()
+        result = await _send(client)
 
-        failed_out = _make_dispatch_out("failed")
-        attempt = MagicMock()
-        attempt.reason = "channel unreachable"
-        failed_out.attempts = [attempt]
+        assert result.success is False
+        assert "notifier" in result.reason.lower()
 
-        session = _setup_session(templates=[template])
-        mock_client = _mock_notifier_client(dispatch_return=failed_out)
-        capture_audit, results_captured = _make_audit_capture()
+    async def test_failed_status_takes_the_attempts_reason(self):
+        client = _client(dispatch_return=_make_dispatch_out("failed", ["channel unreachable"]))
 
-        with (
-            patch("src.core.notifications.notify.get_notifier_client", return_value=mock_client),
-            patch("src.core.notifications.notify.audit", side_effect=capture_audit),
-        ):
-            await dispatch_event_notifications(session=session, event=event)
+        result = await _send(client)
 
-        assert len(results_captured) == 1
-        assert results_captured[0]["success"] is False
-        assert results_captured[0]["reason"] == "channel unreachable"
+        assert (result.success, result.reason) == (False, "channel unreachable")
 
-    async def test_notifier_failed_status_uses_default_reason_when_no_attempts(self, monkeypatch):
-        """FAILED status with no attempts falls back to the default reason string."""
-        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://notifier.invalid:9000")
-        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
+    async def test_failed_status_without_attempts_uses_the_default_reason(self):
+        client = _client(dispatch_return=_make_dispatch_out("failed"))
 
-        template = _fake_template(remote_channel_id=str(ULID()))
-        event = _make_event()
+        result = await _send(client)
 
-        session = _setup_session(templates=[template])
-        mock_client = _mock_notifier_client(dispatch_return=_make_dispatch_out("failed"))
-        capture_audit, results_captured = _make_audit_capture()
+        assert (result.success, result.reason) == (False, "Delivery failed via notifier")
 
-        with (
-            patch("src.core.notifications.notify.get_notifier_client", return_value=mock_client),
-            patch("src.core.notifications.notify.audit", side_effect=capture_audit),
-        ):
-            await dispatch_event_notifications(session=session, event=event)
+    async def test_failed_status_with_a_null_reason_uses_the_default_reason(self):
+        client = _client(dispatch_return=_make_dispatch_out("failed", [None]))
 
-        assert len(results_captured) == 1
-        assert results_captured[0]["success"] is False
-        assert results_captured[0]["reason"] == "Delivery failed via notifier"
+        result = await _send(client)
 
-    async def test_two_visibilities_both_dispatched(self, monkeypatch):
-        """A global template + a watched_item template → 2 dispatches with distinct sources."""
-        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://notifier.invalid:9000")
-        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
-
-        templates = [
-            _fake_template("global", remote_channel_id=str(ULID())),
-            _fake_template("watched_item", remote_channel_id=str(ULID())),
-        ]
-        event = _make_event()
-
-        session = _setup_session(templates=templates)
-        mock_client = _mock_notifier_client(dispatch_return=_make_dispatch_out("succeeded"))
-
-        with (
-            patch("src.core.notifications.notify.get_notifier_client", return_value=mock_client),
-            patch("src.core.notifications.notify.audit"),
-        ):
-            await dispatch_event_notifications(session=session, event=event)
-
-        assert mock_client.dispatch.call_count == 2
-        sources = {c.kwargs["metadata"]["source"] for c in mock_client.dispatch.call_args_list}
-        assert sources == {"global", "watched_item"}
-
-    async def test_notifier_failed_status_uses_default_reason_when_attempt_reason_is_none(
-        self, monkeypatch
-    ):
-        """attempt.reason=None falls back to the default via `or reason`."""
-        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://notifier.invalid:9000")
-        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
-
-        template = _fake_template(remote_channel_id=str(ULID()))
-        event = _make_event()
-
-        failed_out = _make_dispatch_out("failed")
-        attempt = MagicMock()
-        attempt.reason = None
-        failed_out.attempts = [attempt]
-
-        session = _setup_session(templates=[template])
-        mock_client = _mock_notifier_client(dispatch_return=failed_out)
-        capture_audit, results_captured = _make_audit_capture()
-
-        with (
-            patch("src.core.notifications.notify.get_notifier_client", return_value=mock_client),
-            patch("src.core.notifications.notify.audit", side_effect=capture_audit),
-        ):
-            await dispatch_event_notifications(session=session, event=event)
-
-        assert len(results_captured) == 1
-        assert results_captured[0]["success"] is False
-        assert results_captured[0]["reason"] == "Delivery failed via notifier"
-
-
-class TestChangeDiff:
-    """#222: the diff is computed once per event, before the recipient loop,
-    and only when some recipient's options ask for one."""
-
-    DIFF = ChangeDiff(hunks=(("- old", "+ new"),))
-
-    def _templates(self, *configs):
-        out = []
-        for cfg in configs:
-            t = _fake_template(remote_channel_id=str(ULID()))
-            t.content_config = cfg
-            out.append(t)
-        return out
-
-    async def _dispatch(self, monkeypatch, templates, *, event=None, load=None, **kwargs):
-        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://notifier.invalid:9000")
-        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
-        event = event or _make_event(change_revision_id=str(ULID()))
-        load = load or AsyncMock(return_value=self.DIFF)
-        client = _mock_notifier_client()
-        with (
-            patch("src.core.notifications.notify.get_notifier_client", return_value=client),
-            patch("src.core.notifications.notify.audit"),
-            patch("src.core.notifications.notify.load_change_diff", load),
-        ):
-            await dispatch_event_notifications(
-                session=_setup_session(templates=templates), event=event, **kwargs
-            )
-        return client, load
-
-    async def test_default_options_carry_the_snippet(self, monkeypatch):
-        client, load = await self._dispatch(monkeypatch, self._templates(None))
-        load.assert_awaited_once()
-        assert "```diff" in client.dispatch.call_args.kwargs["body_template"]
-        assert "+ new" in client.dispatch.call_args.kwargs["body_template"]
-
-    async def test_computed_once_for_many_recipients(self, monkeypatch):
-        _client, load = await self._dispatch(monkeypatch, self._templates(None, None, None))
-        assert load.await_count == 1
-
-    async def test_not_computed_when_nobody_asks(self, monkeypatch):
-        off = {"default": {"include_diff_snippet": False}}
-        client, load = await self._dispatch(monkeypatch, self._templates(off, off))
-        load.assert_not_awaited()
-        assert "```" not in client.dispatch.call_args.kwargs["body_template"]
-
-    async def test_not_computed_for_other_events(self, monkeypatch):
-        event = _make_event(WatchEventType.WATCH_ERROR)
-        _client, load = await self._dispatch(monkeypatch, self._templates(None), event=event)
-        load.assert_not_awaited()
-
-    async def test_only_the_asking_recipient_gets_it(self, monkeypatch):
-        off = {"default": {"include_diff_snippet": False}}
-        client, _load = await self._dispatch(monkeypatch, self._templates(None, off))
-        bodies = [c.kwargs["body_template"] for c in client.dispatch.call_args_list]
-        assert ["```diff" in b for b in bodies] == [True, False]
-
-    async def test_the_item_reaches_the_loader(self, monkeypatch):
-        event = _make_event(change_revision_id=str(ULID()))
-        _client, load = await self._dispatch(monkeypatch, self._templates(None), event=event)
-        assert load.call_args.kwargs["watched_item_id"] == event.watched_item_id
-
-    async def test_unavailable_still_sends(self, monkeypatch):
-        load = AsyncMock(return_value=ChangeDiff(unavailable="previous text not stored"))
-        client, _load = await self._dispatch(monkeypatch, self._templates(None), load=load)
-        client.dispatch.assert_awaited_once()
-        assert (
-            "DIFF: unavailable (previous text not stored)"
-            in (client.dispatch.call_args.kwargs["body_template"])
-        )
+        assert (result.success, result.reason) == (False, "Delivery failed via notifier")

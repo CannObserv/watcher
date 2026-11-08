@@ -245,6 +245,38 @@ is left: `SELECT status, count(*) FROM procrastinate_jobs WHERE task_name =
 'publish_fetch_policy' AND status IN ('todo', 'doing') GROUP BY status;` should
 return no rows. A job left over fails as an unknown task rather than draining.
 
+## Restart-before-migrate — one-time, `e2eab993d615` (#376)
+
+`e2eab993d615` **drops** `watched_items.last_error_notified_at`, #71's
+reminder clock. F3 handed notifications to Archiver (T =
+`2026-11-06T21:00:00Z`), and part 2 deletes Watcher's dispatch path with the
+reminder. The previous release still maps the column, and SQLAlchemy names
+every mapped column in its SELECTs, so the order is reversed — `f4a8b26c9d31`'s
+shape:
+
+```bash
+sudo systemctl restart watcher      # new code first — it never names the column
+uv run alembic upgrade head         # then drop it
+```
+
+Restart-first has no window: the new code never names the column, and it is
+nullable, so the old schema accepts the new code's INSERTs until the migration
+lands. The stamps are dead; the nightly backup holds them, and the downgrade
+recreates the column empty.
+
+**Then, and only then, remove T.** The same release deletes the gate that read
+`WATCHER_NOTIFY_CUTOVER_AT`. Until it is live, that line is all that stops the
+old code dispatching beside Archiver, so it leaves `/etc/watcher/.env` **after**
+the restart above — never before, and no backup copy:
+
+```bash
+sudo sed -i '/^WATCHER_NOTIFY_CUTOVER_AT=/d' /etc/watcher/.env
+sudo grep -c '^WATCHER_NOTIFY_CUTOVER_AT' /etc/watcher/.env   # expect 0
+```
+
+No restart is needed for it: nothing reads the line any more. Subsequent
+deploys use the standard order above.
+
 ## No safe order — one-time, `e7c4b2a91f60` (#252)
 
 `e7c4b2a91f60` adds `fetch_commands.info_source_id` NOT NULL, and the release

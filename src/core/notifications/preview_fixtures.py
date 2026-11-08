@@ -6,19 +6,17 @@ string `WatchEventType` value. `build_preview_event()` wraps the fixture in a
 `WatchEvent` suitable for passing through `build_title` / `build_body`.
 
 **Fidelity invariant (#221).** Each fixture's metadata keys must be a subset of
-the keys the real emitters actually produce for that event — otherwise the
-preview shows fields a delivered notification never carries. The shared base
-mirrors `watched_item_event_base_metadata`; the per-event extras mirror what
-`pipeline.py` / `tasks.py` layer on. `tests/core/notifications/test_preview_fixtures.py`
-guards this against drift.
+the keys the real emitters produced for that event — otherwise the preview
+shows fields a delivered notification never carried. Watcher has emitted none
+since F3 (#376 part 2 deleted the emitters and their shared base metadata);
+the fixtures stand as they last matched, until #379 deletes the preview.
 
 **Diff parity (#222).** The diff is never event metadata — the dispatcher
-computes it from the two stored canonical texts the event's fingerprints name.
+computed it from the two stored canonical texts the event's fingerprints name.
 The preview stands in two canned texts, names them by their real digests, and
 diffs them with the dispatcher's own ``compute_change_diff`` (``preview_diff``),
-so the preview shows exactly what a delivered notification would.
-`test_preview_fixtures.TestPreviewDispatchParity` drives the dispatcher over
-this fixture and compares bodies.
+so the preview shows what a delivered notification would. The parity test
+that drove the dispatcher over this fixture went with the dispatcher (#376).
 """
 
 from datetime import UTC, datetime
@@ -35,8 +33,8 @@ _PREVIEW_WATCH_URL = "https://example.com/regulatory-page"
 _PREVIEW_OCCURRED_AT = datetime(2026, 4, 15, 12, 0, 0, tzinfo=UTC)
 
 
-# Mirrors `watched_item_event_base_metadata` (src/core/utils.py): the context
-# every dispatch layers onto the event before adding per-event keys.
+# The context every dispatch layered onto an event before its per-event keys,
+# as the emitters #376 part 2 deleted last built it.
 _SHARED_CONTEXT = {
     "domain_name": "example.com",
     "check_interval": "1h",

@@ -56,7 +56,7 @@ matters with it.
 
 **What survives reconciliation**: `health_status`, `health_reason`,
 `health_status_code`, `error_since`, `last_checked_at`,
-`last_observed_at`, `last_changed_at`, `last_reviewed_at`, `last_error_notified_at`,
+`last_observed_at`, `last_changed_at`, `last_reviewed_at`,
 `domain_suspended`, `archived_at`,
 `throttle_floor_interval` and `default_schedule_config` (both inert since F2, #375), `content_media_type`,
 `default_tags`, `description`, `name`, notification config, audit rows, fetch-command
@@ -164,9 +164,9 @@ create/PATCH/URL-change path (API and dashboard) shares
 `source_revision_observed` facts on `content.revisions` (#253) on every detected
 change, and again for the latest revision when a full fetch renews its blob
 reference (#293); the local `pending_archiver_sync` outbox + drain worker
-guarantees delivery during broker outages. Notifications dispatch inline from the pipeline **once per
-WatchedItem** on change detection (`notifications_dispatched ≤ 1`), with
-`change_revision_id` in WatchEvent metadata. `schedule_tick` skips items that
+guarantees delivery during broker outages. A detected change also stages one
+`change_detected` fact on `info.watch-events` (#369), which Archiver notifies
+from; Watcher dispatches nothing itself since F3 (#376). `schedule_tick` skips items that
 are paused (`is_active=false`), archived, or `domain_suspended`. Until F2 (#375)
 it also applied the temporal profile's post-actions (deactivate / archive /
 reduce_frequency) to the WatchedItem itself; Archiver runs them now

@@ -15,6 +15,7 @@ import fakeredis
 import pytest
 from co_core.pure.models.changes import WatchErrorEmit, WatchRecoveredEmit
 from sqlalchemy import select
+from ulid import ULID
 
 import src.workers.fetch_commands as fc_mod
 import src.workers.process_issue as pi_mod
@@ -22,18 +23,16 @@ from src.core.fetch_commands import create_fetch_command, get_open_command
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
 from src.core.models.fetch_command import (
-    INVALID_REQUEST_OPTIONS_REASON,
     OPEN_STATUSES,
     FetchCommand,
     FetchCommandStatus,
 )
+from src.core.models.notification_template import VISIBILITY_GLOBAL, NotificationTemplate
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.pending_watch_event import PendingWatchEvent
 from src.core.models.process_command import ProcessCommand, ProcessCommandStatus
-from src.core.models.watched_item import WatchHealthStatus
+from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 from src.core.notifications.events import WatchEventType
-from src.core.notifications.renotify import ERROR_RENOTIFY_INTERVAL_ENV
-from src.core.utils import format_utc_iso
 from src.core.validators import CONDITIONAL_GET_ENV, validator_source_key
 from src.workers.fetch_commands import (
     apply_fetch_blob,
@@ -218,7 +217,6 @@ class TestApplyFetchBlob:
         # round trip — and the row closes, so the gate lifts.
         wi, row = await _row_with_fact(db_session, specs=[])
         _wire(db_session, monkeypatch)
-        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
 
         result = await apply_fetch_blob(row.command_id, bus_client=fakeredis.FakeAsyncRedis())
 
@@ -340,7 +338,6 @@ class TestApplyFetchFailure:
         monkeypatch.setattr(
             fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
-        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
 
         result = await apply_fetch_failure(row.command_id)
 
@@ -379,17 +376,15 @@ class TestApplyFetchNotModified:
         await db_session.flush()
         return wi, row
 
-    def _spy_dispatch(self, monkeypatch) -> AsyncMock:
-        spy = AsyncMock(return_value=0)
-        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", spy)
-        return spy
+    async def _facts(self, db_session) -> list[str]:
+        stmt = select(PendingWatchEvent).order_by(PendingWatchEvent.id)
+        return [r.event_type for r in (await db_session.execute(stmt)).scalars().all()]
 
     async def test_records_an_unchanged_check_with_ok_health(self, db_session, monkeypatch):
         wi, row = await self._not_modified_row(db_session)
         monkeypatch.setattr(
             fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
-        dispatch = self._spy_dispatch(monkeypatch)
 
         result = await apply_fetch_not_modified(row.command_id)
 
@@ -408,8 +403,8 @@ class TestApplyFetchNotModified:
         # above (CR 5). Pinned on the outcome, not on the stub.
         queued = (await db_session.execute(select(PendingArchiverSync))).scalars().all()
         assert queued == []
-        # No WATCH_ERROR, and no notification at all on a steady OK item.
-        assert dispatch.await_count == 0
+        # No watch_error fact, and no edge at all on a steady OK item.
+        assert await self._facts(db_session) == []
 
     async def test_audits_as_checked_unchanged_never_as_a_fetch_failure(
         self, db_session, monkeypatch
@@ -418,7 +413,6 @@ class TestApplyFetchNotModified:
         monkeypatch.setattr(
             fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
-        self._spy_dispatch(monkeypatch)
 
         await apply_fetch_not_modified(row.command_id)
 
@@ -438,21 +432,17 @@ class TestApplyFetchNotModified:
         monkeypatch.setattr(
             fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
-        dispatch = self._spy_dispatch(monkeypatch)
 
         await apply_fetch_not_modified(row.command_id)
 
         assert wi.health_status == WatchHealthStatus.OK
-        assert dispatch.await_count == 1
-        event = dispatch.await_args.kwargs["event"]
-        assert event.event_type == WatchEventType.WATCH_RECOVERED
+        assert await self._facts(db_session) == ["watch_recovered"]
 
     async def test_idempotent_once_applied(self, db_session, monkeypatch):
         _, row = await self._not_modified_row(db_session)
         monkeypatch.setattr(
             fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
-        self._spy_dispatch(monkeypatch)
 
         await apply_fetch_not_modified(row.command_id)
         second = await apply_fetch_not_modified(row.command_id)
@@ -626,7 +616,6 @@ class TestHealthLevels:
     @pytest.fixture(autouse=True)
     def _wired(self, db_session, monkeypatch):
         _wire(db_session, monkeypatch)
-        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
         self.republish = AsyncMock()
         monkeypatch.setattr(fc_mod, "defer_status_republish", self.republish)
 
@@ -735,7 +724,6 @@ class TestCommandedCheckRepublish:
             setattr(row, key, value)
         await db_session.flush()
         _wire(db_session, monkeypatch)
-        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
         republish = AsyncMock()
         monkeypatch.setattr(fc_mod, "defer_status_republish", republish)
         return row, republish
@@ -817,177 +805,44 @@ class TestCommandedCheckRepublish:
         republish.assert_not_awaited()
 
 
-class TestErrorRenotify:
-    """#71: a persistent ERROR re-sends ``WATCH_ERROR`` once per
-    ``WATCHER_ERROR_RENOTIFY_INTERVAL``, stamping ``last_error_notified_at`` on
-    every dispatch and clearing it on recovery. A repeat is not a health
-    transition, so it never republishes watch-status (#264)."""
+class TestNoDispatch:
+    """#376 part 2: Watcher sends nothing on a health edge. Archiver notifies
+    from the ``watch_error`` / ``watch_recovered`` facts (#369), its reminder
+    cadence included, so an error, a long episode and a recovery each leave
+    their bookkeeping and no ``notification.dispatched`` — even with an active
+    template subscribed to every event."""
 
     @pytest.fixture(autouse=True)
-    def _wired(self, db_session, monkeypatch):
-        monkeypatch.delenv(ERROR_RENOTIFY_INTERVAL_ENV, raising=False)
-        monkeypatch.setattr(
-            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-        self.dispatch = AsyncMock(return_value=0)
-        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", self.dispatch)
+    async def _wired(self, db_session, monkeypatch):
+        _wire(db_session, monkeypatch)
         self.republish = AsyncMock()
         monkeypatch.setattr(fc_mod, "defer_status_republish", self.republish)
+        db_session.add(
+            NotificationTemplate(
+                title="Every event",
+                visibility=VISIBILITY_GLOBAL,
+                remote_channel_id=str(ULID()),
+                channel_hint="json",
+                events=[e.value for e in WatchEventType],
+            )
+        )
+        await db_session.flush()
 
-    async def _item(self, db_session, *, health, notified_ago=None):
+    async def _item(self, db_session, health=WatchHealthStatus.OK):
         wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
         wi.health_status = health
-        if notified_ago is not None:
-            wi.last_error_notified_at = datetime.now(UTC) - notified_ago
         await db_session.flush()
         return wi
 
-    async def _fail(self, db_session, wi, *, reason="http_status", status_code=503):
+    async def _fail(self, db_session, wi):
         row = await create_fetch_command(db_session, wi, now=NOW)
         row.status = FetchCommandStatus.FAILED
-        row.failure_reason = reason
-        row.status_code = status_code
+        row.failure_reason = "http_status"
+        row.status_code = 503
         await db_session.flush()
         await apply_fetch_failure(row.command_id)
-        return row
 
-    def _events(self) -> list:
-        return [c.kwargs["event"] for c in self.dispatch.await_args_list]
-
-    async def test_first_error_notifies_and_stamps(self, db_session):
-        wi = await self._item(db_session, health=WatchHealthStatus.OK)
-
-        await self._fail(db_session, wi)
-
-        [event] = self._events()
-        assert event.event_type == WatchEventType.WATCH_ERROR
-        assert event.metadata["renotify"] is False
-        assert event.metadata["previously_notified_at"] == ""
-        assert wi.last_error_notified_at == event.occurred_at
-        # The window measures from the check clock (CR 4): next due is
-        # last_checked_at + cadence, so a 1d cadence never misses a 24h window.
-        assert wi.last_error_notified_at == wi.last_checked_at
-        assert self.republish.await_count == 1  # the OK -> ERROR transition
-
-    async def test_silent_inside_the_window(self, db_session):
-        wi = await self._item(
-            db_session, health=WatchHealthStatus.ERROR, notified_ago=timedelta(hours=1)
-        )
-        stamp = wi.last_error_notified_at
-
-        await self._fail(db_session, wi)
-
-        assert self._events() == []
-        assert wi.last_error_notified_at == stamp
-        assert self.republish.await_count == 0
-
-    async def test_renotifies_once_the_window_has_elapsed(self, db_session):
-        wi = await self._item(
-            db_session, health=WatchHealthStatus.ERROR, notified_ago=timedelta(hours=25)
-        )
-        previous = wi.last_error_notified_at
-
-        await self._fail(db_session, wi)
-
-        [event] = self._events()
-        assert event.event_type == WatchEventType.WATCH_ERROR
-        assert event.metadata["renotify"] is True
-        assert event.metadata["previously_notified_at"] == format_utc_iso(previous)
-        assert event.metadata["status_code"] == 503
-        assert wi.last_error_notified_at == event.occurred_at
-        assert event.occurred_at > previous
-        # Not a health transition: the level signal did not change (#264).
-        assert self.republish.await_count == 0
-        assert wi.health_status == WatchHealthStatus.ERROR
-
-    async def test_the_interval_is_the_env_knob(self, db_session, monkeypatch):
-        monkeypatch.setenv(ERROR_RENOTIFY_INTERVAL_ENV, "1h")
-        wi = await self._item(
-            db_session, health=WatchHealthStatus.ERROR, notified_ago=timedelta(hours=2)
-        )
-
-        await self._fail(db_session, wi)
-
-        assert [e.metadata["renotify"] for e in self._events()] == [True]
-
-    async def test_an_error_item_with_no_stamp_is_due(self, db_session):
-        """ERROR with no record of telling anyone: tell them, rather than stay
-        silent for ever — the migration backfills existing rows, so this is a
-        guard, not a deploy-time burst."""
-        wi = await self._item(db_session, health=WatchHealthStatus.ERROR)
-
-        await self._fail(db_session, wi)
-
-        [event] = self._events()
-        assert event.metadata["renotify"] is True
-        assert event.metadata["previously_notified_at"] == ""
-        assert wi.last_error_notified_at == event.occurred_at
-
-    async def test_a_repeat_restarts_the_window(self, db_session):
-        wi = await self._item(
-            db_session, health=WatchHealthStatus.ERROR, notified_ago=timedelta(hours=25)
-        )
-
-        await self._fail(db_session, wi)
-        await self._fail(db_session, wi)
-
-        assert len(self._events()) == 1
-
-    async def test_the_stamp_commits_before_the_dispatch(self, db_session):
-        """At most once per window even when the dispatch blows up: the stamp
-        is committed with the failure, so a retried or crashed apply cannot
-        re-send. A dispatch-then-stamp order would storm under #269's wedge."""
-        wi = await self._item(
-            db_session, health=WatchHealthStatus.ERROR, notified_ago=timedelta(hours=25)
-        )
-        previous = wi.last_error_notified_at
-        self.dispatch.side_effect = RuntimeError("notifier misconfigured")
-
-        with pytest.raises(RuntimeError):
-            await self._fail(db_session, wi)
-        await db_session.rollback()
-        await db_session.refresh(wi)
-
-        # This failure's own stamp, committed: the same `now` as the check.
-        assert wi.last_error_notified_at != previous
-        assert wi.last_error_notified_at == wi.last_checked_at
-
-    async def test_a_wedged_invalid_request_options_item_does_not_storm(self, db_session):
-        """#269: each refusal clears validators and fails again — one repeat
-        per window however often the cycle turns."""
-        wi = await self._item(
-            db_session, health=WatchHealthStatus.ERROR, notified_ago=timedelta(hours=25)
-        )
-
-        for _ in range(3):
-            wi.etag = 'W/"v7"'
-            await self._fail(
-                db_session, wi, reason=INVALID_REQUEST_OPTIONS_REASON, status_code=None
-            )
-
-        assert [e.metadata["renotify"] for e in self._events()] == [True]
-        assert wi.etag is None
-
-    async def test_recovery_clears_the_stamp(self, db_session):
-        wi = await self._item(
-            db_session, health=WatchHealthStatus.ERROR, notified_ago=timedelta(hours=1)
-        )
-        row = await create_fetch_command(db_session, wi, now=NOW)
-        row.status = FetchCommandStatus.NOT_MODIFIED
-        row.status_code = 304
-        row.fact_at = NOW
-        await db_session.flush()
-
-        await apply_fetch_not_modified(row.command_id)
-
-        assert wi.health_status == WatchHealthStatus.OK
-        assert wi.last_error_notified_at is None
-        assert [e.event_type for e in self._events()] == [WatchEventType.WATCH_RECOVERED]
-
-    async def test_refailure_after_recovery_is_a_first_error_again(self, db_session):
-        wi = await self._item(
-            db_session, health=WatchHealthStatus.ERROR, notified_ago=timedelta(hours=1)
-        )
+    async def _recover(self, db_session, wi):
         ok = await create_fetch_command(db_session, wi, now=NOW)
         ok.status = FetchCommandStatus.NOT_MODIFIED
         ok.status_code = 304
@@ -995,13 +850,38 @@ class TestErrorRenotify:
         await db_session.flush()
         await apply_fetch_not_modified(ok.command_id)
 
+    async def test_the_edge_into_error_sends_nothing(self, db_session):
+        wi = await self._item(db_session)
+
         await self._fail(db_session, wi)
 
-        recovered, error = self._events()
-        assert recovered.event_type == WatchEventType.WATCH_RECOVERED
-        assert error.event_type == WatchEventType.WATCH_ERROR
-        assert error.metadata["renotify"] is False
-        assert wi.last_error_notified_at == error.occurred_at
+        assert wi.health_status == WatchHealthStatus.ERROR
+        assert await _audit_events(db_session, EventType.NOTIFICATION_DISPATCHED) == []
+
+    async def test_a_long_episode_sends_no_reminder(self, db_session):
+        """#71's reminder is Archiver's: an episode older than a day still
+        stages nothing and sends nothing on its next failure."""
+        wi = await self._item(db_session)
+        await self._fail(db_session, wi)
+        wi.error_since = datetime.now(UTC) - timedelta(days=3)
+        await db_session.flush()
+
+        await self._fail(db_session, wi)
+
+        assert await _audit_events(db_session, EventType.NOTIFICATION_DISPATCHED) == []
+        assert self.republish.await_count == 1  # the edge only
+
+    async def test_recovery_sends_nothing(self, db_session):
+        wi = await self._item(db_session, WatchHealthStatus.ERROR)
+
+        await self._recover(db_session, wi)
+
+        assert wi.health_status == WatchHealthStatus.OK
+        assert await _audit_events(db_session, EventType.NOTIFICATION_DISPATCHED) == []
+
+    def test_the_reminder_stamp_is_gone(self):
+        """``last_error_notified_at`` was #71's clock; nothing reads it now."""
+        assert not hasattr(WatchedItem, "last_error_notified_at")
 
 
 class TestForcedFetchLineage:
@@ -1133,7 +1013,6 @@ class TestValidatorStorage:
         monkeypatch.setattr(
             fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
-        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
 
         await apply_fetch_failure(row.command_id)
 
@@ -1154,7 +1033,6 @@ class TestValidatorStorage:
         monkeypatch.setattr(
             fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
-        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
 
         await apply_fetch_failure(row.command_id)
 
@@ -1164,16 +1042,13 @@ class TestValidatorStorage:
 class TestWatchEventFacts:
     """#369: the error edge and the recovery stage their ``info.watch-events``
     fact in the commit that records the health change — never a commit later,
-    and never on a failure inside an episode, a #71 reminder included
-    (re-notify cadence is Archiver's)."""
+    and never on a failure inside an episode (reminder cadence is Archiver's)."""
 
     @pytest.fixture(autouse=True)
     def _wired(self, db_session, monkeypatch):
-        monkeypatch.delenv(ERROR_RENOTIFY_INTERVAL_ENV, raising=False)
         monkeypatch.setattr(
             fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
-        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
         monkeypatch.setattr(fc_mod, "defer_status_republish", AsyncMock())
 
     async def _item(self, db_session, health=WatchHealthStatus.OK, **over):
@@ -1231,16 +1106,6 @@ class TestWatchEventFacts:
         assert [r.event_type for r in await self._facts(db_session)] == ["watch_error"]
         assert wi.error_since == started  # the episode's start, not the latest failure
 
-    async def test_a_renotify_reminder_stages_nothing(self, db_session):
-        wi = await self._item(db_session)
-        await self._fail(db_session, wi)
-        wi.last_error_notified_at = datetime.now(UTC) - timedelta(days=2)
-        await db_session.flush()
-
-        await self._fail(db_session, wi)
-
-        assert [r.event_type for r in await self._facts(db_session)] == ["watch_error"]
-
     async def test_recovery_commits_its_fact_with_the_episode_start(self, db_session):
         wi = await self._item(db_session)
         await self._fail(db_session, wi)
@@ -1279,20 +1144,6 @@ class TestWatchEventFacts:
         await self._recover(db_session, wi)
 
         assert await self._facts(db_session) == []
-
-    async def test_a_dispatch_that_raises_leaves_the_fact_committed(self, db_session, monkeypatch):
-        """The fact is the state change's, not the notification's: a notifier
-        outage after the commit costs the email, never the fact."""
-        wi = await self._item(db_session)
-        monkeypatch.setattr(
-            fc_mod, "dispatch_event_notifications", AsyncMock(side_effect=RuntimeError("down"))
-        )
-
-        with pytest.raises(RuntimeError):
-            await self._fail(db_session, wi)
-
-        await db_session.rollback()
-        assert [r.event_type for r in await self._facts(db_session)] == ["watch_error"]
 
     async def test_the_reapers_cap_is_a_fetch_timeout_edge(self, db_session):
         wi = await self._item(db_session)

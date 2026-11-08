@@ -7,11 +7,10 @@ renewal), change, and Option A.
 
 import hashlib
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from co_core.pure.models.changes import ChangeDetectedEmit
-from notifier_client.types import DispatchOutStatus
 from sqlalchemy import select
 from ulid import ULID
 
@@ -23,6 +22,7 @@ from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.pending_watch_event import PendingWatchEvent
 from src.core.models.process_command import ProcessCommandStatus
 from src.core.process_commands import create_process_command
+from src.core.watch_events import enqueue_change_detected
 from src.workers.pipeline import (
     BlobProvenance,
     ExtractionOutcome,
@@ -58,6 +58,12 @@ _BLOB = BlobProvenance(
 )
 
 
+def _spy_fact():
+    """Spy on the ``change_detected`` fact (#369) — what a detected change does
+    since F3 (#376), where it used to dispatch."""
+    return patch("src.workers.pipeline.enqueue_change_detected", wraps=enqueue_change_detected)
+
+
 @pytest.mark.integration
 class TestApplyExtractionOutcome:
     async def test_first_run_establishes_baseline_no_notification(self, db_session):
@@ -67,17 +73,14 @@ class TestApplyExtractionOutcome:
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
         await db_session.flush()
 
-        with patch(
-            "src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock
-        ) as mock_dispatch:
+        with _spy_fact() as mock_dispatch:
             result = await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_BLOB)
 
         assert isinstance(result, WatchedItemResult)
         assert result.baseline_established is True
         assert result.cache_hit is False
         assert result.changed is False
-        assert result.notifications_dispatched == 0
-        mock_dispatch.assert_not_awaited()
+        mock_dispatch.assert_not_called()
 
         revs = (
             (
@@ -103,15 +106,12 @@ class TestApplyExtractionOutcome:
         await db_session.flush()
 
         # Same content
-        with patch(
-            "src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock
-        ) as mock_dispatch:
+        with _spy_fact() as mock_dispatch:
             result = await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_BLOB)
 
         assert result.cache_hit is True
         assert result.changed is False
-        assert result.notifications_dispatched == 0
-        mock_dispatch.assert_not_awaited()
+        mock_dispatch.assert_not_called()
 
         revs = (
             (
@@ -124,8 +124,8 @@ class TestApplyExtractionOutcome:
         )
         assert len(revs) == 1  # only the baseline
 
-    async def test_changed_fingerprint_inserts_revision_and_notifies(self, db_session):
-        """Content change: new ChangeRevision + CHANGE_DETECTED for the WatchedItem."""
+    async def test_changed_fingerprint_inserts_revision_and_stages_its_fact(self, db_session):
+        """Content change: new ChangeRevision + one change_detected fact for the item."""
         wi = await make_watched_item(db_session, name="Changed")
         wi.effective_url = "https://example.com"
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
@@ -134,20 +134,12 @@ class TestApplyExtractionOutcome:
         await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_BLOB)
         await db_session.flush()
 
-        with patch(
-            "src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock
-        ) as mock_dispatch:
+        with _spy_fact() as mock_dispatch:
             result = await apply_extraction_outcome(db_session, wi, _outcome(NEXT_FP), blob=_BLOB)
 
         assert result.changed is True
-        assert result.notifications_dispatched == 1
-        mock_dispatch.assert_awaited_once()
-
-        event = mock_dispatch.call_args.kwargs["event"]
-        assert event.event_type.value == "change_detected"
-        assert event.watched_item_id == str(wi.id)
-        assert event.item_url == "https://example.com"
-        assert "change_revision_id" in event.metadata
+        mock_dispatch.assert_called_once()
+        assert mock_dispatch.call_args.args[1] is wi
 
         revs = (
             (
@@ -207,28 +199,6 @@ class TestApplyExtractionOutcome:
         assert len(syncs) == 2
         # No scratch copy since the cutover: the row points at Replicator's blob.
         assert all(sync.blob_uri == _BLOB.blob_uri for sync in syncs)
-
-    async def test_dispatches_once_per_watched_item(self, db_session):
-        """#191: CHANGE_DETECTED fires exactly once for the WatchedItem (the entity)."""
-        wi = await make_watched_item(db_session, name="Item1")
-        wi.effective_url = "https://example.com"
-        wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
-        await db_session.flush()
-
-        await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_BLOB)
-        await db_session.flush()
-
-        dispatched_events = []
-
-        async def capture(*, session, event):
-            dispatched_events.append(event)
-
-        with patch("src.workers.pipeline.dispatch_event_notifications", side_effect=capture):
-            result = await apply_extraction_outcome(db_session, wi, _outcome(NEXT_FP), blob=_BLOB)
-
-        assert result.notifications_dispatched == 1
-        assert len(dispatched_events) == 1
-        assert dispatched_events[0].watched_item_id == str(wi.id)
 
 
 @pytest.mark.integration
@@ -409,9 +379,7 @@ class TestBlobReferenceRenewal:
         await db_session.delete(queued)  # the drain published it
         await db_session.flush()
 
-        with patch(
-            "src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock
-        ) as mock_dispatch:
+        with _spy_fact() as mock_dispatch:
             result = await apply_extraction_outcome(
                 db_session, wi, _outcome(NEXT_FP), blob=_RENEWED_BLOB
             )
@@ -420,7 +388,7 @@ class TestBlobReferenceRenewal:
         assert result.cache_hit is True
         assert result.changed is False
         assert result.renewal_enqueued is True
-        mock_dispatch.assert_not_awaited()
+        mock_dispatch.assert_not_called()
 
         revs = await self._revisions(db_session, wi)
         assert len(revs) == 2  # a renewal is not a revision
@@ -615,145 +583,22 @@ class TestBlobReferenceRenewal:
         assert await self._outbox_rows(db_session, wi) == []
 
 
-@pytest.mark.integration
-class TestChangeEventCarriesTheDiffAddresses:
-    """#222: a change names both texts by their storage address — the
-    fingerprint *is* where the processor keeps the canonical text."""
-
-    async def _changed(self, db_session, name):
-        wi = await make_watched_item(db_session, name=name, source_specs=[_SPEC_FULL_PAGE])
-        await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_BLOB)
-        await db_session.flush()
-        with patch(
-            "src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock
-        ) as dispatch:
-            await apply_extraction_outcome(db_session, wi, _outcome(NEXT_FP), blob=_BLOB)
-        baseline, change = (
-            (
-                await db_session.execute(
-                    select(ChangeRevision)
-                    .where(ChangeRevision.watched_item_id == wi.id)
-                    .order_by(ChangeRevision.captured_at)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        return dispatch, baseline, change
-
-    async def test_previous_and_current_fingerprints(self, db_session):
-        dispatch, baseline, change = await self._changed(db_session, "Diff addresses")
-        meta = dispatch.call_args.kwargs["event"].metadata
-        assert meta["previous_fingerprint"] == baseline.content_fingerprint
-        assert meta["current_fingerprint"] == change.content_fingerprint
-        assert "content_fingerprint" not in meta
-
-    async def test_a_first_change_has_no_previous_change(self, db_session):
-        """#349: a baseline never sets ``last_changed_at``, so there is none."""
-        dispatch, _baseline, _change = await self._changed(db_session, "First change")
-        meta = dispatch.call_args.kwargs["event"].metadata
-        assert "previous_changed_at" not in meta
-
-    async def test_a_later_change_names_the_one_before_it(self, db_session):
-        """#349: ``last_changed_at`` is this change by the time the event is
-        built; the email's PREVIOUS CHANGE needs the value it replaced."""
-        wi = await make_watched_item(
-            db_session, name="Second change", source_specs=[_SPEC_FULL_PAGE]
-        )
-        await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_BLOB)
-        first = datetime(2026, 10, 6, 21, 7, tzinfo=UTC)
-        wi.last_changed_at = first
-        await db_session.flush()
-        with patch(
-            "src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock
-        ) as dispatch:
-            await apply_extraction_outcome(db_session, wi, _outcome(NEXT_FP), blob=_BLOB)
-        meta = dispatch.call_args.kwargs["event"].metadata
-        assert meta["previous_changed_at"] == "2026-10-06T21:07:00Z"
-        assert wi.last_changed_at > first
-
-
-async def _audits_of(db_session, event_type, wi) -> list[AuditLog]:
-    stmt = select(AuditLog).where(
-        AuditLog.event_type == event_type,
-        AuditLog.payload["watched_item_id"].astext == str(wi.id),
-    )
-    return list((await db_session.execute(stmt)).scalars())
-
-
 def _address(text: bytes) -> str:
     return f"sha256:{hashlib.sha256(text).hexdigest()}"
 
 
-@pytest.mark.integration
-class TestChangeDiffEndToEnd:
-    """#222 acceptance: a change with Full diff enabled delivers the diff.
-
-    Nothing between the comparison and the notifier is mocked: the real
-    dispatcher selects the template, the real loader finds both texts through
-    the processor's ``process_commands`` rows (under its savepoint), and the
-    real renderer fences the diff. Only the two edges are stubbed — the
-    notifier client and the GCS read.
-    """
-
-    async def _stored(self, db_session, wi, text: bytes) -> str:
-        """A completed answer naming where the processor stored ``text``."""
-        fetch = await create_fetch_command(db_session, wi, now=datetime.now(UTC))
-        fetch.blob_uri, fetch.content_fingerprint = _BLOB.blob_uri, "61" * 32
-        await db_session.flush()
-        answered = await create_process_command(db_session, fetch, wi, now=datetime.now(UTC))
-        answered.status = ProcessCommandStatus.COMPLETED
-        answered.output_digest = _address(text)
-        answered.output_uri = f"gs://co-gcs-processor/blobs/{hashlib.sha256(text).hexdigest()}.bin"
-        answered.output_size_bytes = len(text)
-        await db_session.flush()
-        return answered.output_uri
-
-    async def test_full_diff_reaches_the_notifier(self, db_session):
-        previous, current = b"Hello world", b"Content changed"
-        wi = await make_watched_item(db_session, name="Diff e2e", source_specs=[_SPEC_FULL_PAGE])
-        await apply_extraction_outcome(db_session, wi, _outcome(_address(previous)), blob=_BLOB)
-        stored = {
-            await self._stored(db_session, wi, previous): previous,
-            await self._stored(db_session, wi, current): current,
-        }
-        db_session.add(
-            NotificationTemplate(
-                title="Diff e2e",
-                visibility=VISIBILITY_GLOBAL,
-                remote_channel_id=str(ULID()),
-                channel_hint="json",
-                events=["change_detected"],
-                content_config={"default": {"include_diff_full": True}},
-            )
-        )
-        await db_session.flush()
-
-        client = AsyncMock()
-        client.__aenter__ = AsyncMock(return_value=client)
-        client.__aexit__ = AsyncMock(return_value=False)
-        client.dispatch.return_value = MagicMock(
-            id=str(ULID()), status=DispatchOutStatus.SUCCEEDED, attempts=[]
-        )
-        with (
-            patch("src.core.notifications.notify.get_notifier_client", return_value=client),
-            patch(
-                "src.core.notifications.diff_loader.aread_blob",
-                new=AsyncMock(side_effect=lambda u: stored[u]),
-            ),
-        ):
-            result = await apply_extraction_outcome(
-                db_session, wi, _outcome(_address(current)), blob=_BLOB
-            )
-        await db_session.flush()
-
-        assert result.changed is True
-        body = client.dispatch.call_args.kwargs["body_template"]
-        fenced = body.split("\n\n", 1)[1]
-        assert fenced == "```diff\n- Hello world\n+ Content changed\n```"
-        assert "DIFF: unavailable" not in body
-        (dispatched,) = await _audits_of(db_session, EventType.NOTIFICATION_DISPATCHED, wi)
-        assert dispatched.payload["results"][0]["success"] is True
+async def _stored(db_session, wi, text: bytes) -> str:
+    """A completed answer naming where the processor stored ``text``."""
+    fetch = await create_fetch_command(db_session, wi, now=datetime.now(UTC))
+    fetch.blob_uri, fetch.content_fingerprint = _BLOB.blob_uri, "61" * 32
+    await db_session.flush()
+    answered = await create_process_command(db_session, fetch, wi, now=datetime.now(UTC))
+    answered.status = ProcessCommandStatus.COMPLETED
+    answered.output_digest = _address(text)
+    answered.output_uri = f"gs://co-gcs-processor/blobs/{hashlib.sha256(text).hexdigest()}.bin"
+    answered.output_size_bytes = len(text)
+    await db_session.flush()
+    return answered.output_uri
 
 
 @pytest.mark.integration
@@ -798,7 +643,7 @@ class TestOptionA:
         wi = await self._baselined(db_session, "OptionA baseline")
         assert wi.processor_version == "0.19.7+1"
 
-    @patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock)
+    @patch("src.workers.pipeline.enqueue_change_detected", wraps=enqueue_change_detected)
     async def test_a_processor_change_alone_re_baselines_silently(self, dispatch, db_session):
         wi = await self._baselined(db_session, "OptionA processor")
         before = wi.last_changed_at
@@ -810,8 +655,7 @@ class TestOptionA:
 
         assert result.rebaselined is True
         assert result.changed is False
-        assert result.notifications_dispatched == 0
-        dispatch.assert_not_awaited()
+        dispatch.assert_not_called()
         _baseline, rebaseline = await self._revisions(db_session, wi)
         assert rebaseline.content_fingerprint == NEXT_FP
         assert rebaseline.processor_version == "0.20.0+1"
@@ -823,7 +667,7 @@ class TestOptionA:
         assert event.payload["processor_version"] == "0.20.0+1"
         assert event.payload["change_revision_id"] == str(rebaseline.id)
 
-    @patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock)
+    @patch("src.workers.pipeline.enqueue_change_detected", wraps=enqueue_change_detected)
     async def test_a_re_baseline_is_still_announced_to_archiver(self, _dispatch, db_session):
         # The derived text moved, so the registry's record of it must move too;
         # only the notification is withheld.
@@ -838,7 +682,7 @@ class TestOptionA:
         )
         assert (await db_session.execute(stmt)).scalar_one_or_none() is not None
 
-    @patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock)
+    @patch("src.workers.pipeline.enqueue_change_detected", wraps=enqueue_change_detected)
     async def test_a_spec_change_notifies_with_a_label(self, dispatch, db_session):
         wi = await self._baselined(db_session, "OptionA spec")
 
@@ -847,10 +691,9 @@ class TestOptionA:
         )
 
         assert result.changed is True
-        event = dispatch.call_args.kwargs["event"]
-        assert event.metadata["extraction_changed"] == "spec"
+        assert dispatch.call_args.kwargs["extraction_changed"] == "spec"
 
-    @patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock)
+    @patch("src.workers.pipeline.enqueue_change_detected", wraps=enqueue_change_detected)
     async def test_a_spec_change_beside_a_processor_change_still_notifies(
         self, dispatch, db_session
     ):
@@ -865,19 +708,19 @@ class TestOptionA:
         )
 
         assert result.changed is True
-        assert dispatch.call_args.kwargs["event"].metadata["extraction_changed"] == "spec"
+        assert dispatch.call_args.kwargs["extraction_changed"] == "spec"
         assert await self._rebaselined_audits(db_session, wi) == []
 
-    @patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock)
+    @patch("src.workers.pipeline.enqueue_change_detected", wraps=enqueue_change_detected)
     async def test_a_content_change_carries_no_label(self, dispatch, db_session):
         wi = await self._baselined(db_session, "OptionA content")
 
         result = await apply_extraction_outcome(db_session, wi, _outcome(NEXT_FP), blob=_BLOB)
 
         assert result.changed is True
-        assert dispatch.call_args.kwargs["event"].metadata["extraction_changed"] is None
+        assert dispatch.call_args.kwargs["extraction_changed"] is None
 
-    @patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock)
+    @patch("src.workers.pipeline.enqueue_change_detected", wraps=enqueue_change_detected)
     async def test_unknown_identity_triggers_neither(self, dispatch, db_session):
         # NULL on either side means unknown: notify as before Option A.
         wi = await self._baselined(db_session, "OptionA unknown", spec=None)
@@ -891,9 +734,9 @@ class TestOptionA:
         )
 
         assert result.changed is True
-        assert dispatch.call_args.kwargs["event"].metadata["extraction_changed"] is None
+        assert dispatch.call_args.kwargs["extraction_changed"] is None
 
-    @patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock)
+    @patch("src.workers.pipeline.enqueue_change_detected", wraps=enqueue_change_detected)
     async def test_an_equal_digest_refreshes_the_items_version_only(self, dispatch, db_session):
         wi = await self._baselined(db_session, "OptionA refresh")
 
@@ -908,7 +751,7 @@ class TestOptionA:
         # The revision records what wrote it; it is never rewritten.
         assert baseline.processor_version == "0.19.7+1"
 
-    @patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock)
+    @patch("src.workers.pipeline.enqueue_change_detected", wraps=enqueue_change_detected)
     async def test_the_comparison_base_is_the_item_not_the_revision(self, dispatch, db_session):
         # After a refresh the revision still says 0.19.7+1. A change under the
         # version the item already knows is content, not the upgrade.
@@ -924,23 +767,18 @@ class TestOptionA:
 
         assert result.changed is True
         assert result.rebaselined is False
-        dispatch.assert_awaited_once()
+        dispatch.assert_called_once()
 
 
 @pytest.mark.integration
 class TestChangeFact:
-    """#369: a notified change stages exactly one ``change_detected`` fact in
+    """#369: a detected change stages exactly one ``change_detected`` fact in
     the session that records it, and nothing else this function decides does —
     a baseline, a cache hit (#293 renewal) and an Option A re-baseline are not
     changes in the content (cannobserv ``docs/change_bus/watch.md``)."""
 
     CURRENT_URI = "gs://co-gcs-processor/blobs/current.bin"
     OTHER_SPEC_FP = "spec1:sha256:" + "22" * 32
-
-    @pytest.fixture(autouse=True)
-    def _quiet(self):
-        with patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock):
-            yield
 
     async def _baselined(self, db_session, **outcome_kwargs):
         wi = await make_watched_item(db_session, name="Fact", source_specs=[_SPEC_FULL_PAGE])
@@ -1001,7 +839,7 @@ class TestChangeFact:
         previous = b"Hello world"
         wi = await make_watched_item(db_session, name="Fact uri", source_specs=[_SPEC_FULL_PAGE])
         await apply_extraction_outcome(db_session, wi, _outcome(_address(previous)), blob=_BLOB)
-        stored_uri = await TestChangeDiffEndToEnd()._stored(db_session, wi, previous)
+        stored_uri = await _stored(db_session, wi, previous)
 
         await apply_extraction_outcome(db_session, wi, self._changed(), blob=_BLOB)
 
@@ -1039,3 +877,39 @@ class TestChangeFact:
         assert ChangeDetectedEmit.model_validate(second.payload).previous_changed_at == (
             first_change
         )
+
+
+@pytest.mark.integration
+class TestNoDispatch:
+    """#376 part 2: a detected change sends nothing. Archiver notifies from the
+    ``change_detected`` fact staged beside the revision (#369), so with a
+    subscribed active template the change still writes its revision and its
+    fact, and no ``notification.dispatched``."""
+
+    async def test_a_change_stages_its_fact_and_sends_nothing(self, db_session):
+        db_session.add(
+            NotificationTemplate(
+                title="Every change",
+                visibility=VISIBILITY_GLOBAL,
+                remote_channel_id=str(ULID()),
+                channel_hint="json",
+                events=["change_detected"],
+            )
+        )
+        wi = await make_watched_item(db_session, name="Quiet", source_specs=[_SPEC_FULL_PAGE])
+        await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_BLOB)
+        await db_session.flush()
+
+        result = await apply_extraction_outcome(db_session, wi, _outcome(NEXT_FP), blob=_BLOB)
+        await db_session.flush()
+
+        assert result.changed is True
+        facts = (await db_session.execute(select(PendingWatchEvent))).scalars().all()
+        assert [f.event_type for f in facts] == ["change_detected"]
+        dispatched = select(AuditLog).where(
+            AuditLog.event_type == EventType.NOTIFICATION_DISPATCHED
+        )
+        assert (await db_session.execute(dispatched)).scalars().all() == []
+
+    def test_the_result_counts_no_notifications(self):
+        assert not hasattr(WatchedItemResult(), "notifications_dispatched")

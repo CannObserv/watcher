@@ -753,21 +753,6 @@ def test_explicit_dev_public_base_url_is_forwarded() -> None:
     assert "WATCHER_PUBLIC_BASE_URL=https://co-watcher.exe.xyz:8001" in result.stdout
 
 
-def test_inherited_notify_cutover_is_cleared() -> None:
-    """#376: /etc/watcher/.env holds production's T from F3 on. T is an
-    agreement between production Watcher and production Archiver; a dev server
-    inheriting it would stop notifying at that instant with no dev Archiver to
-    take over. Cleared, a dev server dispatches every event, as before F3."""
-    result = run(
-        {
-            "TEST_DATABASE_URL": TEST_URL,
-            "WATCHER_NOTIFY_CUTOVER_AT": "2026-11-06T21:00:00Z",
-        }
-    )
-    assert result.returncode == 0, result.stderr
-    assert "WATCHER_NOTIFY_CUTOVER_AT=(cleared)" in result.stdout
-
-
 def test_report_never_prints_a_database_password() -> None:
     """The dry-run report is pasted into issues and scrollback (#296 step 25).
 

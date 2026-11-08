@@ -32,7 +32,6 @@ from src.core.notifier_client import (
     NotifierNotEnabled,
     assert_environment_notifier_allowed,
 )
-from src.core.notify_cutover import NotifyCutoverInvalid, assert_notify_cutover_at
 from src.core.public_base_url import PublicBaseUrlInvalid, assert_public_base_url
 from src.dashboard import register_dashboard
 
@@ -65,9 +64,7 @@ async def lifespan(application: FastAPI):
     for that flag held without a URL (#278) — which means the unit's
     /etc/watcher/notifier.env did not load — and for a malformed
     WATCHER_PUBLIC_BASE_URL (#296 D6), which would otherwise ship every
-    notification with its dashboard link silently dropped, and for a
-    WATCHER_NOTIFY_CUTOVER_AT that is not an unambiguous UTC instant (#376),
-    which at F3 would be a double send or a silent gap. The
+    notification with its dashboard link silently dropped. The
     enforcement point is here rather than at import of src.core.bus or
     src.core.notifier_client: an import-time check would abort alembic,
     everything under scripts/, and anything else that transitively imports the
@@ -82,14 +79,12 @@ async def lifespan(application: FastAPI):
         assert_environment_bus_allowed(os.environ)
         assert_environment_notifier_allowed(os.environ)
         assert_public_base_url(os.environ)
-        assert_notify_cutover_at(os.environ)
     except (
         ProductionDatabaseRefused,
         BusNotEnabled,
         NotifierNotEnabled,
         NotifierCredentialMissing,
         PublicBaseUrlInvalid,
-        NotifyCutoverInvalid,
     ) as e:
         # Log before re-raising: under systemd the bare exception surfaces in
         # journalctl as a lifespan traceback, burying the actionable text.

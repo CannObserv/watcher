@@ -11,21 +11,12 @@ A systemd unit file is provided at `deploy/watcher.service`.
 
 > **Install the Archiver service first** — see [§ Archiver Service](#archiver-service) below. Watcher no longer holds an Archiver SDK and will boot without one (#254), but `info.registry` is Archiver's stream on the broker, so until Archiver is producing, `watched_items` cannot reconcile and no registry state arrives.
 
-> **Join the tailnet first, too** (#280). Notifier runs on its own VM since
-> notifier#43 and binds its **tailnet address alone** — its launch scripts
-> resolve this host's `100.x` address and hand uvicorn that one `--host`, so it
-> is unreachable from loopback, from exe.dev's internal `10.42.0.0/16`, and
-> from the internet. So
-> `notifier` in `WATCHER_NOTIFIER_BASE_URL` is a MagicDNS name on the
-> `cannobserv.org.github` tailnet, and a host that has not joined cannot resolve
-> or reach it at all.
->
-> This failure is quieter than the old wrong-port one. The #277/#278 gates check
-> that the URL and the flag are *held together*, not that the host answers, so a
-> watcher off the tailnet **starts clean** and then fails every dispatch at call
-> time. Join the tailnet, then confirm `curl http://notifier:9000/health`
-> answers before starting the unit. This node's identity, its peers, the
-> cold-boot race and the ACL rules: [reference/tailscale.md](reference/tailscale.md).
+> **Join the tailnet first, too** (#280). The broker in `WATCHER_BUS_REDIS_URL`
+> is a MagicDNS name on the `cannobserv.org.github` tailnet, so a host that has
+> not joined cannot resolve or reach it; the service still starts, and the
+> startup PING logs the failure at ERROR (#287). This node's identity, its
+> peers, the cold-boot race and the ACL rules:
+> [reference/tailscale.md](reference/tailscale.md).
 
 > **Set the host's memory posture too** (#307, #309). This VM has no swap and
 > shares memory with agent sessions the OOM killer cannot pick, so the kernel
@@ -37,26 +28,11 @@ A systemd unit file is provided at `deploy/watcher.service`.
 sudo mkdir -p /etc/watcher
 # Add production secrets (at minimum DATABASE_URL)
 echo 'DATABASE_URL=postgresql+asyncpg://watcher:watcher@localhost:5432/watcher' | sudo tee /etc/watcher/.env
-# The dashboard's public base — THIS host's (#296 D6). Unset only WARNs, and every
-# notification loses its link; a value copied from another VM's file passes every
-# check and points readers at that VM.
-echo 'WATCHER_PUBLIC_BASE_URL=https://co-watcher.exe.xyz' | sudo tee -a /etc/watcher/.env
 sudo chmod 640 /etc/watcher/.env
 sudo chown root:exedev /etc/watcher/.env
 
-# The notifier credential goes in its OWN file, readable by root only (#278).
-# It must never join /etc/watcher/.env: scripts/load-env.sh exports that file
-# into every agent shell, and this is the pair that makes a stray dispatch
-# deliverable to real subscribers.
-sudo install -m 600 -o root -g root /dev/null /etc/watcher/notifier.env
-sudo tee /etc/watcher/notifier.env >/dev/null <<'EOF'
-WATCHER_NOTIFIER_BASE_URL=http://notifier:9000
-WATCHER_NOTIFIER_API_KEY=<production tenant key from notifier's scripts/seed_tenant.py>
-EOF
-
-# IMPORTANT: /etc/watcher/.env and /etc/watcher/notifier.env must both exist
-# before starting the service. Without either, systemd refuses to start the
-# unit (both EnvironmentFile= lines are required).
+# IMPORTANT: /etc/watcher/.env must exist before starting the service. Without
+# it, systemd refuses to start the unit (its EnvironmentFile= line is required).
 
 # Copy (or symlink) the unit file
 sudo cp deploy/watcher.service /etc/systemd/system/watcher.service
@@ -392,4 +368,4 @@ compact either way — 1.7 MB after the prune.
 
 ## notifier-client
 
-**Moved to [DEPENDENCIES.md](DEPENDENCIES.md).**
+**Retired by #379:** Watcher holds no notifier client.

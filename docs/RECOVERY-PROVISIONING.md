@@ -112,7 +112,7 @@ the monitor's JSON.
 constant so a port typo could not aim a dead-man's switch at notifier_dev
 (`:9001`, whose `/health` is byte-identical). This repo's rule is that a
 service URL in `src/` is configuration, a literal being the defect whatever
-host it names (`tests/test_notifier_isolation.py`, #280). The typo is not silent
+host it names (`tests/test_no_resolvable_service_hosts.py`, #280). The typo is not silent
 anyway. On notifier, keys lived per database, so a production-marked key on
 `:9001` was a **401** (notifier#56). On co-status (#330), `status:9001` does
 not answer from co-watcher at all (checked 2026-09-28): the check-in times out.

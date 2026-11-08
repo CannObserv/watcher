@@ -3,8 +3,8 @@
 Watcher reports its **edges** to Archiver as facts on `info.watch-events` (#369;
 contract `docs/change_bus/watch.md` at cannobserv v0.37.0, consumer group
 `archiver.watch-events`). The `info.watch-status` stream carries **levels**;
-this one carries what happened. Watcher's own notification dispatch runs beside
-it until F3 (#376) moves composition to Archiver.
+this one carries what happened. Archiver notifies from it since F3 (#376);
+Watcher sends no notification (#379).
 
 A fourth fact, `check_rejected`, shares the stream and the outbox but is not an
 edge: it answers an Archiver `watch_check` command Watcher will not run (#371,
@@ -31,8 +31,7 @@ OK is not a recovery.
 **What each fact carries:**
 - `watch_error.reason` is the `health_reason` written at the same edge, and
   `status_code` is `health_status_code`. So the extraction-failure path sends
-  `processing_failed`, even though its notification metadata still says
-  `extraction_failed`.
+  `processing_failed`, not `extraction_failed`.
 - `watch_recovered.error_since` is `watched_items.error_since`. That column is
   stamped on the error edge and cleared on every exit from ERROR, including the
   dashboard's URL edit into PROBING. That exit ends the episode with no recovery

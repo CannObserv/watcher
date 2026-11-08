@@ -1,7 +1,7 @@
 # Watched Items
 
 Everything the `WatchedItem` entity owns: fields, schedule resolution, registry
-reconciliation, and notifications. The operator surface that renders it and the
+reconciliation. The operator surface that renders it and the
 guards on its lifecycle are in
 [WATCHED-ITEMS-DASHBOARD.md](WATCHED-ITEMS-DASHBOARD.md). `AGENTS.md` carries
 the one-entity rule, the create path, and the handful of invariants an agent
@@ -49,10 +49,7 @@ going to mean when it was stored; see
 the extraction identity of the latest successful outcome, refreshed even when
 the fingerprint is unchanged: Option A's comparison base, and the key's
 generation when the processor decides — see
-[docs/CONTENT-PIPELINE.md](CONTENT-PIPELINE.md)); and its
-notification surface (the
-item-scoped `NotificationTemplate` rows — `visibility='watched_item'`,
-`watched_item_id` set; see **Notifications** below). **Schedule resolution is announced, else the system default (#375, F2).**
+[docs/CONTENT-PIPELINE.md](CONTENT-PIPELINE.md)). **Schedule resolution is announced, else the system default (#375, F2).**
 `resolved_schedule_config` (`src/core/scheduling/resolution.py`) returns
 `announced_schedule_config` when set (an explicit `{}` passes through as "no
 interval"), otherwise `SYSTEM_DEFAULT_SCHEDULE_CONFIG` (`1d`). Archiver resolves
@@ -132,101 +129,26 @@ like a fetch failure (ERROR health + `CHECK_EXTRACTION_FAILED` + `WATCH_ERROR`).
 
 **Moved to [REGISTRY.md](REGISTRY.md).**
 
-## Notification visibility
+## Notifications: Archiver's (#376, #379)
 
-**Notifications (#200).** One table — `notification_templates` — holds every
-notification target. Each `NotificationTemplate` has an intrinsic `visibility`
-that controls where it fires:
+**Watcher sends no notification.** Archiver has sent every notification for an
+event at or after T = `2026-11-06T21:00:00Z`, from the `info.watch-events` facts
+Watcher stages (#369) — [WATCH-EVENTS.md](WATCH-EVENTS.md). #376 deleted
+Watcher's dispatcher, its three sites, #71's error reminder and the T gate;
+#379 deleted the rest: the templates' renderer and change diff, the test sends,
+the `/api/v1` and dashboard template surfaces, and the notifier client.
+`tests/test_notification_subsystem_retired.py` fails on any of it coming back.
 
-- `global` — every WatchedItem (`domain_name`/`watched_item_id` both NULL).
-- `domain` — every WatchedItem whose `domain_name` matches.
-- `watched_item` — the single `watched_item_id` only.
+**Kept, inert, for #380:** the `NotificationTemplate` model and its
+`notification_templates` table (one row per target, with an intrinsic
+`visibility` — `global`, `domain` or `watched_item`, #200), which
+`src/ops/export_for_archiver.py` still re-exports, and the audit
+`EventType.NOTIFICATION_*` strings. Deleting an item still cascades to its
+item-scoped rows.
 
-## Notification templates
-
-**Watcher dispatches nothing since F3 (#376).** Archiver has sent every
-notification for an event at or after T = `2026-11-06T21:00:00Z`, from the
-`info.watch-events` facts Watcher stages (#369); part 2 deleted Watcher's
-dispatcher, its three sites, #71's error reminder (the `last_error_notified_at`
-clock, dropped by migration `e2eab993d615`) and the T gate.
-`tests/test_notification_dispatch_sites.py` fails on a dispatch site that comes
-back. What remains below — templates, previews, test sends — is the operator
-surface #379 deletes; a test send still calls `dispatch_via_notifier` directly.
-
-A CHECK constraint (`ck_notification_templates_visibility_refs`) enforces that
-exactly the ref column implied by `visibility` is set. There is **no separate
-"configuration" object** and no junction tables — the five legacy sources
-(`is_global_default` flag, `domain_nc_refs`, `watch_nc_refs`,
-`watched_item_notification_templates`, `watch_notification_configs`) were
-collapsed in #200. `channel_hint` is display-only; `remote_channel_id` is the
-notifier-owned delivery handle — nothing dispatches off the hint.
-
-**Subscribable events (#166).** Three: `change_detected`, `watch_error` and
-`watch_recovered` — the three `info.watch-events` facts. Created, paused,
-resumed, archived and deleted were subscribable and never fired; #166 dropped
-them and migration `78606286a887` stripped them from saved templates. Their
-**audits** (`EventType.WATCHED_ITEM_*`) are a separate enum and stay.
-
-Template mutations (create/update/delete/duplicate + their audit events) go
-through one service — `src/core/notifications/templates.py` (#228) — used by
-every surface below; routes stay transport adapters and own the commit.
-
-CRUD: generic visibility-aware library at `/api/v1/notifications/templates`
-(create takes `visibility` + the matching ref); item-scoped convenience at
-`/api/v1/watched-items/{id}/notifications` (creates `visibility='watched_item'`),
-with `GET .../effective` returning the full in-scope set (global + the item's
-domain + the item) — the single answer to "which channels fire for this item".
-Dashboard: the library `/notifications` create makes global templates; domain
-templates are created from the domain detail page; item templates from the item
-detail page. Design: [docs/plans/2026-06-19-notification-model-consolidation-design.md](../docs/plans/2026-06-19-notification-model-consolidation-design.md).
-
-## Notification body format
-
-**Body format — source Markdown (#224/#225).** Notification bodies are **source
-Markdown**. Watcher renders no HTML: it passes the composed body to the Notifier,
-which converts it per channel — CommonMark → HTML for HTML-native plugins
-(Mailgun, SES, `mailto`), raw Markdown for the rest (the local Apprise path was
-stripped in #137). Because CommonMark treats a lone `\n` as a *soft* break (a
-space, not `<br/>`), bodies must be **block-structured**, not `\n`-joined lines —
-the `change_detected` body is a Markdown **bullet list** (one fact per `<li>`;
-`content._build_change_detected_body`). A `\n`-joined paragraph collapses onto
-one run-on line on HTML clients (the #224 regression). Guarded by
-`tests/core/notifications/test_content.py::TestMarkdownListContract`; keep it that
-way when editing the composer.
-
-## Change diff (#222)
-
-A `change_detected` body ends with a diff of the previous and current canonical
-text, by **word** (#349): each change as `-`/`+` lines with 8 words of context,
-wrapped at 72 columns, in a fenced block with no unified-diff header. Live items
-extract to one long line, mostly without sentence ends, so #222's sentence split
-and fixed-width wrap realigned everything after an edit; segments are now
-content-defined, so an edit moves no natural boundary but its own (a positional
-cut in a 64-word run without one can shift, up to the next natural boundary).
-Page text stays
-inside the fence (`_fence_for`, CR 13), never inline marks. Defaults: snippet on
-(25 rendered lines, hunk-aware), full off (every change); both are bounded by
-`MAX_RENDERED_DIFF_BYTES` (32 KiB, #346). Templates saved before #221 get their
-stored diff choices back. On a change, the `include_last_changed_at` toggle
-shows `PREVIOUS CHANGE` (`previous_changed_at`): `last_changed_at` is already
-this change when the event is built. **Failure never blocks a notification** — the
-body says `DIFF: unavailable (<reason>)`, `previous text not stored` for any
-revision older than shadow mode. Each side is capped by
-`WATCHER_DIFF_MAX_INPUT_BYTES`. Mechanism (lookup via the processor's
-`output_uri`, hash check): `src/core/notifications/diff_loader.py`.
-
-## WatchEvent identity fields
-
-**WatchEvent identity fields** are `watched_item_id`, `item_name`, `item_url`
-(renamed from `watch_*` in #191). The same names are the user-facing notification
-template variables; the default-template "ITEM:" link (renamed from "WATCH:" in
-#221) and `change_url` point at `/watched-items/{watched_item_id}` under
-`app_url`, the dashboard's public base (`WATCHER_PUBLIC_BASE_URL`, #296 D6). With
-no base configured both are omitted rather than guessed — a relative link is
-useless in Slack or email. The
-`AuditLog.watch_id` FK column was retired —
-audits carry the WatchedItem as `watched_item_id` inside the JSONB `payload`
-(filter via `GET /api/v1/audit?watched_item_id=<ulid>`).
+Audits carry the WatchedItem as `watched_item_id` inside the JSONB `payload`
+(filter via `GET /api/v1/audit?watched_item_id=<ulid>`); the `AuditLog.watch_id`
+FK column was retired.
 
 ## What the #191 collapse removed
 

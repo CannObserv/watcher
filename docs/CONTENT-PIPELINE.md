@@ -69,8 +69,8 @@ origin request. At the cap the check ends `FAILED`,
 `failure_reason="blob_unreadable"` (the remedy is the blob store, not the
 origin), `CHECK_FETCH_FAILED`, ERROR health, one `WATCH_ERROR` (reminders per
 #71), and the gate lifts. `clear_validators` fires (#362).
-[`src/core/blobs.py`](../src/core/blobs.py) still reads one kind of blob — the
-processor's stored canonical text, for the change diff.
+Watcher reads no blob at all since #379: the change diff, the last reader of
+the processor's stored canonical text, went with the notification renderer.
 
 ### `not_modified` is a success, not a failure (#249)
 
@@ -161,7 +161,8 @@ from the item's *current* specs. The row snapshots the whole wire command; the
 dispatch essence is resolved by Watcher (cannobserv#486 D1), `None` when nothing
 is informative; `input_digest` is the blob fact's bare hex, refused at the
 occasion when it is not. `ix_process_commands_output_digest` (#345) serves the
-change diff's text lookup.
+stored-text lookup (`src/core/stored_text.py`) whose location rides the
+`change_detected` fact.
 
 **The `watcher.derived` consumer settles a row on its first terminal fact.** A
 lost ack makes the processor publish the same outcome again under a fresh

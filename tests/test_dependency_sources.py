@@ -74,9 +74,10 @@ class TestGitSources:
     def test_sweep_matches_the_lock(self):
         """Guard the guard — the manifest sweep sees every git package the lock holds.
 
-        Compared against the lock rather than asserting a count, so graduating
-        ``notifier-client`` to a published package (both sides empty) stays
-        green while a parser that finds nothing does not.
+        Compared against the lock rather than asserting a count, so retiring
+        the last git source (``notifier-client``, #379: both sides empty) stays
+        green while a parser that finds nothing does not. The per-source tests
+        below skip on that empty set until a git source comes back.
         """
         swept = {name for name, _ in _GIT_SOURCES}
         locked = _locked_git_packages()

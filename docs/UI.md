@@ -86,7 +86,7 @@ Edit forms that replace a row use `hx-swap="outerHTML"` targeting the `<tr>`:
 <!-- data row -->
 <tr id="row-{id}">…</tr>
 
-<!-- edit button (real example: WatchedItem notification-template edit-form) -->
+<!-- edit button (example; its real user, the item template form, went in #379) -->
 <button
   hx-get="/watched-items/{id}/templates/{tpl_id}/edit"
   hx-target="#row-{id}"

@@ -40,9 +40,8 @@ does not preserve them). One notion of "did the specs change?" — two would be 
 bug farm, and the conditional-GET invalidation (#269) already depended on this
 one.
 
-No notification fires. `WatchEventType` is a closed enum persisted in
-`notification_templates.events`; a member for this would drag in the template UI
-and dispatch for a signal the audit row and the detail-page badge already carry.
+No notification fires: the audit row and the detail-page badge carry the
+signal.
 
 **Spec acknowledgement (#274).** `last_reviewed_at` means *the operator has
 acknowledged the current `source_specs`* — compared against the newest
@@ -59,7 +58,7 @@ matters with it.
 `last_observed_at`, `last_changed_at`, `last_reviewed_at`,
 `domain_suspended`, `archived_at`,
 `throttle_floor_interval` and `default_schedule_config` (both inert since F2, #375), `content_media_type`,
-`default_tags`, `description`, `name`, notification config, audit rows, fetch-command
+`default_tags`, `description`, `name`, notification templates (inert, #379), audit rows, fetch-command
 history. Pinned by `TestLocalColumnsSurvive` — "we did not write it" is a weaker
 guarantee than "a test fails if someone does".
 

@@ -85,7 +85,7 @@ Shells load two env files in order (later overrides earlier); the service loads 
 1. `/etc/watcher/.env` — production secrets (`DATABASE_URL`, `GOOGLE_APPLICATION_CREDENTIALS`). Persistent, managed manually on the VM.
 2. `.env` (repo root, git-ignored) — dev/agent secrets (`GH_TOKEN`, `TEST_DATABASE_URL`). Never commit.
 
-Plus `/etc/watcher/notifier.env` (600 root:root, `WATCHER_NOTIFIER_BASE_URL` + `WATCHER_NOTIFIER_API_KEY`): `deploy/watcher.service` loads it, nothing else may read it. **Never source, copy, or re-add those names to a shared env file** (#278) — a backup beside the original counts. Non-production runs use notifier's dev tenant via `WATCHER_DEV_NOTIFIER_*`: [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md).
+The notifier credentials and their unit-only file are retired (#379); `tests/test_notification_subsystem_retired.py` forbids their names. History: [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md).
 
 Load both into a shell (pytest, psql, gh):
 
@@ -95,7 +95,7 @@ source scripts/load-env.sh
 
 **Naming rule.** Anything naming a shared external resource takes a **service-prefixed** name plus a dev key (`WATCHER_BUS_REDIS_URL` / `WATCHER_DEV_BUS_REDIS_URL`): a bare `REDIS_URL` is silently inherited from `/etc/watcher/.env`, the #233 hazard in env-var form. [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) → *Environment Variables*.
 
-**A URL is configuration, not permission.** Three unit-only opt-ins gate production resources — `WATCHER_ALLOW_PRODUCTION_DB` (#233), `WATCHER_BUS_ENABLED` (#262), `WATCHER_NOTIFIER_ENABLED` (#277) — and never belong in an env file. A URL without its flag aborts startup — and for the notifier, so does the **flag held without a URL**, which means the unit lost `/etc/watcher/notifier.env` (#278). `scripts/dev_server.sh` and `tests/conftest.py` clear what they did not set.
+**A URL is configuration, not permission.** Two unit-only opt-ins gate production resources — `WATCHER_ALLOW_PRODUCTION_DB` (#233), `WATCHER_BUS_ENABLED` (#262) — and never belong in an env file. A URL without its flag aborts startup. `scripts/dev_server.sh` and `tests/conftest.py` clear what they did not set.
 
 ## Common Commands
 
@@ -191,9 +191,9 @@ A skill is symlinked, unforked, into both `skills/` and `.claude/skills/` (#413)
 - [docs/WATCH-CHECK.md](docs/WATCH-CHECK.md) — #371 `info.watch-check`: shared pre-flight, rejections, DLQ, the completion republish
 - [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md) — #269 validators: gate, snapshot, invalidation
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID errors, DB triggers
-- [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) — the co-pypi index, the notifier SDK's git tag, the certifi and advisory floors, Dependabot PRs: auth, pins, upgrades
+- [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) — the co-pypi index, the certifi and advisory floors, Dependabot PRs: auth, pins, upgrades
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, the install runbook, timers, OS patching (#382)
-- [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — every env file and variable, load order, the unit-only credentials
+- [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — every env file and variable, load order, the unit-only opt-ins
 - [docs/HOST-MEMORY.md](docs/HOST-MEMORY.md) — #307/#309: reservations, slices, earlyoom, the SocratiCode pin
 - [docs/RECOVERY.md](docs/RECOVERY.md) — nightly DB backup to GCS, restore, go/no-go gates; dated [rehearsals](docs/RECOVERY-REHEARSALS.md), one-time [provisioning](docs/RECOVERY-PROVISIONING.md)
 - [docs/MIGRATIONS.md](docs/MIGRATIONS.md) — the manual upgrade step, the two-role grants, one-time orderings
@@ -203,6 +203,6 @@ A skill is symlinked, unforked, into both `skills/` and `.claude/skills/` (#413)
 - [docs/CO-INDEX.md](docs/CO-INDEX.md) — the shared store on `co-index`: the client contract, verifying it before trusting a miss
 - [docs/STYLE.md](docs/STYLE.md) — the design system: brand, color, dark mode, tokens, layout, touch targets, accessibility
 - [docs/UI.md](docs/UI.md) — the component library, the HTMX/flash patterns
-- [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the entity: fields, schedule resolution, domain keying, media-type dispatch, template CRUD, notifications
+- [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the entity: fields, schedule resolution, domain keying, media-type dispatch
 - [docs/REGISTRY.md](docs/REGISTRY.md) — `info.registry` reconciliation: what an announcement owns, every 409, linkage
 - [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md) — the operator surface: routes, lifecycle guards, views, audit parity

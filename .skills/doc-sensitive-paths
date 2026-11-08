@@ -6,8 +6,8 @@
 # a directory entry also flags every same-named directory elsewhere in the
 # tree. Here that means the mirrored test trees, and every such over-match is
 # kept deliberately — do not narrow them:
-#   deploy/   -> tests/deploy/   (asserts the installed unit and the unit-only
-#                                 notifier credential — DEPLOYMENT/ENVIRONMENT)
+#   deploy/   -> tests/deploy/   (asserts the installed units and their env
+#                                 files and credentials — DEPLOYMENT/ENVIRONMENT)
 #   scripts/  -> tests/scripts/  (COMMANDS.md; skills/ are whole-directory
 #                                 symlinks since #413, so nothing under them)
 #   tools/    -> tests/tools/    (ARCHITECTURE.md's module table)

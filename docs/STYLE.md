@@ -148,7 +148,8 @@ Exceptions:
   — `.btn` guarantees height, not width. Keep `min-w-[44px]`, drop the
   redundant `min-h-[44px]`: `class="btn btn-ghost p-2 min-w-[44px]"`.
 - **`.chip-xs`** is a deliberate sub-44px class for dense token-insert chips
-  (notification variable chips). It is the only sanctioned target under 44px;
+  (the notification variable chips, deleted by #379; no template uses it now).
+  It is the only sanctioned target under 44px;
   do not use it for primary actions.
 
 Never use `min-h-0` to shrink a component target below 44px — it is a latent

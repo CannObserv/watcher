@@ -139,9 +139,10 @@ field (`blob_uri`, `source_media_type`) would replace a publishable row with
 one the drain dead-letters — a real revision lost to a refresh, where the
 change path's equivalent gap costs only an observation that never existed. The
 renewal declines and logs instead, and reports `renewal_enqueued=False`.
-Unreachable today (`aread_blob` raises before the pipeline on a null URI, and
-the consumer writes `media_type` in the same upsert); the guard is there
-because the asymmetry is not otherwise enforced.
+The consumer writes `media_type` in the same upsert as the reference; the
+guard is there because the asymmetry is not otherwise enforced. (The
+null-`blob_uri` half was once argued unreachable through `aread_blob`, which
+#379 deleted; nothing re-derived that argument.)
 
 **The baseline is announced (#367).** Archiver has no baseline concept: a new
 `(info_source_id, extracted_fingerprint)` pair inserts a `SourceRevision`, emits

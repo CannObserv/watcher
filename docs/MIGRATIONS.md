@@ -143,8 +143,18 @@ outside the Alembic chain and no migration recreates them — a rebuilt or
 restored database needs this script run again. Objects created by any role
 *other* than `watcher` are not covered by the default privileges either: a
 migration run as `postgres` leaves tables the app cannot read, with no error at
-migrate time. And `procrastinate schema --apply` on a procrastinate upgrade is
-DDL, so it needs the migration credential too.
+migrate time. And procrastinate's own schema changes are DDL, so they need the
+migration credential too.
+
+**A procrastinate upgrade migrates by hand.** Nothing applies its schema at
+startup (#341: a missing one raises). `procrastinate schema --apply` is the
+fresh-install schema and fails on an existing one. An upgrade applies the
+release's versioned files from `$(uv run procrastinate schema --migrations-path)`,
+named `<xx.yy.zz>_<nn>_<pre|post>_*.sql`: `pre` before the new code starts,
+`post` after ([procrastinate: *Migrate the schema*](https://procrastinate.readthedocs.io/en/stable/howto/production/migrations.html)).
+Before landing a bump, list the files newer than the installed version; none
+means no DDL. 3.7.2 → 3.10.0 (#426) shipped none: the newest file is still
+`03.04.00_50_post_add_retry_failed_job_procedure.sql`.
 
 ## Restart-before-migrate — one-time, `d5a71c93e0f2` (#251)
 

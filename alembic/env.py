@@ -37,9 +37,10 @@ def _include_object(object, name, type_, reflected, compare_to):
       and under its own Alembic root. Production's dead copy was dropped by
       hand (#271); the one ``tests/conftest.py`` builds lives only in
       ``TEST_DATABASE_URL``, and autogenerate must never diff against it.
-    - Procrastinate-managed tables: the task queue installs and migrates its
-      own ``procrastinate_*`` tables at app startup; they should not appear
-      in Watcher's Alembic diffs.
+    - Procrastinate-managed tables: ``procrastinate schema --apply`` installs
+      the ``procrastinate_*`` tables once, and a procrastinate upgrade applies
+      its versioned SQL migrations by hand (docs/MIGRATIONS.md). Neither
+      Alembic nor app startup touches them (#341: a missing schema raises).
     """
     if hasattr(object, "schema") and object.schema not in (None, "public"):
         return False

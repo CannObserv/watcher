@@ -36,6 +36,5 @@ deploy/
 scripts/
 src/api/
 src/core/
-src/dashboard/
 src/workers/
 tools/

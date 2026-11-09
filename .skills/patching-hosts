@@ -50,7 +50,8 @@ backup watcher-backup.service postgresql@16-main
 # --- third-party origins --------------------------------------------------
 # Each followed origin is scoped by a tracked pin file, installed under
 # /etc/apt/preferences.d/ (deploy/apt-preferences.d/, docs/DEPLOYMENT.md).
-# NodeSource: nodejs, for the Tailwind CLI (AGENTS.md).
+# NodeSource: nodejs, for SocratiCode's pinned MCP server (docs/HOST-MEMORY.md).
+# The Tailwind CLI it was first added for went in #377.
 origin deb.nodesource.com follow
 # Tailscale carries the bus and notifier paths (docs/reference/tailscale.md).
 # Its postinst restarts tailscaled; watcher.service orders After= it with no

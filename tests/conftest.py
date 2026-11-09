@@ -34,7 +34,6 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from procrastinate.schema import SchemaManager
 from sqlalchemy import event, select, text
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from ulid import ULID
@@ -43,11 +42,9 @@ from src.api.deps import get_db_session, get_probe_fn, require_api_key
 from src.core import db_safety
 from src.core.database import MIGRATION_DATABASE_URL_ENV
 from src.core.models import Base
-from src.core.models.app_user import AppUser
 from src.core.models.domain import Domain
 from src.core.models.watched_item import WatchedItem
 from src.core.probe import ProbeResult
-from src.dashboard.deps import get_dashboard_user
 from tests.network_guard import NetworkGuard, database_hosts, guards
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
@@ -263,11 +260,12 @@ async def _run_script(sql: str) -> None:
 async def _procrastinate_schema(test_engine) -> AsyncGenerator[None]:
     """Build Procrastinate's own tables in the test database, once (#298).
 
-    Shared by the dashboard's queue tile and the stalled-job sweep's
-    characterization test (#334): each reads tables procrastinate's own SQL
-    writes. ``Base.metadata.create_all`` never makes them — Procrastinate owns
-    its schema and applies it with its own CLI — so ``get_queue_health``
-    otherwise hits ``ProgrammingError`` and returns zeros. A test reading those
+    Shared by the stalled-job sweep's characterization test (#334) and the
+    in-flight count (``src.ops.inflight``): each reads tables procrastinate's own
+    SQL writes; the dashboard's queue tile did too until #377.
+    ``Base.metadata.create_all`` never makes them — Procrastinate owns its schema
+    and applies it with its own CLI — so a reader otherwise hits
+    ``ProgrammingError`` and returns zeros. A test reading those
     zeros passes against any query at all, which is how a queue tile that
     counted almost nothing went unnoticed. Applying the shipped ``schema.sql``
     also makes drift impossible, the same reasoning as running Archiver's own
@@ -359,19 +357,8 @@ async def client(test_engine, db_session) -> AsyncGenerator[AsyncClient]:
     async def override_probe_fn():
         return _make_mock_probe()
 
-    async def override_dashboard_user():
-        stmt = (
-            pg_insert(AppUser)
-            .values(id="test-user-id", email="test@example.com")
-            .on_conflict_do_update(index_elements=["id"], set_={"email": "test@example.com"})
-            .returning(AppUser)
-        )
-        result = await db_session.execute(stmt)
-        return result.scalar_one()
-
     app.dependency_overrides[get_db_session] = override_session
     app.dependency_overrides[get_probe_fn] = override_probe_fn
-    app.dependency_overrides[get_dashboard_user] = override_dashboard_user
     app.dependency_overrides[require_api_key] = lambda: "test-user-id"
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:

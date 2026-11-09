@@ -15,8 +15,8 @@ denormalized ``WatchedItem.domain_default_schedule_config``) → system default
 ``throttle_floor_interval`` applied over it as a floor that could only slow an
 item. The announced cadence had its own column so the hourly snapshot could not
 overwrite the operator's item default or revert a throttle. Those three columns
-and their writers are kept, inert, until the jump: the dashboard and API
-surfaces go in #377/#378, the columns in #380, and
+and their writers are kept, inert, until the jump: the dashboard went in #377,
+the API goes in #378, the columns in #380, and
 ``src/ops/export_for_archiver.py`` still reads all of them for the pre-F3
 re-export (#376).
 """

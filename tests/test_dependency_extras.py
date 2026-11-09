@@ -90,8 +90,7 @@ class TestRequestedExtrasExist:
 
 _LOCK = _REPO_ROOT / "uv.lock"
 
-# What `co-core[extract]` brought in, beyond what the dev group declares itself
-# (beautifulsoup4 parses HTMX responses in tests/dashboard).
+# What `co-core[extract]` brought in.
 _EXTRACTION_STACK = ("html5lib", "lxml", "openpyxl", "pypdf")
 
 

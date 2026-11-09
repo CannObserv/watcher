@@ -27,4 +27,3 @@ docs/SOCRATICODE.md: index scope, .socraticodeignore entries, link stubs (.socra
 docs/MIGRATIONS.md: manual upgrade steps, grants, one-time orderings (alembic/versions/)
 docs/REGISTRY.md: what an announcement owns, every reconcile 409, linkage (src/workers/registry_reconcile.py, announcement-owned columns)
 docs/WATCHED-ITEMS.md: fields, schedule resolution, notifications (src/core/watched_items.py, notifications)
-docs/WATCHED-ITEMS-DASHBOARD.md: routes, lifecycle guards, list and detail views (src/dashboard/)

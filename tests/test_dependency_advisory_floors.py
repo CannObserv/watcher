@@ -2,8 +2,8 @@
 
 ``uv audit --frozen --no-dev`` on ``223eac7`` reported 20 unique advisories in
 six runtime packages. Each was fixed by moving the lock alone
-(``uv lock --upgrade-package <pkg>``). python-multipart is the only direct
-dependency among them, and its declared floor (``>=0.0.22``) stays where it is.
+(``uv lock --upgrade-package <pkg>``). python-multipart was the only direct
+dependency among them; its row went with it in #377.
 fastapi does not move: 0.135.1 declares ``starlette>=0.46.0``, uncapped, so
 starlette 1.x needs nothing from it.
 
@@ -16,7 +16,8 @@ rather than on the commit that regressed.
 
 **Both groups (#400).** ``uv audit --frozen`` on ``af791c3`` reported 28
 unique advisories in the ``dev`` group: pre-commit's tree (virtualenv,
-filelock), test HTML parsing (soupsieve), pytest's pygments, and one in
+filelock), test HTML parsing (soupsieve, gone with beautifulsoup4 in #377),
+pytest's pygments, and one in
 openapi-python-client, which has no row: nothing used it, so it was removed
 rather than bumped. The environment this test runs in is synced with ``dev``,
 as CI's is, so a dev row is checked the same way. Each is lock-only; none is
@@ -39,7 +40,6 @@ from packaging.version import Version
 
 # package -> (first release fixing every advisory listed, advisories)
 _FLOORS: dict[str, tuple[str, str]] = {
-    "python-multipart": ("0.0.31", "PYSEC-2026-3036, -3037, -3038, -3039, -3040, -3041"),
     "urllib3": ("2.8.0", "PYSEC-2026-4175, -4176, -4177"),
     "idna": ("3.15", "PYSEC-2026-215"),
     "mako": ("1.4.2", "PYSEC-2026-88, -2617, -4243"),
@@ -56,7 +56,6 @@ _FLOORS: dict[str, tuple[str, str]] = {
     #   GHSA-hhxq-47xx-j5xx, GHSA-qmx5-4p3x-wvqf, GHSA-vxj4-q4g9-crj7
     "virtualenv": ("21.14.9", "PYSEC-2026-4011, -4012, -4013, -4014 and 15 GHSAs"),
     "filelock": ("4.2.1", "GHSA-567q-5qvw-pf92, GHSA-9vhv-jxww-xfm5, GHSA-v4x8-3wr5-3wq8"),
-    "soupsieve": ("2.9.0", "PYSEC-2026-3071, -3072, -4170, -4171"),
     "pygments": ("2.20.0", "PYSEC-2026-2987"),
 }
 

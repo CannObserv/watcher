@@ -194,7 +194,7 @@ BUS_RETRIES = 0
 #
 # This is why the startup probe below runs detached rather than inline in the
 # lifespan: even five seconds of a blocked lifespan is five seconds the
-# dashboard does not serve, and the dashboard has no business being unavailable
+# HTTP surface does not serve, and it has no business being unavailable
 # because the bus is.
 WORST_CASE_CONNECT_SECONDS = (BUS_RETRIES + 1) * SOCKET_CONNECT_TIMEOUT_SECONDS
 

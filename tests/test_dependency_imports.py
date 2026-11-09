@@ -82,17 +82,6 @@ _NEEDED_WITHOUT_IMPORT: dict[str, tuple[str, str, str]] = {
         "uvicorn src.api.main:app",
         "The server: deploy/watcher.service and scripts/dev_server.sh run it.",
     ),
-    "python-multipart": (
-        "src/dashboard/**/*.py",
-        "Form(",
-        "FastAPI parses every dashboard `Form(...)` body with it.",
-    ),
-    "jinja2": (
-        "src/dashboard/templating.py",
-        "Jinja2Templates(",
-        "fastapi.templating imports it; the dashboard renders every page with it. "
-        "Imported directly until the notification renderer went (#379).",
-    ),
 }
 
 
@@ -393,9 +382,9 @@ class TestDeclarationsAreImported:
     def test_allowlist_reason_still_holds(self, dist: str):
         """Each reason names a witness — the text that reaches *dist* by name.
 
-        Without one, the entry outlives its reason: drop the dashboard's last
-        ``Form(...)`` and python-multipart stays declared for nothing, the very
-        staleness this class exists to catch.
+        Without one, the entry outlives its reason: the dashboard's last
+        ``Form(...)`` once kept python-multipart declared, and a dependency left
+        behind when its witness goes is the very staleness this class catches.
         """
         pattern, witness, reason = _NEEDED_WITHOUT_IMPORT[dist]
         assert any(witness in path.read_text() for path in sorted(_REPO_ROOT.glob(pattern))), (

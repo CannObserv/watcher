@@ -12,7 +12,7 @@ TDD required. Red → Green → Refactor. No production code without a failing t
 
 ## Environment & Tooling
 
-Python ≥3.12, uv, pytest, ruff; Node.js + npm (Tailwind CLI — `sudo npm install -g @tailwindcss/cli@4.2.4`; the pin is load-bearing, another CLI builds a different `output.css`, so `check-css.sh` refuses it).
+Python ≥3.12, uv, pytest, ruff.
 
 **co-pypi index (#358).** co-core is private: a `uv lock`, or a `uv sync` that
 downloads, needs a per-command token — never in an env file:
@@ -64,7 +64,7 @@ The exe.dev proxy forwards 3000–9999; dev server at `https://co-watcher.exe.xy
 
 **Port 8000 belongs to systemd. Never start uvicorn manually on port 8000.**
 
-After committing to `main`: `sudo systemctl restart watcher`. After DB model changes: `uv run alembic upgrade head` then restart. After Tailwind/vendor CSS changes: `bash scripts/build-css.sh` then restart. Logs: `sudo journalctl -u watcher -f`.
+After committing to `main`: `sudo systemctl restart watcher`. After DB model changes: `uv run alembic upgrade head` then restart. Logs: `sudo journalctl -u watcher -f`.
 
 Dev server (port 8001, leaves prod alone):
 
@@ -101,7 +101,7 @@ source scripts/load-env.sh
 
 ```bash
 bash scripts/co-pypi.sh uv sync              # install deps (token: above)
-uv run pre-commit install                    # once per clone: ruff + check-css.sh hook
+uv run pre-commit install                    # once per clone: ruff hooks
 uv run pytest                                # tests
 uv run pytest -m integration                 # integration tests (test DB only; CI + pre-ship run them)
 uv run ruff check .                          # lint
@@ -163,16 +163,6 @@ JSON records with a four-key floor pinned by `tests/core/test_logging.py`; why u
 
 **ULID format errors:** path → 404, filter → 400. **DB triggers:** none; one added in a migration is also recreated in `tests/conftest.py`. Both: [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
 
-## Style & UI
-
-Design system: [docs/STYLE.md](docs/STYLE.md); component library and HTMX/flash
-patterns: [docs/UI.md](docs/UI.md). **Read one of them before writing a
-template**; their rules, in brief: brand color is never a status color (STYLE
-§2), every color utility takes its `dark:` variant (§3), WCAG 2.1 AA and no
-`title` attributes (§7–8), never a CDN build (§10), component classes over raw
-utilities (UI §4), and `is_htmx(request)` rather than a bare `HX-Request` read
-(UI §2, #211).
-
 ## Agent Skills
 
 A skill is symlinked, unforked, into both `skills/` and `.claude/skills/` (#413): [docs/SKILLS.md](docs/SKILLS.md).
@@ -201,8 +191,5 @@ A skill is symlinked, unforked, into both `skills/` and `.claude/skills/` (#413)
 - [docs/SKILLS.md](docs/SKILLS.md) — skill triggers, vendored skill repos, the SessionStart hooks
 - [docs/SOCRATICODE.md](docs/SOCRATICODE.md) — tool table, index scope, green-failing traps, link stubs
 - [docs/CO-INDEX.md](docs/CO-INDEX.md) — the shared store on `co-index`: the client contract, verifying it before trusting a miss
-- [docs/STYLE.md](docs/STYLE.md) — the design system: brand, color, dark mode, tokens, layout, touch targets, accessibility
-- [docs/UI.md](docs/UI.md) — the component library, the HTMX/flash patterns
 - [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the entity: fields, schedule resolution, domain keying, media-type dispatch
 - [docs/REGISTRY.md](docs/REGISTRY.md) — `info.registry` reconciliation: what an announcement owns, every 409, linkage
-- [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md) — the operator surface: routes, lifecycle guards, views, audit parity

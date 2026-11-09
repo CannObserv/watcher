@@ -3,17 +3,16 @@
 Resolution mirrors the create-time probe path's domain handling but takes a URL
 or hostname that is already known (Archiver is authoritative for
 ``effective_url``), so no network probe is performed. Centralising the upsert +
-suspension-resolution logic keeps the API create branch, the API PATCH branch,
-and the dashboard /effective-url route from drifting (#196).
+suspension-resolution logic keeps the API create branch, the API PATCH branch
+and the registry reconcile from drifting (#196).
 
 ``set_domain_active`` is the one writer of ``Domain.is_active`` (#372).
 Deactivating a domain suspends every WatchedItem on it — the denormalized
 ``WatchedItem.domain_suspended`` that ``schedule_tick`` filters on and
-``check_watched_item`` re-checks — and reactivating clears it. The dashboard
-toggle and the break-glass CLI (``src.ops.suspend_domain``) both delegate here,
-so the CLI imports nothing from ``src.dashboard`` (#377 deletes it) and the two
-cannot drift. A suspension acts on Watcher's scheduling alone: since F1 (#374)
-nothing downstream sees it.
+``check_watched_item`` re-checks — and reactivating clears it. The break-glass
+CLI (``src.ops.suspend_domain``) delegates here, the one control left since #377
+deleted the dashboard's toggle. A suspension acts on Watcher's scheduling alone:
+since F1 (#374) nothing downstream sees it.
 
 **The break-glass imports this module**, and it exists to work when Archiver is
 down, so this module imports no bus, no worker, no dashboard and no API
@@ -144,8 +143,8 @@ async def set_domain_active(
 ) -> DomainActivation:
     """Activate or deactivate domain ``name`` and back-fill its items.
 
-    Locks the domain row (``FOR UPDATE``) so a dashboard click and the CLI
-    cannot interleave. Raises :class:`DomainNotFound` for an unknown name and
+    Locks the domain row (``FOR UPDATE``) so two concurrent writers cannot
+    interleave. Raises :class:`DomainNotFound` for an unknown name and
     :class:`DomainArchived` for an archived domain, writing nothing. Audits
     ``domain.activated`` / ``domain.deactivated`` with ``source`` only when
     ``is_active`` actually moves; the back-fill runs either way, so "already

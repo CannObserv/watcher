@@ -169,19 +169,8 @@ duplicate :: `tests/core/notifications/test_content.py::TestMarkdownListContract
 # nothing behind it. The touch-target idiom and HTMX detection each have guards
 # that fail the build, so their depth moved to the pointer.
 
-# --- Style & UI / Accessibility -> docs/STYLE.md "7. Touch Targets" ---
-# Dropped: the `min-h-[44px]` / `.btn` / `min-h-0` enumeration. docs/STYLE.md §7
-# carries it in more detail (11 `44px` hits, 4 `min-h-[44px]`, 2 `min-h-0`),
-# including the #203 reference and the full list of classes that bake it in.
-# The two guard paths survive inline, which is what an agent needs to act.
-tighten :: **Accessibility:** WCAG 2.1 AA, and no `title` attributes. **Touch-target idiom (#203):**
-
-# --- Style & UI / HTMX -> docs/UI.md "3. Flash / Notification UX" ---
-# Dropped: the `src/dashboard/deps.py` link and the `partials/flash_oob.html`
-# path. docs/UI.md carries both (1 `is_htmx`, 1 `HX-Request`, 3 `flash_oob`).
-# `is_htmx(request)` itself is KEPT inline — it is the actionable atom, and the
-# point of the line is that an agent writes that call rather than reads a header.
-tighten :: **HTMX:** **Detect HTMX with `is_htmx(request)`** ([src/dashboard/deps.py](src/dashboard/deps.py))
+# The round's two Style & UI rows (touch targets -> STYLE.md, HTMX -> UI.md)
+# went at #377 with the section and both destination docs.
 
 # --- Agent Skills -> docs/SKILLS.md (Directory Layout, Local Overrides, Linked Projects) ---
 # Two base lines merged into one. Dropped: the `skills/` + `.claude/skills/`
@@ -197,8 +186,6 @@ tighten :: Cross-project search to the sister `notifier` index requires a per-in
 # rewrite in place: the claims survive, the words do not. --claims passes, so
 # each line's atoms are accounted for somewhere in the surface.
 # ============================================================================
-
-# --- Environment & Tooling: the Tailwind pin, said in fewer words ---
 
 # --- Code Exploration Policy: two lines merged into one, same two rules ---
 # The health-hook clause is KEPT verbatim inside the merged line: docs/SKILLS.md
@@ -233,18 +220,6 @@ tighten :: a stable item becomes unreplicable
 tighten :: observation of the pair, not a refresh
 tighten :: improve a queued row:
 
-# --- Style & UI: five prose bullets -> five imperative rules. Each rule's detail
-# was already authoritative in docs/STYLE.md / docs/UI.md, and in fuller form
-# there than here (UI.md:361 carries the HX-Boosted guard this never mentioned).
-tighten :: Component library and the
-tighten :: Both authoritative; what follows
-tighten :: is only what is easy to get wrong.
-tighten :: **Brand:** Cannabis Observer
-tighten :: **Dark Mode:** Tailwind `dark:` variants
-tighten :: **Accessibility:** WCAG 2.1 AA, and no
-tighten :: **CSS:** Tailwind v4 with `@theme`
-tighten :: **HTMX:** **detect with `is_htmx(request)`**
-
 # --- #296 step 25, second pass: after the fresh-eyes review restored five rules
 # that the first pass had weakened, these paid for them. All wayfinding or
 # connective tissue; no rule changed scope.
@@ -256,9 +231,7 @@ tighten :: #288 the `noeviction` cap and the
 tighten :: fetch → extract → fingerprint, the fetch-command outbox
 tighten :: logging configuration, ULID error handling, DB-trigger rules
 tighten :: the manual upgrade step, the two-role grant model
-tighten :: the component library and the HTMX/flash interaction patterns
 tighten :: the entity: fields, schedule resolution, registry reconciliation
-tighten :: routes, lifecycle guards, list and detail views, audit parity
 
 # --- 2026-09-23 curation (6474 -> under 6000). Every line below was rewritten in
 # place, not dropped: each one's atoms are carried by the new line or by the doc
@@ -283,11 +256,6 @@ tighten :: **An unchanged fingerprint still announces (#293)** — after a **ful
 tighten :: which renews the blob, so its cache-hit branch upserts a `PendingArchiverSync`
 tighten :: for the latest revision. A 304 renews nothing and announces nothing. **Never
 tighten :: Records are JSON with a four-key floor — `timestamp`/`level`/`logger`/`message`
-tighten :: template** — both carry every rule below in fuller form than this file did:
-tighten :: brand color is never a status color (STYLE §2), every color utility takes its
-tighten :: `dark:` variant (§3), WCAG 2.1 AA and no `title` attributes (§7–8), never a CDN
-tighten :: build (§10), component classes over raw utilities (UI §4), and
-tighten :: `is_htmx(request)` rather than a bare `HX-Request` read (UI §2, #211).
 tighten :: - [docs/SKILLS.md](docs/SKILLS.md) — skill triggers, vendored skill repos, SocratiCode workflow
 tighten :: - [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the entity: fields, schedule resolution, reconciliation, notifications
 # ruff's F set (pyproject select) flags a star import as F403.

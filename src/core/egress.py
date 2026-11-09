@@ -4,9 +4,9 @@
 ``follow_redirects=True``, returning status code, content type and the full
 redirect chain. The capability that grants is not "issue an outbound request" —
 it is *reach whatever this host's network position reaches, and report back*.
-Both call sites are authenticated (``require_api_key`` on ``/api/v1/probe``,
-``get_dashboard_user`` on ``POST /domains``), which bounds who may pull the
-trigger; nothing bounded where the barrel pointed. On co-watcher there is
+The call site is authenticated (``require_api_key`` on ``/api/v1/probe``; the
+dashboard's ``POST /domains`` was the other until #377), which bounds who may pull
+the trigger; nothing bounded where the barrel pointed. On co-watcher there is
 something to reach: ``127.0.0.1:9999`` answers **200** unauthenticated, exeuntu's
 socket-activated Shelley agent UI, which the exe.dev proxy authenticates and
 loopback bypasses (#304, CannObserv/replicator#97).
@@ -144,8 +144,7 @@ async def resolve_addresses(host: str, port: int) -> Sequence[str]:
 
     Through the running loop's ``getaddrinfo`` rather than ``socket``'s: a
     blocking resolve inside an async route parks the whole process, and this one
-    runs in the single uvicorn process that serves the API, the dashboard and
-    the worker.
+    runs in the single uvicorn process that serves the API and runs the worker.
     """
     loop = asyncio.get_running_loop()
     infos = await loop.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)

@@ -1,15 +1,25 @@
 """Integration tests for X-API-Key authentication."""
 
 import hashlib
+import os
 
 import pytest
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.core.models.api_key import ApiKey
 from src.core.models.app_user import AppUser
-from src.dashboard.deps import generate_api_key
 
 pytestmark = pytest.mark.integration
+
+
+def generate_api_key() -> tuple[str, str, str]:
+    """``(raw_key, key_hash, key_prefix)`` in the shape the dashboard minted.
+
+    Production mints no key since #377 deleted ``/settings/api-keys``; existing
+    keys authenticate ``/api/v1`` until #378 deletes both.
+    """
+    raw_key = "co_" + os.urandom(16).hex()
+    return raw_key, hashlib.sha256(raw_key.encode()).hexdigest(), raw_key[:8]
 
 
 @pytest.fixture

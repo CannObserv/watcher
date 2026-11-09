@@ -23,7 +23,6 @@ from src.core.bus import (
 from src.core.database import get_session_factory
 from src.core.db_safety import ProductionDatabaseRefused, assert_environment_db_allowed
 from src.core.logging import configure_logging, get_logger
-from src.dashboard import register_dashboard
 
 # Worker imports are safe at module top: src.workers.__init__ defers task-module
 # registration into get_app(), and fetch_facts only touches bp-registered tasks
@@ -87,7 +86,7 @@ async def lifespan(application: FastAPI):
         #
         # Detached because the worst case is ``BOOT_REACHABILITY_WINDOW_SECONDS``
         # of retrying a cold boot's name race (#296) plus one whole attempt — a
-        # connect and a read, each to its own timeout — and the dashboard has no
+        # connect and a read, each to its own timeout — and the HTTP surface has no
         # business being unavailable because the bus is. Held on ``app.state``
         # so a test can await it rather than yield the loop and hope it ran.
         reachability_task = asyncio.create_task(
@@ -186,4 +185,3 @@ v1_router.include_router(probe_router)
 v1_router.include_router(watched_items_router)
 app.include_router(v1_router)
 app.include_router(health_router)
-register_dashboard(app)

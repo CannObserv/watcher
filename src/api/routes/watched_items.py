@@ -180,7 +180,7 @@ async def patch_watched_item(
     **registry-owned** item (409 — once ``applied_generation`` is set, pause and
     resume live in Archiver, and a local toggle would be reverted by the next
     ``info.registry`` announcement; #254), and an item cannot resume while its
-    domain is suspended (409 — kill-switch parity with the dashboard toggle).
+    domain is suspended (409 — kill-switch parity).
 
     An ``is_active`` transition emits a dedicated ``WATCHED_ITEM_PAUSED`` /
     ``WATCHED_ITEM_RESUMED`` audit event (#189) and is excluded from the
@@ -196,7 +196,7 @@ async def patch_watched_item(
     # same generation, which the reconcile's `>` ordering guard ignores as
     # stale, so a local write diverges until the next real registry mutation.
     # Never-announced rows keep every field. `is_active` is guarded separately
-    # in set_watched_item_active (same rule, dedicated audit + dashboard flash).
+    # in set_watched_item_active (same rule, dedicated audit).
     if wi.applied_generation is not None:
         owned = sorted(REGISTRY_OWNED_PATCH_FIELDS & updates.keys())
         if owned:

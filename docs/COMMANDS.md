@@ -10,12 +10,10 @@ source scripts/load-env.sh && bash scripts/co-pypi.sh uv sync
 uv run pre-commit install
 ```
 
-The hook (`.pre-commit-config.yaml`, #352) runs `ruff check`, `ruff format
---check` (Python and Markdown) and `scripts/check-css.sh`. The CSS check fires
-on any Tailwind source (`src/dashboard/**` templates, JS, Python, CSS) or CSS
-build script, and needs the pinned Tailwind CLI (*Tailwind CSS* below). Nothing
-installs it for you: `.git/hooks/` is per clone, which is why CI also runs every
-check (*CI* below).
+The hook (`.pre-commit-config.yaml`, #352) runs `ruff check` and `ruff format
+--check` (Python and Markdown). Its CSS check went with the dashboard (#377).
+Nothing installs the hook for you: `.git/hooks/` is per clone, which is why CI
+also runs every check (*CI* below).
 
 ## Environment
 
@@ -331,22 +329,6 @@ the rest of Watcher's notification code. The record is on #376 and #368; the
 one-time deploy order is [MIGRATIONS.md](MIGRATIONS.md) →
 *Restart-before-migrate — one-time, `e2eab993d615`*.
 
-## Tailwind CSS
-
-```bash
-# VM setup (tailwindcss CLI — global npm). Already installed on co-watcher.
-# Keep the pin: output.css carries its builder's version in the banner, and
-# another CLI builds it differently, so check-css.sh refuses any other version
-# by name ("tailwindcss vX found, pinned vY") before it builds.
-sudo npm install -g @tailwindcss/cli@4.2.4
-
-# Build Tailwind CSS
-bash scripts/build-css.sh
-
-# Watch mode (auto-rebuild on changes)
-bash scripts/build-css.sh --watch
-```
-
 ## Git Submodules
 
 ```bash
@@ -383,9 +365,7 @@ are the rework when xdist is actually adopted.
 ## CI (#220)
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`: a
-**lint** job (`ruff check` + `ruff format --check`), a **css** job
-(`scripts/check-css.sh` with `@tailwindcss/cli@4.2.4` from npm — Node only, no
-uv, no cloud credentials; #352), a **test** job
+**lint** job (`ruff check` + `ruff format --check`), a **test** job
 (`pytest -m "not integration and not live"` with **no database** — its
 `TEST_DATABASE_URL` points at port 1, so an unmarked test that connects fails there),
 an

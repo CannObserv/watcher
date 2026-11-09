@@ -12,14 +12,13 @@ Top-level directories. Read the code for per-file detail.
 ```
 src/api/         FastAPI app (ASGI routes, schemas, deps)
 src/core/        Shared domain logic (models, probe, scheduling, fetch and process commands, the bus, watch facts)
-src/dashboard/   Server-rendered UI (Jinja2 + HTMX + Tailwind)
 src/workers/     Procrastinate task queue (check_watched_item, schedule_tick, pipeline, fetch apply/consumer, watch-check consumer)
 src/ops/         Operator entry points beside the service: nightly backup, restore, backup check-in, job-history prune (#296), Archiver migration export (#373), break-glass host suspension (#372), the patching `inflight` gate (#382)
 tools/           Operational scripts
 tests/           Mirrors src/ structure
 deploy/          Systemd units and deployment config
 docs/            Reference docs (index: AGENTS.md → Detail Docs) + plans/
-scripts/         Build scripts (Tailwind, vendor CSS, cleanup)
+scripts/         Operator and dev scripts (dev server, env loading, co-pypi, pre-ship, cleanup)
 skills/          Agent skills (committed overrides + symlinks → skills-vendor/)
 skills-vendor/   Git submodules for external skill repos
 .claude/skills/  Claude Code skill discovery (symlinks → ../../skills/<name>)

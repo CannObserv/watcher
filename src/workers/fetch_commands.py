@@ -160,7 +160,8 @@ async def _record_check_success(
 
     Shared by the succeeding apply paths (``apply_fetch_blob`` /
     ``apply_fetch_not_modified``) so every outcome leaves identical bookkeeping —
-    the dashboard checks_today stat and WatchedItem activity read these events. A
+    ``audit_log`` keeps these events as the forensic record (the dashboard's
+    checks_today stat and activity feed read them until #377). A
     snapshot event marks a cycle that wrote a ChangeRevision (baseline, change,
     or re-baseline); otherwise the content was unchanged.
 

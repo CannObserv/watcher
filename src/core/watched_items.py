@@ -1,4 +1,4 @@
-"""WatchedItem lifecycle business rules shared by the API and dashboard (#228).
+"""WatchedItem lifecycle business rules for the API (#228; the dashboard went in #377).
 
 ``set_watched_item_active`` is the single owner of the pause/resume semantics:
 the archived guard, the resume-while-suspended guard, and the dedicated
@@ -7,14 +7,12 @@ translate the raised domain errors into their own transport (409 vs OOB flash)
 and own the commit.
 """
 
-from urllib.parse import urlparse, urlsplit
+from urllib.parse import urlsplit
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.domains import domain_name_for_url
 from src.core.models.audit_log import EventType, audit
-from src.core.models.watched_item import WatchedItem, WatchHealthStatus
-from src.core.scheduling.cadence import parse_interval
+from src.core.models.watched_item import WatchedItem
 
 
 def set_item_schedule_config(watched_item: WatchedItem, config: dict | None) -> None:
@@ -22,14 +20,12 @@ def set_item_schedule_config(watched_item: WatchedItem, config: dict | None) -> 
 
     **Inert since F2 (#375).** Neither column moves the resolved cadence any
     more — Archiver announces it — so this writer stores and clears values that
-    schedule nothing. It stays until #377/#378 delete both operator surfaces; the
-    columns go in #380. What follows is why it was built this way.
+    schedule nothing. It stays until #378 deletes the API; the columns go in
+    #380. What follows is why it was built this way.
 
-    The single owner of the item cadence write. Both operator paths go through
-    it: the API's ``PATCH /api/v1/watched-items/{id}`` (whole ``schedule_config``
-    dict) and the dashboard's inline interval field (via
-    :func:`set_item_schedule_interval`, which is the string-shaped front door to
-    this one).
+    The single owner of the item cadence write: the API's
+    ``PATCH /api/v1/watched-items/{id}`` (whole ``schedule_config`` dict). The
+    dashboard's string-shaped front door to it went with the dashboard (#377).
 
     Why the throttle release belongs here (#254 CR-1). The ``reduce_frequency``
     post-action used to write ``default_schedule_config`` directly, so editing
@@ -45,29 +41,10 @@ def set_item_schedule_config(watched_item: WatchedItem, config: dict | None) -> 
 
     Shape validation is the API schema's job (``validate_optional_schedule_config``,
     shared with the Domain boundary — #254 CR-10/16) so a bad interval is a 422
-    rather than a 500; the dashboard front door validates for the same reason on
-    its own path.
+    rather than a 500.
     """
     watched_item.default_schedule_config = config
     watched_item.throttle_floor_interval = None
-
-
-def set_item_schedule_interval(watched_item: WatchedItem, interval: str | None) -> None:
-    """Set the item-tier cadence from an interval *string* (the dashboard shape).
-
-    Validates before writing anything — a rejected edit leaves both the cadence
-    and the floor exactly as they were — then delegates to
-    :func:`set_item_schedule_config`. ``None`` or empty clears the tier back to
-    inherited, which is just as deliberate an operator act and releases the floor
-    the same way.
-    """
-    if not interval:
-        set_item_schedule_config(watched_item, None)
-        return
-    parse_interval(interval)  # raises ValueError on a bad shape — before any write
-    set_item_schedule_config(
-        watched_item, {**(watched_item.default_schedule_config or {}), "interval": interval}
-    )
 
 
 def derive_watched_item_name(url: str) -> str:
@@ -84,40 +61,6 @@ def derive_watched_item_name(url: str) -> str:
     parts = urlsplit(url)
     name = f"{parts.netloc}{parts.path}".rstrip("/") or url
     return name[:255]
-
-
-def resolve_watch_target(url: str) -> tuple[str, str | None, WatchHealthStatus]:
-    """``(effective_url, domain_name, health_status)`` for an operator URL edit.
-
-    **One caller since #251**: the dashboard's
-    ``POST /watched-items/{id}/effective-url``. Creates no longer use this —
-    they take the URL from Archiver, which is authoritative for it, and start
-    ``UNKNOWN`` so a steady-state redirect stays audit-only.
-
-    Nothing here touches the network (the Phase-4 async-create design, #241):
-    the submitted URL *is* the effective URL until the first fact's
-    ``final_url`` proves otherwise, the domain is its hostname (the same
-    ``urlparse().hostname`` derivation the old inline probe used, so the
-    domain-keying invariant holds), and the item re-enters ``PROBING`` — this
-    is now the only producer of that state. The apply path
-    (``apply_fetch_blob``) resolves the redirect, re-derives the domain, and
-    clears the state to OK/ERROR.
-
-    That is what closes the boundaries-charter exception for the *scheduled*
-    path: nothing Watcher does on a timer touches an origin. Two
-    operator-initiated one-shot probes remain by design (domain create and
-    ``POST /api/v1/probe``) — a human action against a URL they just typed,
-    not automated traffic.
-    """
-    # Syntactic validation stays at the boundary (CR-3): a typo'd URL must
-    # fail the request, not surface as ERROR health minutes later via a
-    # cross-service round trip through Replicator's DLQ.
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        raise ValueError(
-            f"invalid URL {url!r}: an absolute http(s) URL with a hostname is required"
-        )
-    return url, domain_name_for_url(url), WatchHealthStatus.PROBING
 
 
 class ArchivedItemActivationError(Exception):

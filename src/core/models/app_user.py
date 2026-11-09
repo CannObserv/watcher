@@ -9,7 +9,10 @@ from src.core.models.base import Base
 
 
 class AppUser(Base):
-    """One row per exe.dev user; created/updated lazily on each dashboard login."""
+    """One row per exe.dev user, upserted on each dashboard login until #377.
+
+    Nothing writes it since the dashboard went; the table goes in #378/#380.
+    """
 
     __tablename__ = "app_users"
 

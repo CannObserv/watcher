@@ -49,9 +49,3 @@ gunicorn.ctl
 # session key (.last-token) and mockups here. Guarded by
 # tests/test_brainstorm_session_is_not_committable.py.
 .superpowers/
-
-# Tailwind
-src/dashboard/static/css/output.css
-
-# Generated vendor-layer wrappers (built from vendor/*.min.css; see docs/STYLE.md §14)
-src/dashboard/static/css/vendor/*.layered.css

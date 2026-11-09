@@ -74,7 +74,7 @@ plain line and hides every record after it.
 
 **ULID format errors:** Treatment depends on whether the ULID is a path parameter or a filter query parameter.
 
-- **Path parameters** (e.g. `/watched-items/{id}`) → 404. Use `parse_ulid` from [src/api/routes/helpers.py](../src/api/routes/helpers.py), which raises `HTTPException(404)`. The dashboard helper (`get_watched_item_detail` in [src/dashboard/context.py](../src/dashboard/context.py)) returns `None` and the route renders a 404 page.
+- **Path parameters** (e.g. `/watched-items/{id}`) → 404. Use `parse_ulid` from [src/api/routes/helpers.py](../src/api/routes/helpers.py), which raises `HTTPException(404)`.
 - **Filter query parameters** on list endpoints (e.g. `?watch_id=<value>`) → 400. Use `parse_filter_ulid` from [src/api/routes/helpers.py](../src/api/routes/helpers.py), which raises `HTTPException(400, "Invalid <field> format")`. Pass the parameter name as `field` (e.g. `parse_filter_ulid(watch_id, "watch_id")`).
 
 Do not use `parse_ulid` for filter query params — the endpoint itself exists; an unparseable filter value is a bad request, not a missing resource.

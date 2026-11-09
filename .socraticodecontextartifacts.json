@@ -3,17 +3,12 @@
     {
       "name": "agents-guide",
       "path": "./AGENTS.md",
-      "description": "Authoritative project guide for agents and contributors. Project overview, full src/ layout (every module's purpose), env vars, server lifecycle (port 8000=systemd, 8001=dev), commit conventions, DB trigger rules, and pointers to STYLE.md."
+      "description": "Authoritative project guide for agents and contributors. Project overview, full src/ layout (every module's purpose), env vars, server lifecycle (port 8000=systemd, 8001=dev), commit conventions, DB trigger rules, and the Detail Docs index."
     },
     {
       "name": "readme",
       "path": "./README.md",
       "description": "Top-level project README. Brief project description and setup instructions for the watcher web service, a general-purpose monitor that fingerprints the content at registered URLs on a schedule and reports each change."
-    },
-    {
-      "name": "style-guide",
-      "path": "./docs/STYLE.md",
-      "description": "UI/CSS/accessibility style guide. Brand colors (Cannabis Observer / co-purple-600), Tailwind v4 component classes (.btn, .badge, .stat-card, .data-table, .form-input, .link, .segment-group, .chip-group, .detail-grid, .toggle), badge variants, dark mode rules, WCAG 2.1 AA accessibility patterns, HTMX OOB flash conventions, vendor CSS @layer pattern."
     },
     {
       "name": "commands-reference",

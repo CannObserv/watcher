@@ -83,8 +83,8 @@ class WatchedItem(Base, TimestampMixin):
         DateTime(timezone=True), nullable=True, default=None
     )
     # The operator's item cadence — was the item tier of schedule resolution
-    # (#205); inert since F2 (#375), Archiver announces the cadence. The writers
-    # (dashboard field, API PATCH) stay until #377/#378, the column until #380.
+    # (#205); inert since F2 (#375), Archiver announces the cadence. The writer
+    # (API PATCH) stays until #378, the column until #380.
     # none_as_null=True so an omitted/None config persists as SQL NULL, not the
     # JSONB 'null' literal — keeps `IS NULL` queries correct (#198).
     default_schedule_config: Mapped[dict | None] = mapped_column(

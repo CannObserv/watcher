@@ -28,7 +28,7 @@ waits there, and by the next tick that republish has run.
 A job that reaches the sweep with :data:`FAIL_AT_ATTEMPTS` attempts is failed
 instead: one that is itself the cause of the kill — an OOM on one huge blob —
 would otherwise loop retry → kill → restart for ever. Failed rows are kept 30
-days (``src.workers.retention``) and counted on the dashboard. The count is
+days (``src.workers.retention``), where ``psql`` finds them. The count is
 procrastinate's ``attempts``, which a task's own retries raise too, so a job
 retried twice already is failed at its first orphaning; for each task that
 retries, something else re-defers the work — ``reap_fetch_commands`` the

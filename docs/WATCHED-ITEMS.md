@@ -1,9 +1,8 @@
 # Watched Items
 
 Everything the `WatchedItem` entity owns: fields, schedule resolution, registry
-reconciliation. The operator surface that renders it and the
-guards on its lifecycle are in
-[WATCHED-ITEMS-DASHBOARD.md](WATCHED-ITEMS-DASHBOARD.md). `AGENTS.md` carries
+reconciliation. Archiver's control plane is the operator surface (the dashboard
+went in #377). `AGENTS.md` carries
 the one-entity rule, the create path, and the handful of invariants an agent
 needs on nearly every task; the detail is here.
 
@@ -156,13 +155,6 @@ The `Watch` model is gone — its table, its
 `/watches*` routes, the override resolution chain and the per-Watch notification
 tier with it. `AGENTS.md` carries the one-entity rule itself; this is the list of
 what an agent will not find.
-
-## Operator surface and dashboard
-
-The API/dashboard surface, its lifecycle guards, and the dashboard views built on
-it — operator surface, dashboard parity, list view, domain counts, detail page,
-and Recent Activity / Audit Log parity — are in
-[WATCHED-ITEMS-DASHBOARD.md](WATCHED-ITEMS-DASHBOARD.md).
 
 ## Plans
 

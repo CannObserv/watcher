@@ -7,7 +7,7 @@ Stops Watcher checking every item on one host, from a shell, with Archiver down:
     WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.suspend_domain <host> --resume
 
 It sets ``Domain.is_active`` and every item's ``domain_suspended`` through
-``set_domain_active`` — the dashboard toggle's own service — and audits the
+``set_domain_active`` — the dashboard toggle's service until #377 — and audits the
 change with ``source="cli"``. It is the one operator control Watcher keeps
 (charter rule 2): host-local, so it touches the database and nothing else. No
 bus, no worker, no Archiver; a test pins that import set (#262).

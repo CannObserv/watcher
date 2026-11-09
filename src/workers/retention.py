@@ -2,11 +2,11 @@
 
 ``procrastinate_events`` and ``procrastinate_jobs`` were 96 % of the database —
 679 k finished jobs back to March, three events each, growing ~5 k a day, and
-nothing anywhere deleting them. The history is diagnostic, not data. Its one
-reader is the dashboard's queue tile, whose failed count therefore covers the
-failed-retention window, and is labelled with it. The same tile counts today's
-``succeeded`` events (#298) — a window the succeeded horizon, seven days back,
-never reaches into.
+nothing anywhere deleting them. The history is diagnostic, not data, read with
+``psql`` since #377 deleted its one in-app reader, the dashboard's queue tile.
+The horizons below were sized for that tile (its failed count covered the
+failed window; its count of today's ``succeeded`` events, #298, sat inside the
+succeeded one) and still bound the tables.
 
 The policy is two horizons. **Succeeded** jobs go after 7 days. **Failed,
 cancelled and aborted** ones go after 30, because a failure is the thing someone

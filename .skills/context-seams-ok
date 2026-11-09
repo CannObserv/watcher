@@ -37,14 +37,10 @@ process, port ownership — stay in `AGENTS.md`; the reasoning behind them is he
 # Pre-existing provenance heading, same class as the eight above.
 Registry reconciliation (#254)
 
-# CR round 3. Both judged legitimate:
-# - the DASHBOARD doc's pointer is to the ARCHIVER repo's own docs/DEPLOYMENT.md
-#   and AGENTS.md, explicitly qualified as "its own" so it cannot be misread as
-#   this repo's file in a sibling checkout. Nothing here moved.
-# - WATCHED-ITEMS.md's new preamble names AGENTS.md as carrying the one-entity
-#   rule, which it still does.
-The Archiver service must be installed first — see its own `docs/DEPLOYMENT.md`.
-[WATCHED-ITEMS-DASHBOARD.md](WATCHED-ITEMS-DASHBOARD.md). `AGENTS.md` carries
+# CR round 3, re-judged at #377 (the dashboard doc and its row went):
+# WATCHED-ITEMS.md's preamble names AGENTS.md as carrying the one-entity rule,
+# which it still does.
+went in #377). `AGENTS.md` carries
 docs/MIGRATIONS.md :: Restart-before-migrate — one-time, `d5a71c93e0f2` (#251)
 docs/MIGRATIONS.md :: No safe order — one-time, `e7c4b2a91f60` (#252)
 
@@ -143,12 +139,6 @@ src/ops/restore.py :: then the gates in docs/RECOVERY.md
 docs/COMMANDS.md :: Backup, restore and job history (#296)
 docs/CONTENT-PIPELINE.md :: A renewed blob reference is re-announced (#293)
 
-# --- #296 step 25: fires only under `check-seams.sh --file docs/STYLE.md`.
-# UI.md's opening cross-link to STYLE.md predates this run and still holds —
-# the demotion ADDED to STYLE.md (the dark-variant authoring rule, the CDN
-# prohibition) and moved nothing out of it, so nothing it points at has gone.
-docs/UI.md :: [STYLE.md](STYLE.md), which stays the design system
-
 # --- 2026-09-23 curation: standing seams, none moved by this run.
 # Both point at *archiver's* AGENTS.md, a different repo's policy file.
 docs/ARCHITECTURE.md :: Two sibling services, separately managed and neither co-located
@@ -199,11 +189,9 @@ docs/REGISTRY.md :: How the `info.registry` announcements Archiver publishes bec
 docs/CO-INDEX.md :: How this repo's SocratiCode index lives in the cohort's shared store on `co-index` (#300): the client contract, what is and is not indexed there, and how to verify the store before trusting a miss. The tool reference is [SOCRATICODE.md](SOCRATICODE.md).
 # Each points at content that stayed where it says: the scratch-cluster check
 # (DEPLOYMENT), the re-notify paragraph and "verified current" wording
-# (WATCHED-ITEMS), the split note (WATCHED-ITEMS-DASHBOARD), the link stubs
-# (SOCRATICODE, cited from ARCHITECTURE).
+# (WATCHED-ITEMS), the link stubs (SOCRATICODE, cited from ARCHITECTURE). The
+# split note (WATCHED-ITEMS-DASHBOARD) and the dashboard test went in #377.
 tests/workers/test_supervisor.py :: scratch-cluster check in docs/DEPLOYMENT.md is what covers that.
-docs/WATCHED-ITEMS-DASHBOARD.md :: [WATCHED-ITEMS.md](WATCHED-ITEMS.md). Split out of that file when it passed the
-tests/dashboard/test_watched_item_routes.py :: Wording tracks docs/WATCHED-ITEMS.md — "content verified current" vs the
 # The SocratiCode hooks and ignore file name the doc for the prefetch query and
 # the index scope, both still in SOCRATICODE.md; the manifest entry is that
 # doc's own (its description was updated in this run).

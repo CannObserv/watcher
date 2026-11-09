@@ -26,12 +26,11 @@ across broker outages. Its change, error and recovery edges go to Archiver as fa
 `info.watch-events` through a second outbox (#369; [docs/WATCH-EVENTS.md](docs/WATCH-EVENTS.md)),
 and Archiver notifies from those; Watcher sends no notification (#376, #379).
 
-Operate WatchedItems at `/api/v1/watched-items` (API) and `/watched-items` (dashboard).
+Operate WatchedItems from Archiver's control plane; the `/api/v1/watched-items` API remains until #378.
 Full conventions: [AGENTS.md](AGENTS.md). Operator install: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md);
 env files and every variable: [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md).
 Fetch/revision path and the Archiver linkage: [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md).
-The WatchedItem entity in full: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md); the API
-and dashboard surfaces that operate it: [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md). Module
+The WatchedItem entity in full: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md). Module
 layout and bus topology: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 Collapse design: [docs/plans/2026-06-16-collapse-watcheditem-watch-design.md](docs/plans/2026-06-16-collapse-watcheditem-watch-design.md).
 

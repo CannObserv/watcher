@@ -19,8 +19,6 @@ dependencies = [
     # a base requirement, and PsycopgConnector uses it internally (#242).
     "procrastinate>=3.10.0,<4",
     "httpx>=0.28.0,<1",
-    "jinja2>=3.1.6,<4",
-    "python-multipart>=0.0.33,<1",
     # No [extract]: the processor extracts (#350); watcher needs the models, the
     # bus contract and the stdlib-only media-type rule. Exact, because watcher
     # resolves the essence Processor dispatches on and Processor never re-resolves
@@ -40,9 +38,6 @@ dependencies = [
 [dependency-groups]
 dev = [
     "anyio>=4.16.0,<5",
-    # tests/dashboard parses HTMX responses; production parses no HTML itself —
-    # the processor owns the extraction stack (#350).
-    "beautifulsoup4>=4.15.0,<5",
     # In-memory Redis for the bus producer and consumer tests (#245); mirrors
     # replicator's test harness so both ends of a stream test alike.
     "fakeredis>=2.40.0,<3",
@@ -53,8 +48,8 @@ dev = [
     "pytest>=9.2.0,<10",
     "pytest-asyncio>=1.4.1.post1,<2",
     "pytest-cov>=7.1.0,<8",
-    # Imported directly by tests/dashboard/test_css_sources.py to read the
-    # pre-commit and CI configs (#352); declared, not relied on via pre-commit.
+    # Imported directly by tests/ci/ and others to read the workflow, Dependabot
+    # and pre-commit configs (#352); declared, not relied on via pre-commit.
     "pyyaml>=6,<7",
     "ruff>=0.17.4,<0.18",
 ]

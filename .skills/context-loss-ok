@@ -396,3 +396,6 @@ AGENTS.md :: disproven :: **ULID format errors:** path → 404, filter → 400. 
 AGENTS.md :: disproven :: - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, fetch contracts, the probe destination guard
 AGENTS.md :: disproven :: - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID errors, DB triggers
 AGENTS.md :: disproven :: - [docs/REGISTRY.md](docs/REGISTRY.md) — `info.registry` reconciliation: what an announcement owns, every 409, linkage
+# #378 CR 2: the single-process line named "API" among what the process runs;
+# only /health and /ready are served now (tests/test_operator_api_retired.py).
+AGENTS.md :: disproven :: **Single process is load-bearing.** One uvicorn process runs everything — API, embedded Procrastinate worker

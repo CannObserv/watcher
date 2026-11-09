@@ -52,7 +52,7 @@ Full tool table, index scope, client contract and traps: [docs/SOCRATICODE.md](d
 
 The exe.dev proxy forwards 3000–9999; dev server at `https://co-watcher.exe.xyz:8001/`.
 
-**Single process is load-bearing.** One uvicorn process runs everything — API, embedded Procrastinate worker, fact consumers, cache sweeper. **Never `uvicorn --workers N`, never a second worker unit against prod.** Why, and the escalation path that is *not built*: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Single process*.
+**Single process is load-bearing.** One uvicorn process runs everything — `/health` and `/ready`, embedded Procrastinate worker, fact consumers, cache sweeper. **Never `uvicorn --workers N`, never a second worker unit against prod.** Why, and the escalation path that is *not built*: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Single process*.
 
 **Host memory is the shared resource (#307).** SocratiCode is **pinned pre-installed** (`~/.socraticode/pin`): never let a launch install a server. The unit takes a **reservation, never a cap** (#309). Session `oom_score_adj` (#337), slices, verify, re-pin: [docs/HOST-MEMORY.md](docs/HOST-MEMORY.md).
 

@@ -34,7 +34,7 @@ dependencies = [
     "redis>=7.4,<8",
     "google-cloud-storage>=2,<4",
     # src/ops/backup.py and restore.py import its exceptions; arrives via google-cloud-storage (#294).
-    "google-api-core>=2.27,<3",
+    "google-api-core>=2.44.0,<3",
 ]
 
 [dependency-groups]

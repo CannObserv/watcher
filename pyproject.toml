@@ -17,7 +17,7 @@ dependencies = [
     "python-ulid>=3.0.0,<4",
     # No `[psycopg]` extra — procrastinate never published one; psycopg[pool] is
     # a base requirement, and PsycopgConnector uses it internally (#242).
-    "procrastinate>=3.0,<4",
+    "procrastinate>=3.10.0,<4",
     "httpx>=0.28.0,<1",
     "jinja2>=3.1.6,<4",
     "python-multipart>=0.0.33,<1",

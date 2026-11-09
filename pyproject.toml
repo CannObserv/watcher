@@ -20,7 +20,7 @@ dependencies = [
     "procrastinate>=3.0,<4",
     "httpx>=0.28.0,<1",
     "jinja2>=3.1.6,<4",
-    "python-multipart>=0.0.22,<1",
+    "python-multipart>=0.0.33,<1",
     # No [extract]: the processor extracts (#350); watcher needs the models, the
     # bus contract and the stdlib-only media-type rule. Exact, because watcher
     # resolves the essence Processor dispatches on and Processor never re-resolves

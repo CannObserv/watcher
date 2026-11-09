@@ -22,7 +22,7 @@ and a quiet bot reads like "no updates available". Notifier's pattern
   derived — one PR per action from the workflows, one per runtime package not
   ignored plus one per group from ``pyproject.toml`` — never transcribed.
 * **Commits match AGENTS.md's convention**, because a Dependabot PR lands by
-  fast-forwarding its commit onto ``main`` (docs/COMMANDS.md → *Dependabot
+  fast-forwarding its commit onto ``main`` (docs/DEPENDENCIES.md → *Dependabot
   PRs*).
 * **Every ``uses:`` pins a commit SHA with its version comment** (#360).
   Dependabot proposes refs in the pin's own form, so a floating major goes

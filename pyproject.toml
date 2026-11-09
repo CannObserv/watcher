@@ -9,7 +9,7 @@ dependencies = [
     # Imported directly — every schema is pydantic v2. Until #294 its bounds were
     # co-core's (>=2.12,<3; FastAPI's range has no cap): a major is ours to adopt.
     "pydantic>=2.12,<3",
-    "python-json-logger>=4.0.0,<5",
+    "python-json-logger>=4.2.0,<5",
     "uvicorn>=0.34.0,<1",
     "sqlalchemy[asyncio]>=2.0,<3",
     "asyncpg>=0.32.0,<1",

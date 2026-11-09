@@ -124,8 +124,11 @@ sudo systemctl restart watcher                 # then /health reports the SHA, a
   its version lookup asks PyPI first, where the names are unclaimed (*Accepted
   limits*).
 - **A cap-crossing PR** rewrites the `pyproject.toml` specifier. It's a major:
-  read its changelog against the code, as #294's caps intend. redis 8 means
-  re-measuring docs/BUS-CONNECTION-POLICY.md.
+  read its changelog against the code, as #294's caps intend.
+- **redis is held by co-core-aio, not by our cap:** 0.37.0's `bus` extra
+  requires `redis<8,>=5`, so no redis 8 bump resolves until a co-core bump
+  (#408, #414) lifts it, and the updater reports none or a resolution failure
+  for it. Taking 8 means re-measuring docs/BUS-CONNECTION-POLICY.md.
 - **A security PR** (its body lists the advisory) is a lock-only fix: add its
   `_FLOORS` row (*Advisory floors*) as a commit on top of the fast-forward,
   before the push.

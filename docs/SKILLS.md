@@ -166,7 +166,7 @@ a miss byte-identical to a pass. Two committed files replace its built-in defaul
 
 | File | Role |
 |---|---|
-| [.skills/doc-sensitive-paths](../.skills/doc-sensitive-paths) | What Step 1.5 watches. Drops the three defaults that match nothing here (`schema.sql`, `src/models/`, `.env.example`), adds `scripts/`, `src/dashboard/`, `src/workers/`, `tools/` |
+| [.skills/doc-sensitive-paths](../.skills/doc-sensitive-paths) | What Step 1.5 watches. Drops the three defaults that match nothing here (`schema.sql`, `src/models/`, `.env.example`), adds `scripts/`, `src/workers/`, `tools/` (`src/dashboard/` went in #377) |
 | [.skills/doc-sections](../.skills/doc-sections) | The advice printed on a hit — watcher's own docs, each line naming the change that triggers it |
 
 Tailor them together: the list says what the gate watches and the sections say what to do about

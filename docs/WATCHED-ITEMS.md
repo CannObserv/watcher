@@ -12,8 +12,8 @@ A `WatchedItem` owns everything: the canonical `effective_url` and `source_specs
 used by the pipeline; `default_schedule_config` (the operator's item cadence, inert since F2, #375), `default_tags`;
 `content_media_type` (#168); `domain_name` (FK → `Domain.name`, set at create time);
 `domain_suspended` (set True/False by domain deactivation/reactivation, through
-`set_domain_active` — the dashboard toggle and the `src.ops.suspend_domain`
-break-glass, #372 — it gates scheduling directly, no live Domain join); `domain_default_schedule_config`
+`set_domain_active` — the `src.ops.suspend_domain` break-glass, #372; the
+dashboard toggle until #377 — it gates scheduling directly, no live Domain join); `domain_default_schedule_config`
 (denormalized copy of the parent Domain's cadence — was the Domain tier of schedule
 resolution, #205; inert since F2, #375); a single optional
 `TemporalProfile` (1:1, `temporal_profiles.watched_item_id`; inert since F2 —
@@ -94,8 +94,8 @@ reconcile's own parse is what keeps the announced column safe.
 Per-domain cadence is `Domain.default_schedule_config`
 (a `schedule_config` interval string — operator check cadence, distinct from the
 `Domain.min_interval` rate-limiter floor), still editable via `PATCH
-/api/v1/domains/{name}` and the domain detail page, and inert since F2 (#375): the
-dashboard field says so. Archiver holds the domain default it resolves from.
+/api/v1/domains/{name}` (the domain detail page until #377), and inert since F2
+(#375). Archiver holds the domain default it resolves from.
 
 ## Registry reconciliation (#254)
 

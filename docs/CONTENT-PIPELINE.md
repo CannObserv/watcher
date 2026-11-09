@@ -271,11 +271,10 @@ order of `alembic upgrade head` and `systemctl restart` avoids a brief window of
 failing command INSERTs. [`MIGRATIONS.md`](MIGRATIONS.md) → "No safe order" has
 the procedure and what it looks like in the journal.
 
-**Async create (step 3).** Nothing on a create path probes
-(`resolve_watch_target`, [`src/core/watched_items.py`](../src/core/watched_items.py)).
-Since #251 that helper's only caller is the dashboard's `effective_url` edit,
-which re-enters `health_status='probing'` with the submitted URL as
-`effective_url`; the next fact resolves it (`final_url` → `effective_url` +
+**Async create (step 3).** Nothing on a create path probes. Since #251 the only
+producer of `health_status='probing'` was the dashboard's `effective_url` edit
+(`resolve_watch_target`), and #377 deleted both, so nothing enters PROBING now.
+An item already there still resolves on its next fact (`final_url` → `effective_url` +
 domain re-derivation via the #196 helper, PROBING → OK/ERROR). Steady-state
 redirects — and every Archiver-provisioned create, which starts `unknown` —
 stay audit-only (`CHECK_REDIRECT_OBSERVED`).
@@ -330,7 +329,7 @@ derived from it — no probe on any create path (#241), and a fresh item starts
 `health_status='unknown'`, not `probing`: Archiver is authoritative for the URL.
 On any PATCH that sets `effective_url` (the URL-succession path), `domain_name`
 is re-derived from the URL **without** re-probing and `domain_suspended` is
-re-evaluated; every create/PATCH/re-probe path (API and dashboard) shares
+re-evaluated; every create/PATCH path (API and registry reconcile) shares
 `ensure_domain_and_resolve_suspension` in
 [`src/core/domains.py`](../src/core/domains.py) (#196).
 

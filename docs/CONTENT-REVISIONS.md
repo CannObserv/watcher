@@ -161,8 +161,8 @@ renewal is a horizon refresh for a revision it holds and a first observation
 for one it does not. That second case is the backfill for every baseline
 recorded before #367: it reaches Archiver at the item's next full fetch under
 that cycle's live reference, never a replay of the original blob, which is
-long past the temp window. The dashboard's "has an older sibling" test keeps
-baselines out of `changes_today`; it no longer gates anything here.
+long past the temp window. The dashboard's "has an older sibling" test kept
+baselines out of `changes_today` until #377; it never gated anything here.
 
 Traffic is bounded by full fetches, each of which already produced a
 `content.blobs` fact; a 304 touches no blob and correctly announces nothing.

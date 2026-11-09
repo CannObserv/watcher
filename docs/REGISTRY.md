@@ -46,7 +46,8 @@ signal.
 **Spec acknowledgement (#274).** `last_reviewed_at` means *the operator has
 acknowledged the current `source_specs`* — compared against the newest
 `announcement_applied` event whose diff touched `source_specs`
-(`unacknowledged_spec_change`, `src/dashboard/context.py`). `NULL` reads as
+(the dashboard's `unacknowledged_spec_change` until #377 deleted it; nothing reads
+the column now, and it goes in #380). `NULL` reads as
 *never acknowledged*, not *acknowledged at the dawn of time*. Narrow on purpose:
 a cadence re-announcement does **not** raise it, because
 `announced_schedule_config` changes *when* the fingerprint is taken, not what it
@@ -74,7 +75,7 @@ the column.
 
 **A local pause is not sticky — and since the 2026-08-13 cutover, not offered.**
 `active` applies unconditionally, and once an item is reconciled
-(`applied_generation` set) the API PATCH and the dashboard toggle both 409/flash
+(`applied_generation` set) the API PATCH 409s (the dashboard toggle flashed, until #377)
 naming Archiver as the authority (`RegistryOwnedActivationError` in
 `set_watched_item_active`) — a control that silently reverts within the snapshot
 period is worse than a refusal that says where the control lives. Never-announced
@@ -85,7 +86,7 @@ drift.** The hourly republish carries the same generation, which the `>` orderin
 guard ignores as stale — so a local write to an announcement-owned column diverges
 until the next *real* registry mutation, not the next snapshot. Hence: PATCH 409s
 `effective_url` / `source_specs` / `archiver_info_source_id` on reconciled items
-(the dashboard URL edit flashes the same rule), and **restore clears `archived_at`
+(the dashboard URL edit flashed the same rule until #377), and **restore clears `archived_at`
 without re-activating** a reconciled item — archive→restore was otherwise a
 two-step bypass of the pause guard. A restored registry-owned item stays paused
 until Archiver re-arms it — one click, not a round-trip: Archiver's watch-active
@@ -114,11 +115,10 @@ the announced cadence and silently cleared on the next announcement. Since F2
 (#375) neither column is read; both are kept until #380.
 
 **The floor was releasable, and only by an operator (inert since F2, #375).** Writing an explicit item
-cadence — `PATCH /api/v1/watched-items/{id}` with `default_schedule_config`, or the
-dashboard's inline interval field — clears `throttle_floor_interval`. Both go through
-`set_item_schedule_config` (`src/core/watched_items.py`), the single owner of that
-write; `set_item_schedule_interval` is the string-shaped front door the dashboard
-uses. Without that the escape hatch would be gone: before the
+cadence — `PATCH /api/v1/watched-items/{id}` with `default_schedule_config` (and,
+until #377, the dashboard's inline interval field) — clears `throttle_floor_interval`,
+through `set_item_schedule_config` (`src/core/watched_items.py`), the single owner of
+that write. Without that the escape hatch would be gone: before the
 split, editing the interval *was* how a throttle was undone, and a floor nothing
 clears means one temporal profile firing caps an item at 1d forever while the
 operator's edits appear to do nothing. Reconciliation deliberately does not clear it;
@@ -157,7 +157,7 @@ revision is always enqueued. Full detail, including why a fresh item starts
 **[docs/CONTENT-PIPELINE.md](../docs/CONTENT-PIPELINE.md)**. On any PATCH that sets
 `effective_url` (the URL-succession path), `domain_name` is re-derived from the
 URL **without** re-probing and `domain_suspended` is re-evaluated; every
-create/PATCH/URL-change path (API and dashboard) shares
+create/PATCH/URL-change path (API and registry reconcile) shares
 `ensure_domain_and_resolve_suspension` in
 `src/core/domains.py` (#196). SourceRevisions are published to Archiver as
 `source_revision_observed` facts on `content.revisions` (#253) on every detected

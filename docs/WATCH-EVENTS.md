@@ -34,8 +34,8 @@ OK is not a recovery.
   `processing_failed`, not `extraction_failed`.
 - `watch_recovered.error_since` is `watched_items.error_since`. That column is
   stamped on the error edge and cleared on every exit from ERROR, including the
-  dashboard's URL edit into PROBING. That exit ends the episode with no recovery
-  fact, which the contract allows. There is **no backfill**: an item already in
+  dashboard's URL edit into PROBING until #377. That exit ended the episode
+  with no recovery fact, which the contract allows. There is **no backfill**: an item already in
   ERROR at deploy recovers with `null`, which is stated in the payload rather
   than omitted.
 - `change_detected.current_text_uri` is the processor's `output_uri` from the

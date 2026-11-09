@@ -40,7 +40,7 @@ On the host, after the merge, run `bash scripts/co-pypi.sh uv sync --locked`, th
 **Accepted limits:**
 - **The check runs only where it's wired in,** the unit and the dev server. A hand-run `uv run` in the deploy checkout still syncs the service's venv. Since #358 it can't download co-core without the wrapper, so it fails rather than installing something unchecked.
 - **The token reaches whatever the wrapped `uv` spawns:** the build backend for the editable project (and `git`, should a git source come back). CI's `uv sync` step is the same. The bound is `co-pypi-reader`'s read-only role and the token's hour.
-- **Dependabot's version lookup asks PyPI before the index,** where the co-core names are unclaimed. Who registers them is CannObserv/replicator#169's open decision. Both names are ignored, so the updater looks neither up; resolution still asks PyPI first, so a `uv` PR whose `uv.lock` moves co-core or takes its `source` off the index URL is a stop.
+- **Dependabot's version lookup asks PyPI before the index,** where the co-core names are unclaimed. Who registers them is CannObserv/replicator#169's open decision. Both names are ignored, so the updater never looks them up, and uv's resolution (`explicit`, a source per name) never asks PyPI. Dropping an ignore brings the limit back: a `uv` PR that moves co-core, or takes its `source` off the index URL, is a stop.
 - **Rollback:** reverting #358 restores `find-links` and `scripts/sync_wheelhouse.py`; run it to refill `.wheelhouse/` before a restart. The deploy checkout's copy was deleted 2026-11-06, after part 1's first restart.
 
 ## notifier-client
@@ -120,8 +120,8 @@ git push origin main
 sudo systemctl restart watcher                 # then /health reports the SHA, and NRestarts=0
 ```
 
-- **co-core moving is a stop.** The ignore keeps the bot off it, and
-  resolution still asks PyPI first, where the names are unclaimed (*Accepted
+- **co-core moving is a stop.** The ignore keeps the bot off it; without one,
+  its version lookup asks PyPI first, where the names are unclaimed (*Accepted
   limits*).
 - **A cap-crossing PR** rewrites the `pyproject.toml` specifier. It's a major:
   read its changelog against the code, as #294's caps intend. redis 8 means

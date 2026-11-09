@@ -10,8 +10,8 @@ below is one a later edit could quietly undo:
   name says so.
 * **Weekly as well as on change.** Disclosures arrive without commits.
 * **Push as well as PR, path-filtered.** Watcher lands by a local merge and a
-  push; only Dependabot opens PRs, and those move action pins. The filter is the
-  files that change what the audit reads, plus the audit's own two.
+  push; only Dependabot opens PRs, and its ``uv`` ones move the lock (#358). The
+  filter is the files that change what the audit reads, plus the audit's own two.
 * **No secret, no OIDC token, no index token.** ``uv audit --frozen`` reads the
   lock alone (measured from a bare ``git archive``, #397), so the job needs none
   of ``ci.yml``'s WIF steps, and ``contents: read`` is all it holds.

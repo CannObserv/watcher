@@ -40,7 +40,7 @@ On the host, after the merge, run `bash scripts/co-pypi.sh uv sync --locked`, th
 **Accepted limits:**
 - **The check runs only where it's wired in,** the unit and the dev server. A hand-run `uv run` in the deploy checkout still syncs the service's venv. Since #358 it can't download co-core without the wrapper, so it fails rather than installing something unchecked.
 - **The token reaches whatever the wrapped `uv` spawns:** the build backend for the editable project (and `git`, should a git source come back). CI's `uv sync` step is the same. The bound is `co-pypi-reader`'s read-only role and the token's hour.
-- **Dependabot's version lookup asks PyPI before the index,** where the co-core names are unclaimed. Who registers them is CannObserv/replicator#169's open decision. Part 2 of #358 ignores both names.
+- **Dependabot's version lookup asks PyPI before the index,** where the co-core names are unclaimed. Who registers them is CannObserv/replicator#169's open decision. Both names are ignored, so the updater never looks them up, and uv's resolution (`explicit`, a source per name) never asks PyPI. Dropping an ignore brings the limit back: a `uv` PR that moves co-core, or takes its `source` off the index URL, is a stop.
 - **Rollback:** reverting #358 restores `find-links` and `scripts/sync_wheelhouse.py`; run it to refill `.wheelhouse/` before a restart. The deploy checkout's copy was deleted 2026-11-06, after part 1's first restart.
 
 ## notifier-client
@@ -61,12 +61,18 @@ On the host, after the merge, run `bash scripts/co-pypi.sh uv sync --locked`, th
 
 ## Dependabot PRs (#283)
 
-`.github/dependabot.yml` proposes **action bumps only** (`github-actions`, weekly,
-one PR per action); `tests/ci/test_dependabot.py` pins it, because a broken
-config goes quiet rather than red. `uv` is out until #358 part 2: part 1 put
-co-core on the co-pypi index, which the updater reads over OIDC, and part 2
-ignores co-core's pins, bumped when Processor coordinates a contract change. Every
-`uses:` is `@<sha> # vX.Y.Z` (#360); the same test fails any other form.
+`.github/dependabot.yml` runs two weekly updaters; `tests/ci/test_dependabot.py`
+pins both, because a broken config goes quiet rather than red.
+- **`github-actions`:** one PR per action. Every `uses:` is `@<sha> # vX.Y.Z`
+  (#360); the same test fails any other form.
+- **`uv` (#358):** one PR per runtime package and one `dev-tools` PR for the dev
+  group, `increase-if-necessary` (a bump past a cap rewrites the cap). It reads
+  co-core from the co-pypi index over OIDC: cannobserv's org registry admits
+  this repository, and `pyproject.toml`'s URL equals the registry's byte for
+  byte. **Every `==` runtime pin is ignored by name** (co-core and co-core-aio
+  today): they move when Processor coordinates a contract change (#408, #414),
+  and the test derives the list. The open-PR limit outlasts the runtime
+  packages not ignored plus the group, derived the same way.
 
 **A Dependabot run reads its own credential context.** Its `GITHUB_TOKEN` is
 read-only and only *Dependabot* secrets reach it, so the four WIF jobs depend on
@@ -97,6 +103,48 @@ already takes the repo's form (`chore: bump …`, the `commit-message` prefix). 
 PR at a time — after each push the next may need `@dependabot rebase`. **Restart**
 (`sudo systemctl restart watcher`) only when the diff touches something outside
 `.github/`; an action bump never does.
+
+**A `uv` bump also needs the host's venv to match before any restart.** The
+unit's start step is `uv sync --locked --offline`, fail-closed (*The start
+check*): a locked file that's in neither the venv nor uv's cache stops the next
+start, a crash restart included. So each landing syncs, and the batch restarts
+once:
+
+```bash
+# …the fetch and the ff-merge above, then:
+git diff -U0 ORIG_HEAD -- pyproject.toml uv.lock | grep -E '^[-+].*co[-_]core'  # must print nothing
+source scripts/load-env.sh && bash scripts/co-pypi.sh uv sync --locked
+bash scripts/pre-ship.sh                       # tests/test_dependency_index.py: co-core still on the index
+git push origin main
+# After the batch's last landing:
+sudo systemctl restart watcher                 # then /health reports the SHA, and NRestarts=0
+```
+
+- **co-core moving is a stop.** The ignore keeps the bot off it; without one,
+  its version lookup asks PyPI first, where the names are unclaimed (*Accepted
+  limits*).
+- **A cap-crossing PR** rewrites the `pyproject.toml` specifier. It's a major:
+  read its changelog against the code, as #294's caps intend.
+- **redis is held by co-core-aio, not by our cap:** 0.37.0's `bus` extra
+  requires `redis<8,>=5`, so no redis 8 bump resolves until a co-core bump
+  (#408, #414) lifts it, and the updater reports none or a resolution failure
+  for it. Taking 8 means re-measuring docs/BUS-CONNECTION-POLICY.md.
+- **A security PR** (its body lists the advisory) is a lock-only fix: add its
+  `_FLOORS` row (*Advisory floors*) as a commit on top of the fast-forward,
+  before the push.
+- **A batch shares `uv.lock`**, as do the hand-made co-core re-locks (#408,
+  #414), so after each landing the next PR may need `@dependabot rebase`.
+  `audit.yml` runs on each one (report-only).
+- **Between landings main is ahead of live,** which the synced venv covers: a
+  crash restart starts the landed lock.
+
+**Is the `uv` updater running?** A failed run never shows as a red PR. Read the
+job log (Actions → *Dependabot Updates*) for `registered gcp OIDC credentials
+for python index`, `All versions of co-core ignored, no update allowed`, and,
+once it re-locks for a bump, `authenticating request with OIDC token (host:
+us-west1-python.pkg.dev)` and a `200`. A run with nothing to bump re-locks
+nothing, so it may log neither of the last two. Symptoms: cannobserv
+DEPENDABOT.md → step 4.
 
 **`context-cadence.yml` is generated** (`install-cadence.sh`, vendored in
 `skills-vendor/`), and Dependabot bumps its `actions/checkout` with `ci.yml`'s.

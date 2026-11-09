@@ -1,9 +1,9 @@
 name: audit
 
 # uv.lock against OSV (#397), ported from CannObserv/broker#86 and
-# CannObserv/archiver#420. Dependabot's uv ecosystem isn't on yet (#358 part
-# 2), so nothing else audits the lock between patching-hosts runs (#382,
-# class 6).
+# CannObserv/archiver#420. Dependabot's uv updater (#358) proposes version
+# bumps, not an audit of the lock, so this is what reads it between
+# patching-hosts runs (#382, class 6).
 #
 # Report-only: scripts/audit_lock.sh always exits 0, and a finding is a warning
 # annotation plus the job summary, runtime and dev under separate titles. A red

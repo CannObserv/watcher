@@ -1,15 +1,15 @@
-# Proposes the action bumps nothing else does (#283): every `uses:` in
-# .github/workflows/ pins a commit SHA with a `# vX.Y.Z` comment (#360), and
-# this moves both.
+# Proposes the bumps nothing else does: the actions every `uses:` in
+# .github/workflows/ pins to a commit SHA with a `# vX.Y.Z` comment (#283, #360),
+# and the Python dependencies whose caps hide a new release from `uv lock` (#358).
 # Each PR is gated by ci.yml like any other; a Dependabot run reads its own
 # credential context, so the WIF jobs' auth step is the first thing to read on
 # a red one. How one lands — fast-forwarded onto main locally, like every other
-# change — is docs/DEPENDENCIES.md -> "Dependabot PRs".
+# change, and for a `uv` bump a sync and a restart — is docs/DEPENDENCIES.md ->
+# "Dependabot PRs".
 #
-# github-actions only, until #358 part 2. Part 1 moved co-core to the co-pypi
-# index, which Dependabot's updater reads over OIDC; part 2 adds the `uv` block
-# and ignores both co-core names, whose exact pins move when Processor
-# coordinates a contract change.
+# The `uv` updater resolves co-core from the co-pypi index over OIDC: the org
+# registry admits this repository, and pyproject.toml's index URL equals the
+# registry's byte for byte, so no `registries:` key (cannobserv DEPENDABOT.md).
 # Guarded by tests/ci/test_dependabot.py: a mistyped config stops producing
 # PRs without erroring anywhere a person looks.
 version: 2
@@ -23,5 +23,30 @@ updates:
     open-pull-requests-limit: 10
     # The PR's commit lands on main as-is, so it takes AGENTS.md's form:
     # "chore: bump actions/checkout from 5 to 6".
+    commit-message:
+      prefix: "chore"
+  - package-ecosystem: "uv"
+    directory: "/" # pyproject.toml + uv.lock
+    # Weekly: each runtime bump costs the host a sync and a restart.
+    schedule:
+      interval: "weekly"
+    # The default `auto` resolves to `widen`, which uv can't do
+    # (dependabot-core#15290). A bump inside a cap moves the lock (and, under
+    # uv, the floor: notifier#103); one past it rewrites the cap.
+    versioning-strategy: increase-if-necessary
+    # One PR per runtime package not ignored, plus one per group; the test
+    # derives that bound from pyproject.toml and fails the limit at or below it.
+    open-pull-requests-limit: 20
+    groups:
+      # Dev tooling is one PR; a runtime bump gets its own review and restart.
+      dev-tools:
+        dependency-type: "development"
+    # Every `==` runtime pin, by name, so every version is ignored and the
+    # updater drops the package before any lookup. co-core's exact pins move
+    # when Processor coordinates a contract change (#366), by hand (#408, #414).
+    # Resolution still needs the index: every other bump re-locks co-core from it.
+    ignore:
+      - dependency-name: "co-core"
+      - dependency-name: "co-core-aio"
     commit-message:
       prefix: "chore"

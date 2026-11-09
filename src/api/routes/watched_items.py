@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from ulid import ULID
 
 from src.api.deps import get_db_session
 from src.api.routes.helpers import parse_filter_ulid, parse_ulid
@@ -24,6 +23,7 @@ from src.core.models.audit_log import EventType, audit
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
 from src.core.models.watched_item import WatchedItem
+from src.core.ulids import parse_canonical_ulid
 from src.core.watched_items import (
     ArchivedItemActivationError,
     RegistryOwnedActivationError,
@@ -107,8 +107,8 @@ async def create_watched_item(
     issue, not here, because until then it is the only way a WatchedItem exists.
 
     **Both ids must be canonical ULIDs — uppercase Crockford base32.** That is
-    what ``ULID.from_str`` accepts, so it is what path parameters have always
-    required and what ``ULIDRefStr`` now enforces here; the OpenAPI document
+    what ``parse_canonical_ulid`` accepts (#432), so it is what path parameters
+    require and what ``ULIDRefStr`` enforces here; the OpenAPI document
     advertises the same pattern. Archiver's provisioning call satisfies this by
     construction (``str()`` of a ``ULID``); a caller that lowercases its ids
     gets a 422 naming the field.
@@ -121,7 +121,7 @@ async def create_watched_item(
     domain_name = domain_name_for_url(data.url)
     domain_state = await ensure_domain_and_resolve_suspension(session, domain_name)
     wi = WatchedItem(
-        archiver_info_item_id=ULID.from_str(data.archiver_info_item_id),
+        archiver_info_item_id=parse_canonical_ulid(data.archiver_info_item_id),
         name=data.name or derive_watched_item_name(data.url),
         description=data.description,
         is_active=data.is_active,

@@ -308,7 +308,8 @@ Both ids are validated as ULIDs at the boundary (`ULIDRefStr`,
 reference is a 422 rather than a row that fails later against a real captured
 revision. **Canonical uppercase Crockford base32 only** — the same standard
 `parse_ulid` holds path parameters to, since it is the same parser
-(`ULID.from_str`, which rejects the lowercase form). The OpenAPI document
+(`parse_canonical_ulid`, which rejects the lowercase form whatever python-ulid
+accepts — #432). The OpenAPI document
 carries the matching `format: ulid` + `pattern`, so a generated client sees the
 constraint rather than a bare string; a schema test pins the pattern and the
 parser to the same accept-set. Archiver's provisioning call satisfies this by

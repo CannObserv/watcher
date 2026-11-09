@@ -15,6 +15,7 @@ from src.api.schemas.watched_item import (
     WatchedItemResponse,
 )
 from src.core.models.watched_item import CONTENT_MEDIA_TYPE_MAX_LEN, WatchedItem
+from src.core.ulids import parse_canonical_ulid
 
 # Required and non-empty on create since #260; every construction needs one.
 _SPECS = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
@@ -354,11 +355,12 @@ class TestIssue251ULIDValidation:
         ],
     )
     def test_advertised_pattern_agrees_with_the_parser(self, value):
-        """The spec's pattern and ULID.from_str must accept the same strings —
-        an advertised constraint looser or tighter than the enforced one is
-        worse than none."""
+        """The spec's pattern and the enforcing parser must accept the same
+        strings — an advertised constraint looser or tighter than the enforced
+        one is worse than none. The parser is Watcher's guard, not the library's
+        ``from_str``, which python-ulid 4.1.0 made case-insensitive (#432)."""
         try:
-            ULID.from_str(value)
+            parse_canonical_ulid(value)
             parses = True
         except (ValueError, TypeError):
             parses = False

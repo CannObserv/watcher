@@ -15,7 +15,6 @@ from datetime import UTC, datetime
 import procrastinate
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from ulid import ULID
 
 from src.core.bus import BUS_REDIS_URL_ENV, get_shared_bus_client
 from src.core.database import get_session_factory
@@ -29,6 +28,7 @@ from src.core.models.audit_log import EventType, audit
 from src.core.models.watched_item import WatchedItem
 from src.core.scheduling.cadence import compute_next_check
 from src.core.scheduling.resolution import resolved_schedule_config
+from src.core.ulids import parse_canonical_ulid
 from src.workers import bp
 
 logger = get_logger(__name__)
@@ -139,7 +139,7 @@ async def check_watched_item(
     force a real re-read without touching the database.
     """
     async with get_session_factory()() as session:
-        watched_item = await session.get(WatchedItem, ULID.from_str(watched_item_id))
+        watched_item = await session.get(WatchedItem, parse_canonical_ulid(watched_item_id))
         if watched_item is None:
             logger.warning("watched_item not found", extra={"watched_item_id": watched_item_id})
             return {"skipped": True}

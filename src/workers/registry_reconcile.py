@@ -63,7 +63,6 @@ from co_core.pure.models.changes import RegistryAnnouncementState
 from co_core_aio.bus import AsyncBusTailReader
 from redis.asyncio import Redis
 from sqlalchemy import select
-from ulid import ULID
 
 from src.core import read_windows
 from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_suspension
@@ -72,6 +71,7 @@ from src.core.models.audit_log import EventType, audit
 from src.core.models.revoked_info_item import RevokedInfoItem
 from src.core.models.watched_item import WatchedItem
 from src.core.scheduling.cadence import parse_interval
+from src.core.ulids import parse_canonical_ulid
 from src.core.validators import canonical_specs
 from src.core.watched_items import derive_watched_item_name
 from src.workers.watch_status import defer_status_republish
@@ -189,7 +189,7 @@ async def reconcile_announcement(session, payload: RegistryAnnouncementState) ->
     stream at boot cheap.
     """
     try:
-        info_item_ulid = ULID.from_str(payload.info_item_id)
+        info_item_ulid = parse_canonical_ulid(payload.info_item_id)
     except (ValueError, TypeError):
         # Nothing to reconcile against and nowhere to route it. Log attributably
         # and drop; the next snapshot supersedes it.

@@ -49,13 +49,13 @@ from co_core_aio.bus import AsyncBusConsumer
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from ulid import ULID
 
 from src.core.check_now import CheckRefusal, preflight_check
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.fetch_command import FetchCommand
 from src.core.models.watched_item import WatchedItem
+from src.core.ulids import parse_canonical_ulid
 from src.core.watch_events import enqueue_check_rejected
 from src.workers.fetch_facts import (
     BLOCK_MS,
@@ -94,7 +94,7 @@ async def _item_for(session: AsyncSession, info_item_id: str) -> WatchedItem | N
     """The WatchedItem linked to ``info_item_id``; ``None`` for an id that is
     not a ULID — no validator on the command (#283), so any string decodes."""
     try:
-        key = ULID.from_str(info_item_id)
+        key = parse_canonical_ulid(info_item_id)
     except ValueError:
         return None
     stmt = select(WatchedItem).where(WatchedItem.archiver_info_item_id == key)

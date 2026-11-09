@@ -19,6 +19,12 @@ class TestParseUlid:
         assert exc_info.value.status_code == 404
         assert "not found" in exc_info.value.detail
 
+    def test_lowercase_raises_404(self):
+        """#432: the canonical form only, whatever python-ulid accepts."""
+        with pytest.raises(HTTPException) as exc_info:
+            parse_ulid(str(ULID()).lower(), "Watch")
+        assert exc_info.value.status_code == 404
+
 
 class TestParseFilterUlid:
     def test_valid_ulid_returns_ulid(self):
@@ -35,3 +41,9 @@ class TestParseFilterUlid:
         with pytest.raises(HTTPException) as exc_info:
             parse_filter_ulid("not-a-ulid", "watch_id")
         assert "watch_id" in exc_info.value.detail
+
+    def test_lowercase_raises_400(self):
+        """#432: the canonical form only, whatever python-ulid accepts."""
+        with pytest.raises(HTTPException) as exc_info:
+            parse_filter_ulid(str(ULID()).lower(), "watch_id")
+        assert exc_info.value.status_code == 400

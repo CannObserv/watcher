@@ -223,6 +223,16 @@ class TestRejected:
         (row,) = await _rejections(db_session)
         assert row.payload["info_item_id"] == "not-a-ulid"
 
+    async def test_a_lowercased_id_of_a_real_item_is_an_unknown_item(self, db_session):
+        """#432: the canonical form only — a lowercase spelling names no item,
+        whatever python-ulid accepts."""
+        wi = await make_watched_item(db_session)
+
+        outcome = await _process(db_session, _command(str(wi.archiver_info_item_id).lower()))
+
+        assert outcome == "rejected_unknown_item"
+        assert await _fetches(db_session, wi) == []
+
     async def test_the_rejection_is_committed(self, db_session):
         """The loop acks after ``process`` returns, so the fact must already be
         durable: an uncommitted row is lost with the session."""

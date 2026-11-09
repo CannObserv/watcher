@@ -5,12 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.core.models.watched_item import WatchedItem
+from src.core.ulids import parse_canonical_ulid
 
 
 def parse_ulid(value: str, label: str = "Resource") -> ULID:
-    """Parse a ULID string, raising 404 on invalid format."""
+    """Parse a canonical ULID string (#432), raising 404 on invalid format."""
     try:
-        return ULID.from_str(value)
+        return parse_canonical_ulid(value)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=f"{label} not found") from exc
 
@@ -21,7 +22,7 @@ def parse_filter_ulid(value: str, field: str = "id") -> ULID:
     Use for filter params on list endpoints (not path parameters — use parse_ulid there).
     """
     try:
-        return ULID.from_str(value)
+        return parse_canonical_ulid(value)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid {field} format") from exc
 

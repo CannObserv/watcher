@@ -79,6 +79,8 @@ plain line and hides every record after it.
 
 Do not use `parse_ulid` for filter query params — the endpoint itself exists; an unparseable filter value is a bad request, not a missing resource.
 
+**One spelling: canonical uppercase (#432).** Every parse of an id from outside — path, filter, body, bus message, task argument — goes through `parse_canonical_ulid` ([src/core/ulids.py](../src/core/ulids.py)), which enforces `ULID_PATTERN` before `ULID.from_str`. The library is not the contract: python-ulid rejected lowercase from 2.6.0 and accepts it again from 4.1.0, and `info.registry`'s reconcile looks up a revocation's tombstone by the id's string, so a lowercase spelling that parsed would miss it and re-create a revoked item. `tests/core/test_ulids.py` fails a bare `ULID.from_str` anywhere in `src/` outside an allowlist that names its reason (today: the guard, and `ULIDType`'s read path, which parses only what `str(ULID)` stored).
+
 ## DB triggers
 
 **DB Triggers (gotcha):**

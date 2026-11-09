@@ -816,6 +816,18 @@ class TestGetWatchedItemDetail:
 
         assert await get_watched_item_detail(db_session, str(ULID())) is None
 
+    async def test_lowercase_id_returns_none(self, db_session):
+        """#432: a lowercased id of a real item is not that item's id."""
+        from src.core.models.watched_item import WatchedItem
+        from src.dashboard.context import get_watched_item_detail
+
+        wi = WatchedItem(
+            archiver_info_source_id=str(ULID()), archiver_info_item_id=ULID(), name="X"
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        assert await get_watched_item_detail(db_session, str(wi.id).lower()) is None
+
 
 class TestProfileBatchLoaderIsGone:
     """#375: nothing resolves a profile any more, so the list views no longer

@@ -3,7 +3,8 @@
 from typing import Annotated
 
 from pydantic import BeforeValidator, HttpUrl, TypeAdapter, WithJsonSchema
-from ulid import ULID
+
+from src.core.ulids import ULID_PATTERN, parse_canonical_ulid
 
 _http_url_adapter = TypeAdapter(HttpUrl)
 
@@ -21,25 +22,20 @@ ULIDStr = Annotated[str, BeforeValidator(lambda v: str(v))]
 the value comes from a ``ULID`` column and is well-formed by construction."""
 
 
-ULID_PATTERN = r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
-"""Canonical ULID: 26 chars of uppercase Crockford base32, first char ≤ 7.
-Mirrors what ``ULID.from_str`` accepts — kept in sync by the schema tests."""
-
-
 def _validate_ulid_ref(v: object) -> str:
     """Validate that *v* is a well-formed ULID, returning it as a plain string.
 
     Same parser as ``parse_ulid`` in ``src/api/routes/helpers.py``, so an
-    inbound reference is held to exactly the standard a path parameter is
-    (canonical Crockford base32, **uppercase** — ``ULID.from_str`` rejects the
-    lowercase form, and so does this).
+    inbound reference is held to exactly the standard a path parameter is:
+    ``ULID_PATTERN``, canonical Crockford base32, **uppercase** (#432 —
+    Watcher's guard, not the library's case rules).
 
-    *v* is passed through un-coerced: a non-string trips ``from_str``'s own
-    ``TypeError`` and fails as a type error, rather than being stringified into
-    a length complaint about a value that was never a ULID to begin with.
+    *v* is passed through un-coerced: a non-string raises ``TypeError`` and
+    fails as a type error, rather than being stringified into a length
+    complaint about a value that was never a ULID to begin with.
     """
     try:
-        return str(ULID.from_str(v))
+        return str(parse_canonical_ulid(v))
     except (ValueError, TypeError) as exc:
         raise ValueError(f"must be a 26-character ULID: {exc}") from exc
 

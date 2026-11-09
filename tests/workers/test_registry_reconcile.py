@@ -648,6 +648,18 @@ class TestMalformedIdentity:
         assert outcome == "invalid"
         assert any("info_item_id" in r.message for r in caplog.records)
 
+    async def test_a_lowercase_info_item_id_is_dropped(self, db_session):
+        """#432: the tombstone lookup keys on the id's string, so a lowercase
+        spelling that parsed would miss a revocation and re-create the item."""
+        info_item_id = ULID()
+        payload = _announcement(info_item_id)
+        object.__setattr__(payload, "info_item_id", str(info_item_id).lower())
+
+        outcome = await reconcile_announcement(db_session, payload)
+
+        assert outcome == "invalid"
+        assert await _get(db_session, info_item_id) is None
+
 
 class TestPreexistingRow:
     """The rollout case: WatchedItems created through the POST route before the

@@ -15,6 +15,7 @@ from src.core.models.domain import Domain
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watched_item import WatchedItem
 from src.core.scheduling.schedule import ScheduleDisplay, resolve_schedule_display
+from src.core.ulids import parse_canonical_ulid
 
 _DOMAIN_WI_SORT_COLS: dict[str, Any] = {
     "name": WatchedItem.name,
@@ -451,7 +452,7 @@ async def get_watched_item_detail(
 ) -> WatchedItem | None:
     """Fetch a single WatchedItem; returns None on invalid ID or not-found."""
     try:
-        wi_ulid = ULID.from_str(watched_item_id)
+        wi_ulid = parse_canonical_ulid(watched_item_id)
     except (ValueError, TypeError):
         return None
     return await session.get(WatchedItem, wi_ulid)

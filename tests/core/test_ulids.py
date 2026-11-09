@@ -64,24 +64,33 @@ class TestParseCanonicalULID:
 class TestNoBareFromStr:
     """Fitness: an inbound parse that skips the guard silently widens the
     contract on the next python-ulid release. Route it through
-    ``parse_canonical_ulid``, or add it to the allowlist with its reason."""
+    ``parse_canonical_ulid``, or add it to the allowlist with its reason.
+    ``ULID.parse`` is banned with ``from_str``: it accepts a ``str`` too."""
 
-    def test_only_allowlisted_modules_call_ulid_from_str(self):
-        offenders = []
-        for path in sorted(SRC.rglob("*.py")):
-            rel = path.relative_to(SRC).as_posix()
-            if rel in BARE_FROM_STR_ALLOWED:
-                continue
-            for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
-                if (
-                    isinstance(node, ast.Attribute)
-                    and node.attr == "from_str"
-                    and isinstance(node.value, ast.Name)
-                    and node.value.id == "ULID"
-                ):
-                    offenders.append(f"src/{rel}:{node.lineno}")
+    def test_only_allowlisted_modules_parse_ulid_strings(self):
+        offenders = [
+            f"src/{rel}:{lineno}"
+            for path in sorted(SRC.rglob("*.py"))
+            if (rel := path.relative_to(SRC).as_posix()) not in BARE_FROM_STR_ALLOWED
+            for lineno in _string_parse_sites(path)
+        ]
         assert offenders == []
 
     def test_allowlist_has_no_stale_entries(self):
         for rel in BARE_FROM_STR_ALLOWED:
-            assert "ULID.from_str" in (SRC / rel).read_text(), rel
+            assert _string_parse_sites(SRC / rel), rel
+
+
+_STRING_PARSERS = {"from_str", "parse"}
+
+
+def _string_parse_sites(path: Path) -> list[int]:
+    """Line numbers of ``ULID.from_str`` / ``ULID.parse`` in *path* — code, not text."""
+    return [
+        node.lineno
+        for node in ast.walk(ast.parse(path.read_text(), filename=str(path)))
+        if isinstance(node, ast.Attribute)
+        and node.attr in _STRING_PARSERS
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "ULID"
+    ]

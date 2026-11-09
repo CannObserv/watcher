@@ -2,7 +2,8 @@
 
 Landed only because replicator#17 and #249 part 1 are both **in production**: a
 validator sent to a deployment that still classifies 304 as a plain fetch failure
-marks a healthy item ERROR and notifies a user about it on every no-change check.
+marks a healthy item ERROR on every no-change check, and Archiver notifies a user
+from the `watch_error` fact it stages.
 
 **Storage takes two hops**, because the fact and the apply are separated in time:
 

@@ -16,7 +16,6 @@ The service loads env files in this order (later values override earlier):
 |---|---|---|
 | `/run/watcher/build-id` | `BUILD_ID` (auto-generated from git SHA) | optional |
 | `/etc/watcher/.env` | Production secrets (`DATABASE_URL`) | **yes** |
-| `/etc/watcher/notifier.env` | The production notifier credential, unit-only (#278) | **yes** |
 
 `/etc/watcher/.env` is owned by `root:exedev` (mode 640) and survives repo resets, worktree switches, and redeployments.
 
@@ -30,34 +29,7 @@ shells, which is what it is for. A production setting belongs in
 `tests/deploy/test_installed_unit_matches_repo.py` fails a unit that loads any
 env file from the checkout.
 
-`/etc/watcher/notifier.env` is `600 root:root` and holds
-`WATCHER_NOTIFIER_BASE_URL` + `WATCHER_NOTIFIER_API_KEY` and nothing else.
-`scripts/load-env.sh` does not know the path, so no shell, suite or REPL
-inherits the pair; systemd parses `EnvironmentFile=` as root before `User=`
-takes effect, so the `exedev` account never needs to read it.
-
-**Why it is separate.** #277 made the notifier credential unusable outside the
-unit (`WATCHER_NOTIFIER_ENABLED`); it could not make it *unheld*. Every agent
-shell on this VM sources `/etc/watcher/.env`, and notifier's audit
-([CannObserv/notifier#22](https://github.com/CannObserv/notifier/issues/22),
-watcher#278) found ~1289 watcher fixture notifications already delivered on that
-key to the production Slack and Mailgun channels. A flag stops an accident; it
-does not stop a deliberate `export`, and it does not stop the key being read out
-of a process environment. Moving the file is what makes the credential
-genuinely unavailable to anything but the service.
-
-It is loaded **last** (env files apply in order, so nothing may override it) and
-**required** — no `-` prefix, so an absent file fails the start rather than
-leaving the service up and quietly un-notifying.
-`src/core/notifier_client.assert_environment_notifier_allowed` makes the same
-combination fatal in-app, which covers what systemd cannot see: a file present
-but empty, truncated, or with the assignment renamed.
-
-**The backup unit loads one env file of its own, and neither of the service's** (#296 D8/D9, #297): `/etc/watcher/backup.env` — the bucket, and the check-in's base URL and monitor id, no secret. Its two keys are not environment at all: `LoadCredential=` reads `/etc/watcher/co-watcher-backup.json` and `/etc/watcher/backup-checkin.key` (both `0400 root:root`, both required; the second is a co-status key for the `co-watcher` tenant (#330) — unrelated to `WATCHER_NOTIFIER_API_KEY` — and empty until the monitor exists) and hands the run private copies under `$CREDENTIALS_DIRECTORY`. `watcher-backup.service` never loads `/etc/watcher/.env` — it holds no database credential and must not hold the bus URL — nor `notifier.env`. See [RECOVERY.md](RECOVERY.md); installing them: [RECOVERY-PROVISIONING.md](RECOVERY-PROVISIONING.md).
-
-**Do not** re-add either variable to `/etc/watcher/.env` or to the repo `.env`.
-Non-production runs point at notifier's *development* tenant instead — see
-`WATCHER_DEV_NOTIFIER_BASE_URL` below.
+**The backup unit loads one env file of its own, and neither of the service's** (#296 D8/D9, #297): `/etc/watcher/backup.env` — the bucket, and the check-in's base URL and monitor id, no secret. Its two keys are not environment at all: `LoadCredential=` reads `/etc/watcher/co-watcher-backup.json` and `/etc/watcher/backup-checkin.key` (both `0400 root:root`, both required; the second is a co-status key for the `co-watcher` tenant (#330), empty until the monitor exists) and hands the run private copies under `$CREDENTIALS_DIRECTORY`. `watcher-backup.service` never loads `/etc/watcher/.env` — it holds no database credential and must not hold the bus URL. See [RECOVERY.md](RECOVERY.md); installing them: [RECOVERY-PROVISIONING.md](RECOVERY-PROVISIONING.md).
 
 For shell commands that need secrets:
 
@@ -95,14 +67,10 @@ pattern — see [BUS.md](BUS.md).
 | `GH_TOKEN` | `.env` | no | GitHub personal access token |
 | `TEST_DATABASE_URL` | `.env` | no | PostgreSQL connection string for test database |
 | `BUILD_ID` | env | no | Git SHA for static asset cache-busting (default `"dev"`) |
-| `WATCHER_NOTIFIER_BASE_URL` | `/etc/watcher/notifier.env` | **yes** | Base URL of the notifier service — `http://notifier:9000` on this VM since notifier#43 moved it to its own host (#280). `notifier` is a MagicDNS name on the `cannobserv.org.github` tailnet, and notifier binds its tailnet address alone: a watcher that has not joined cannot reach it from anywhere. **Not sufficient on its own since #277** — see `WATCHER_NOTIFIER_ENABLED`. Moved out of `/etc/watcher/.env` under #278: that file is exported into every agent shell, and this pair must be held by the service alone |
-| `WATCHER_NOTIFIER_API_KEY` | `/etc/watcher/notifier.env` | **yes** | Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo, marked `production` there. This is the credential that makes a stray dispatch *deliverable*, which is why the pair is gated — and, since #278, why it lives in a file no shell sources |
-| `WATCHER_PUBLIC_BASE_URL` | `/etc/watcher/.env` | no (prod: set it) | The dashboard's public base (`https://co-watcher.exe.xyz` after #296), from which notification links are built — the `app_url` template variable, the ITEM line and `change_url` (#296 D6). Unset → links are **omitted**, never a guessed host, and startup WARNs when the notifier is enabled. Malformed (no scheme, not http(s), a bad port, a `?`/`#`, a username or password, whitespace) → **startup refuses**, since it is a typo that would otherwise drop every link silently. Not a credential, so it lives in the shared file; `scripts/dev_server.sh` still clears it so a dev worker's links cannot point into production |
 | `WATCHER_BACKUP_BUCKET` | `/etc/watcher/backup.env` | backup unit | Bucket the nightly dump is created in (`co-gcs-watcher-backup`); no default — unset fails the run and checks in `alert` (#296 D8) |
 | `WATCHER_BACKUP_PREFIX` | `/etc/watcher/backup.env` | no | Object prefix the backup writes under; defaults to the hostname, so each host's dumps list as their own timeline. Unset here, and this host is `co-watcher`. The restore never reads it — a restore runs on another host, so `--prefix` names the source. **The bucket holds two timelines:** `co-watcher/` is live, `watcher/` is the retired VM's and its newest object post-dates the #296 cutover, so `--prefix watcher` restores 2026-09-15 |
 | `WATCHER_BACKUP_CHECKIN_BASE_URL` | `/etc/watcher/backup.env` | backup unit | Base URL of the dead-man check-in (#296 D9): `http://status:9000`, co-status since #330. Named for no service (#332); the old `WATCHER_BACKUP_NOTIFIER_BASE_URL` is not read: set alone it is an ERROR naming the rename, beside the new one a WARNING to remove it. Configuration, not a constant — see RECOVERY-PROVISIONING.md for why a port typo still alarms rather than inverts |
 | `WATCHER_BACKUP_MONITOR_ID` | `/etc/watcher/backup.env` | backup unit | The co-status monitor (`co-watcher-backup`, id unchanged from notifier) the backup checks in to on every run. All three or none: this, the base URL, and the check-in key — a systemd credential, not a variable (#297); `WATCHER_BACKUP_NOTIFIER_API_KEY` is no longer read |
-| `WATCHER_NOTIFIER_ENABLED` | `deploy/watcher.service` **only** | prod only | `=1` opts this process into building a notifier client at all (`src/core/notifier_client/client.py`, #277). Without it `get_notifier_client()` raises `NotifierNotEnabled` — **and a URL held without it aborts startup**, so a unit that lost the line fails loudly instead of going quiet on notifications. Must live in the systemd unit, never an env file, for the same reason as the two flags above and with the largest blast radius of the three: a stray database row is recoverable and a stray bus frame is inert, but a stray notification is delivered to real subscribers, cannot be recalled, and *succeeds* — leaving no error behind to notice. `scripts/dev_server.sh` sets it for itself when `WATCHER_DEV_NOTIFIER_BASE_URL` names a scratch notifier. Since #278 the **flag without a URL** aborts startup too: only the unit sets it, and the credential it goes with is in the unit's own env file, so that combination means the file did not load |
 | `WATCHER_ALLOW_PRODUCTION_DB` | `deploy/watcher.service` **only** | prod only | `=1` opts into serving a database whose name lacks a `_test`/`_dev` suffix (`src/core/db_safety.py`, #233). Must live in the systemd unit, never an env file — env files are loaded by hand-run dev servers, which are exactly what the guard stops |
 | `WATCHER_DEV_DATABASE_URL` | `.env` | no | Persistent dev database for `scripts/dev_server.sh`; wins over `TEST_DATABASE_URL` |
 | `WATCHER_BUS_REDIS_URL` | `/etc/watcher/.env` | prod | Redis URL of the broker, over the tailnet (`redis://watcher:<password>@broker:6379/0`) for the `info.watch-status` producer (#264; `content.fetch-policy` too until F1, #374). Unset → the periodic publish task skips with an ERROR log: Archiver's watched-item panel / drift detector go stale. **Not sufficient on its own since #262** — see `WATCHER_BUS_ENABLED` |
@@ -110,52 +78,18 @@ pattern — see [BUS.md](BUS.md).
 | `WATCHER_WATCH_STATUS_REPUBLISH_CRON` | env | no | Cron expression for the `info.watch-status` full-set republish (default `*/5 * * * *`, #264). The period is the recovery bound for a dropped frame — this stream has no outbox by design; loss is corrected by the next full set. A malformed value falls back to the default with an ERROR log |
 | `WATCHER_WATCH_STATUS_STREAM_MAXLEN` | env | no | Producer-enforced retention cap for `info.watch-status` (`XADD MAXLEN ~`, default `500`). The full set republishes forever, so an untrimmed stream grows without bound; invalid/non-positive values fall back to the default with a warning — never to unbounded. **Floored at 10 full sets** of whatever batch is being published, so a corpus larger than the cap raises it rather than being trimmed below one full set (#292) — which is why a value *below* the floor is silently raised too |
 | `WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS` | env | no | Reaper timeout for an in-flight command with no fact (default `1800` — deliberately generous; Replicator's reclaim cadence is an operator knob, and a tight value re-issues under live retries) |
-| `WATCHER_CONDITIONAL_GET_ENABLED` | env | no | Which items may replay stored conditional-GET validators (#269). Unset/falsey → off for everything and every command is byte-identical to the pre-#269 one; `true` → the whole fleet; anything else is read as a comma-separated list of WatchedItem ids, which is the canary position. Safe only while replicator#17 and #249 part 1 are both deployed — a validator sent to a Replicator that classifies 304 as a plain fetch failure marks a healthy item ERROR and notifies a user about it on every no-change check |
+| `WATCHER_CONDITIONAL_GET_ENABLED` | env | no | Which items may replay stored conditional-GET validators (#269). Unset/falsey → off for everything and every command is byte-identical to the pre-#269 one; `true` → the whole fleet; anything else is read as a comma-separated list of WatchedItem ids, which is the canary position. Safe only while replicator#17 and #249 part 1 are both deployed — a validator sent to a Replicator that classifies 304 as a plain fetch failure marks a healthy item ERROR on every no-change check, and Archiver notifies a user from the `watch_error` fact it stages |
 | `WATCHER_VALIDATOR_MAX_AGE_HOURS` | env | no | How long a stored validator pair may be replayed before one unconditional re-fetch is forced (default `168`). The residual net under the deterministic invalidation rules — an origin whose ETag tracks a template rather than the watched region would otherwise hold a fingerprint inherited indefinitely. Not the blob-renewal bound: replay also stops at half the fact's `blob_expires_at` horizon whatever this is set to (#339, [CONDITIONAL-GET.md](CONDITIONAL-GET.md)). An unparseable value falls back to the default rather than raising, and a zero or negative value disables replay entirely (logged at INFO): the knob must not be able to wedge the issue path |
-| `GCS_BLOB_CREDENTIALS` | env | for change diffs | Key file for the `co-gcs-blob-reader` SA (`/etc/watcher/co-gcs-blob-reader.json`), read by the `gs://` blob arm — since #350 only for the processor's stored texts (`gs://co-gcs-processor`). Singular `BLOB` — easy to typo as `BLOBS`. Deliberately **not** `GOOGLE_APPLICATION_CREDENTIALS`, the co-pypi index identity: the two jobs must not share a principal. Unset or unusable → every change diff reads `DIFF: unavailable (… text unreadable)`; no check fails. A rotated key at the same path needs a restart |
 | `GOOGLE_APPLICATION_CREDENTIALS` | `/etc/watcher/.env` | for `uv lock` | The `co-pypi-reader` key; only `scripts/co-pypi.sh` reads it (#358). |
 | `UV_INDEX_CO_PYPI_*` | one `uv` command **only** | for `uv lock` | co-pypi auth, set by `scripts/co-pypi.sh` or CI; **never** in an env file ([DEPENDENCIES.md](DEPENDENCIES.md)). |
 | `WATCHER_FETCH_MAX_REISSUES` | env | no | Re-issues per fetch intent before it fails with ERROR health (default `3`). Caps the *lineage*, not one path: the reaper's stall sweep, the process reaper and the processor's `input_unreadable` (#275) all read it, one counter spanning both legs (#326) |
 | `WATCHER_PROCESS_COMMAND_TIMEOUT_SECONDS` | env | no | How long an in-flight process command may go without a fact before the reaper may re-issue it (default `1800`) — **only once the processor has read past it** (answered a command published after it); otherwise it is held. Unparseable → the default |
 | `WATCHER_PROCESS_COMMAND_HARD_LIMIT_SECONDS` | env | no | How long a process command may stay in flight (or unpublished) at all before its lineage ends, consuming or not (default `86400`): the check fails `processing_timeout` and the item goes ERROR (#326). The command whose failure fact was refused never gets one (processor#17) |
-| `WATCHER_DIFF_MAX_INPUT_BYTES` | env | no | Largest canonical text either side of a change diff may be (default `1048576`, #222); over it the notification says `DIFF: unavailable (content too large)`. Checked against the processor's recorded size before any download. `0` makes every diff unavailable without touching templates (the notice line still renders) |
 | `WATCHER_DEV_BUS_REDIS_URL` | `.env` | no | Scratch-bus opt-in for `scripts/dev_server.sh`; without it the dev server **clears** an inherited `WATCHER_BUS_REDIS_URL` (and `WATCHER_BUS_ENABLED`) so it cannot publish policy onto the production stream. With it, the script exports both, since the flag is otherwise unit-only |
-| `WATCHER_DEV_NOTIFIER_BASE_URL` | `.env` | no | Scratch-notifier opt-in for `scripts/dev_server.sh`; without it the dev server **clears** `WATCHER_NOTIFIER_BASE_URL`, `WATCHER_NOTIFIER_API_KEY` and `WATCHER_NOTIFIER_ENABLED` so it cannot notify the production tenant (#277) — kept after #278 moved the pair out of the loaded env files, because it also catches a shell that exported them by hand. Requires `WATCHER_DEV_NOTIFIER_API_KEY` beside it — a URL without its key refuses to start rather than fall back to whatever key is in the environment |
-| `WATCHER_DEV_NOTIFIER_API_KEY` | `.env` | no | The scratch notifier's tenant key. Required whenever `WATCHER_DEV_NOTIFIER_BASE_URL` is set; meaningless without it. Use a key notifier marks **`development`** (notifier#22), so a dev server pointed at a production notifier is refused instead of delivering |
-| `WATCHER_DEV_PUBLIC_BASE_URL` | `.env` | no | Base for a dev server's notification links (e.g. `https://co-watcher.exe.xyz:8001`); `scripts/dev_server.sh` exports it as `WATCHER_PUBLIC_BASE_URL`, and without it **clears** the inherited production value so links are omitted rather than aimed at the live dashboard (#296 D6) |
 
-**The dev notifier tenant (#278, provisioned 2026-08-25).** Watcher's
-development credential is valid against the notifier deployment on
-**`http://notifier:9001`**, a separate instance from production's `:9000` with
-its own database. Both moved off this VM with notifier#43 and are now tailnet
-MagicDNS names (#280) — the split between them is unchanged, only the host.
-Two consequences, both verified rather than assumed, and **re-probed against
-the tailnet hosts on 2026-08-29** after the move (#280) — the original
-2026-08-25 readings were taken against loopback, so the label would otherwise
-have outlived what it certified. Those probes ran from the retired VM; from
-co-watcher, only *reachability* has been re-checked (2026-09-16: `:9000` and
-`:9001` both answer `/health` 200), so the two claims below still carry their
-2026-08-29 date:
-
-* The dev key **authenticates on `:9001`** — which is itself the proof that
-  deployment is not classified production, since notifier refuses a
-  `development` key wherever `serving_production()` is true.
-* Presented to production `:9000` it comes back **401 `Invalid API key`, not the
-  403** notifier#22 describes. The 403 branch compares a key's `environment`
-  against the deployment it reached, which only arises when one database holds
-  both kinds. Here the two deployments have separate databases, so the dev key
-  does not exist in production at all — refused by non-existence, which is the
-  stronger of the two failures. Do not rely on reading a 403 to detect a
-  misdirected dev server; the refusal is what matters, not its code.
-
-The dev tenant currently has **no channels and no templates**, so a dev server
-can authenticate and construct a client but has nothing to send *to*. Since F3
-(#376) Watcher dispatches no event of its own anyway; the client serves only
-the operator's test sends, which #379 deletes.
-
-**Retired variables.** Removed from `/etc/watcher/.env` (under #277, and #376
-for the last two) after each was confirmed to have no reader in `src/` or
-`scripts/` (`tests/test_notification_dispatch_sites.py` pins #376's two). Historical
+**Retired variables.** Removed from `/etc/watcher/.env` (under #277, #376 and
+#379) after each was confirmed to have no reader in `src/` or `scripts/`
+(`tests/test_notification_subsystem_retired.py` pins #376's and #379's). Historical
 plan documents under `docs/plans/` still describe them and are left as written
 — they are a record of what was true then, not instructions:
 
@@ -167,12 +101,12 @@ plan documents under `docs/plans/` still describe them and are left as written
 | `APPRISE_SECRET_KEY` | The Fernet key for encrypted Apprise URLs. Verified no ciphertext column survives in the schema before deletion |
 | `WATCHER_ERROR_RENOTIFY_INTERVAL` | #71's reminder gap. Watcher sends no reminder since F3 (#376): Archiver owns the cadence. Never set in production, so nothing to remove |
 | `WATCHER_NOTIFY_CUTOVER_AT` | F3's gate (#376), set to `2026-11-06T21:00:00Z` at the flip. Part 2 deleted the gate with the dispatch path, so nothing reads it; the operator removes the line **after** part 2 is live (before, a restart without it double-sent): [MIGRATIONS.md](MIGRATIONS.md) → *Restart-before-migrate — one-time, `e2eab993d615`* |
-
-The notifier pair was **renamed** rather than retired in the same pass:
-`NOTIFIER_BASE_URL` → `WATCHER_NOTIFIER_BASE_URL`, `NOTIFIER_API_KEY` →
-`WATCHER_NOTIFIER_API_KEY`, bringing them under the service-prefix rule that
-`WATCHER_BUS_REDIS_URL` already followed. A bare `NOTIFIER_*` name in a shell
-today resolves to nothing.
+| `WATCHER_NOTIFIER_BASE_URL`, `WATCHER_NOTIFIER_API_KEY` | The production notifier credential (renamed from bare `NOTIFIER_*` under #277). #278 moved it out of this file into `/etc/watcher/notifier.env`, `600 root:root`, loaded by the unit alone and last, because every agent shell exports this one and notifier's audit (notifier#22) found ~1289 watcher fixture notifications delivered on it. #379 deleted the client and dropped the file from the unit; the operator shreds it, with no copy, once the new unit is live, and CannObserv/notifier#118 revokes the key |
+| `WATCHER_NOTIFIER_ENABLED` | The unit-only opt-in for the notifier client (#277); with #278 a URL without it, or it without a URL, aborted startup. Went from `deploy/watcher.service` with the client (#379) |
+| `WATCHER_DEV_NOTIFIER_BASE_URL`, `WATCHER_DEV_NOTIFIER_API_KEY` | `scripts/dev_server.sh`'s scratch notifier (notifier's development tenant on `:9001`, #278). The operator removes them from the repo `.env` after #379 is live |
+| `WATCHER_PUBLIC_BASE_URL`, `WATCHER_DEV_PUBLIC_BASE_URL` | The dashboard base notification links were built from (#296 D6). No link is built any more (#379); the operator removes the production line after #379 is live |
+| `WATCHER_DIFF_MAX_INPUT_BYTES` | The change diff's input cap (#222). The diff went with the notification renderer (#379). Never set in production |
+| `GCS_BLOB_CREDENTIALS` | The `co-gcs-blob-reader` key (`/etc/watcher/co-gcs-blob-reader.json`) the change diff read the processor's stored texts with (#275, #350). `src/core/blobs.py` went with the diff (#379); the operator removes the line and the key file after #379 is live |
 
 **Watcher's Redis use.** The broker is its own VM, operated from
 CannObserv/broker (archiver#193 D6; archiver#109 before that). Watcher published

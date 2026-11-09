@@ -2,17 +2,16 @@
 
 Monitors web resources for change. Each Watched Item is a URL that Archiver registers;
 Watcher has it fetched on a schedule (Replicator performs the fetch), fingerprints the
-content, reports each change on the bus, and notifies any configured targets through
-Notifier.
+content and reports each change on the bus; Archiver notifies from those reports.
 
 ## Architecture
 
 The **`WatchedItem` is the single monitored entity** (#191): one row = one URL = one
 fingerprint = one change signal. It owns its `effective_url`, `source_specs`, schedule
 (the cadence Archiver announces, else a 1d system default — #375), `domain_name` /
-`domain_suspended`, health/timestamps, and its notification surface. A periodic
+`domain_suspended`, and health/timestamps. A periodic
 `schedule_tick` enqueues `check_watched_item` for each due item; the processor extracts and
-fingerprints, and Watcher writes a `ChangeRevision` and dispatches `CHANGE_DETECTED` once per item.
+fingerprints, and Watcher writes a `ChangeRevision` and stages one `change_detected` fact per change.
 
 Canonical content provenance (InfoItem / InfoSource / SourceRevision) lives in the sibling
 **Archiver service** (separate repo, its own VM), consumed over the bus via `info.registry`
@@ -24,9 +23,8 @@ Archiver provisions it. Every detected change is reported to Archiver as a
 latest revision is re-announced when a full fetch renews the blob reference behind it
 (#293), with a local `pending_archiver_sync` outbox + drain worker guaranteeing delivery
 across broker outages. Its change, error and recovery edges go to Archiver as facts on
-`info.watch-events` through a second outbox (#369; [docs/WATCH-EVENTS.md](docs/WATCH-EVENTS.md)).
-Notifications dispatch through the sibling **Notifier service** via the
-`NotifierClient` SDK.
+`info.watch-events` through a second outbox (#369; [docs/WATCH-EVENTS.md](docs/WATCH-EVENTS.md)),
+and Archiver notifies from those; Watcher sends no notification (#376, #379).
 
 Operate WatchedItems at `/api/v1/watched-items` (API) and `/watched-items` (dashboard).
 Full conventions: [AGENTS.md](AGENTS.md). Operator install: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md);

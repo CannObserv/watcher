@@ -128,10 +128,10 @@ class TestBlockingReadDiscovery:
             pathlib.Path(__file__).resolve().parents[2]
             / "src"
             / "core"
-            / "notifications"
+            / "scheduling"
             / "_cr_probe_block_ms.py"
         )
-        module = "src.core.notifications._cr_probe_block_ms"
+        module = "src.core.scheduling._cr_probe_block_ms"
         planted.write_text("BLOCK_MS = 99_000\n", encoding="utf-8")
         previous = sys.dont_write_bytecode
         sys.dont_write_bytecode = True

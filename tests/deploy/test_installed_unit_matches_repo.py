@@ -98,8 +98,8 @@ def test_repo_unit_loads_no_env_file_from_the_checkout() -> None:
 def test_repo_unit_orders_after_tailscaled_without_depending_on_it() -> None:
     """#296: start after the tailnet agent, but never be bound to it.
 
-    Every peer this service talks to — the broker, notifier — is a MagicDNS name
-    on the tailnet, so starting before ``tailscaled`` only guarantees a burst of
+    Every peer this service talks to — the broker — is a MagicDNS name on the
+    tailnet, so starting before ``tailscaled`` only guarantees a burst of
     connection failures. Ordering is all that is wanted, and it is all that is
     safe: ``Requires=``/``BindsTo=`` would stop the dashboard whenever a
     Tailscale upgrade restarts the agent, and ``Wants=`` would make this unit
@@ -161,26 +161,6 @@ def test_repo_unit_declares_the_bus_opt_in() -> None:
     """
     text = REPO_UNIT.read_text()
     assert "Environment=WATCHER_BUS_ENABLED=1" in text
-
-
-def test_repo_unit_declares_the_notifier_opt_in() -> None:
-    """#277: the notifier gate is unit-only, for the same reason as the other two.
-
-    ``WATCHER_NOTIFIER_BASE_URL`` and ``WATCHER_NOTIFIER_API_KEY`` lived in
-    ``/etc/watcher/.env`` when this flag was added, so every process that
-    sourced it inherited the production tenant's credentials. The flag is what
-    separated the service from a pytest run, a hand-run dev server, a script or
-    a REPL — and it only works if no env file carries it. #278 moved the pair
-    to ``/etc/watcher/notifier.env`` so nothing but the unit holds it either;
-    the flag stays, because it is what the app checks
-    (``tests/deploy/test_notifier_credential_is_unit_only.py`` owns the move).
-
-    Without this line the service starts and refuses to notify,
-    which is why ``src/core/notifier_client`` also makes the URL-without-flag
-    combination a startup failure rather than a silent one.
-    """
-    text = REPO_UNIT.read_text()
-    assert "Environment=WATCHER_NOTIFIER_ENABLED=1" in text
 
 
 def test_repo_unit_treats_sigterm_exit_as_success() -> None:

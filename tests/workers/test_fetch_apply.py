@@ -32,7 +32,6 @@ from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.pending_watch_event import PendingWatchEvent
 from src.core.models.process_command import ProcessCommand, ProcessCommandStatus
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
-from src.core.notifications.events import WatchEventType
 from src.core.validators import CONDITIONAL_GET_ENV, validator_source_key
 from src.workers.fetch_commands import (
     apply_fetch_blob,
@@ -823,7 +822,7 @@ class TestNoDispatch:
                 visibility=VISIBILITY_GLOBAL,
                 remote_channel_id=str(ULID()),
                 channel_hint="json",
-                events=[e.value for e in WatchEventType],
+                events=["change_detected", "watch_error", "watch_recovered"],
             )
         )
         await db_session.flush()

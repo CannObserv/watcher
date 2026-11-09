@@ -268,13 +268,13 @@ def test_a_command_substitution_in_an_env_file_is_never_run(tmp_path: Path, shap
     value = shape.format(m=marker)
     script = make_repo(tmp_path / "repo")
     (tmp_path / "repo" / ".env").write_text(
-        f"TEST_DATABASE_URL={TEST_URL}\nWATCHER_DEV_PUBLIC_BASE_URL={value}\n"
+        f"TEST_DATABASE_URL={TEST_URL}\nWATCHER_DEV_PORT={value}\n"
     )
 
     result = run_loading(script, tmp_path / "no-system.env", cwd=tmp_path / "repo")
     assert result.returncode == 0, result.stderr
     assert not marker.exists()
-    assert f"WATCHER_PUBLIC_BASE_URL={value}" in result.stdout.splitlines()
+    assert f"PORT={value}" in result.stdout.splitlines()
 
 
 def test_a_cwd_outside_the_repo_still_loads_the_repos_env(tmp_path: Path) -> None:
@@ -328,7 +328,6 @@ def test_no_loaded_value_reaches_stdout_or_stderr(tmp_path: Path) -> None:
         f"DATABASE_URL=postgresql+asyncpg://watcher_app:{sys_secret}@localhost:5432/watcher\n"
         f"WATCHER_MIGRATION_DATABASE_URL=postgresql://watcher:{sys_secret}@localhost/watcher\n"
         f"WATCHER_BUS_REDIS_URL=redis://watcher:{sys_secret}@broker:6379/0\n"
-        f"WATCHER_PUBLIC_BASE_URL=https://{sys_secret}.invalid\n"
     )
     script = make_repo(tmp_path / "repo")
     (tmp_path / "repo" / ".env").write_text(
@@ -639,118 +638,6 @@ def test_an_inherited_bus_opt_in_does_not_survive_without_a_dev_bus() -> None:
     assert result.returncode == 0, result.stderr
     assert "WATCHER_BUS_REDIS_URL=(cleared)" in result.stdout
     assert "WATCHER_BUS_ENABLED=(cleared)" in result.stdout
-
-
-def test_inherited_production_notifier_is_cleared() -> None:
-    """#277: a dev server must not notify the production tenant.
-
-    /etc/watcher/.env carried WATCHER_NOTIFIER_BASE_URL and WATCHER_NOTIFIER_API_KEY until
-    #278 moved them to a unit-only file; the clearing stays regardless, and this
-    script loads it. The dev server runs the embedded worker against a real
-    check pipeline, so an inherited key means real deliveries to real
-    subscribers — the #233 hazard, notifier edition, and the only one of the
-    three whose stray output cannot be recalled.
-    """
-    result = run(
-        {
-            "TEST_DATABASE_URL": TEST_URL,
-            "WATCHER_NOTIFIER_BASE_URL": "http://notifier.invalid:9000",
-            "WATCHER_NOTIFIER_API_KEY": "nk_production",
-        }
-    )
-    assert result.returncode == 0, result.stderr
-    assert "WATCHER_NOTIFIER_BASE_URL=(cleared)" in result.stdout
-    assert "WATCHER_NOTIFIER_ENABLED=(cleared)" in result.stdout
-
-
-def test_explicit_dev_notifier_is_forwarded_and_opts_in() -> None:
-    """A scratch notifier opts the sanctioned launch path in, as the bus does.
-
-    The flag is otherwise unit-only, so without this the dev server would set a
-    dev notifier URL and then refuse to start on the very gate that exists to
-    stop *unsanctioned* processes.
-    """
-    result = run(
-        {
-            "TEST_DATABASE_URL": TEST_URL,
-            "WATCHER_NOTIFIER_BASE_URL": "http://notifier.invalid:9000",
-            "WATCHER_NOTIFIER_API_KEY": "nk_production",
-            "WATCHER_DEV_NOTIFIER_BASE_URL": "http://notifier.invalid:9001",
-            "WATCHER_DEV_NOTIFIER_API_KEY": "nk_dev",
-        }
-    )
-    assert result.returncode == 0, result.stderr
-    assert "WATCHER_NOTIFIER_BASE_URL=http://notifier.invalid:9001" in result.stdout
-    assert "WATCHER_NOTIFIER_ENABLED=1" in result.stdout
-
-
-def test_dev_notifier_url_without_a_dev_key_refuses() -> None:
-    """Half a scratch notifier is a misconfiguration, not a mode.
-
-    Falling back to the inherited WATCHER_NOTIFIER_API_KEY would point a dev base URL
-    at production credentials — or, if the dev notifier ignores the key,
-    silently authorise the wrong tenant. Neither is worth guessing at, and the
-    pair is two lines in .env.
-    """
-    result = run(
-        {
-            "TEST_DATABASE_URL": TEST_URL,
-            "WATCHER_NOTIFIER_API_KEY": "nk_production",
-            "WATCHER_DEV_NOTIFIER_BASE_URL": "http://notifier.invalid:9001",
-        }
-    )
-    assert result.returncode != 0
-    assert "WATCHER_DEV_NOTIFIER_API_KEY" in result.stderr
-
-
-def test_an_inherited_notifier_opt_in_does_not_survive() -> None:
-    """A flag leaked into an env file must not re-arm the production tenant.
-
-    The unit is the only sanctioned home for it, but this script loads
-    /etc/watcher/.env and the repo .env — so it clears what it did not set.
-    """
-    result = run(
-        {
-            "TEST_DATABASE_URL": TEST_URL,
-            "WATCHER_NOTIFIER_BASE_URL": "http://notifier.invalid:9000",
-            "WATCHER_NOTIFIER_API_KEY": "nk_production",
-            "WATCHER_NOTIFIER_ENABLED": "1",
-        }
-    )
-    assert result.returncode == 0, result.stderr
-    assert "WATCHER_NOTIFIER_BASE_URL=(cleared)" in result.stdout
-    assert "WATCHER_NOTIFIER_ENABLED=(cleared)" in result.stdout
-
-
-def test_inherited_public_base_url_is_cleared() -> None:
-    """#296 D6: a dev server's notifications must not link into production.
-
-    /etc/watcher/.env carries the production WATCHER_PUBLIC_BASE_URL, and the
-    dev server loads it. Inherited, every notification the dev worker sends
-    would point readers at the live dashboard — at an item id that exists only
-    in the dev database. Cleared, links are omitted, which is honest.
-    """
-    result = run(
-        {
-            "TEST_DATABASE_URL": TEST_URL,
-            "WATCHER_PUBLIC_BASE_URL": "https://co-watcher.exe.xyz",
-        }
-    )
-    assert result.returncode == 0, result.stderr
-    assert "WATCHER_PUBLIC_BASE_URL=(cleared)" in result.stdout
-
-
-def test_explicit_dev_public_base_url_is_forwarded() -> None:
-    """WATCHER_DEV_PUBLIC_BASE_URL points dev links at the dev server itself."""
-    result = run(
-        {
-            "TEST_DATABASE_URL": TEST_URL,
-            "WATCHER_PUBLIC_BASE_URL": "https://co-watcher.exe.xyz",
-            "WATCHER_DEV_PUBLIC_BASE_URL": "https://co-watcher.exe.xyz:8001",
-        }
-    )
-    assert result.returncode == 0, result.stderr
-    assert "WATCHER_PUBLIC_BASE_URL=https://co-watcher.exe.xyz:8001" in result.stdout
 
 
 def test_report_never_prints_a_database_password() -> None:

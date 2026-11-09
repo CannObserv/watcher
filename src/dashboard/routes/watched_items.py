@@ -40,11 +40,8 @@ from src.core.watched_items import (
 from src.dashboard.context import (
     WATCHED_ITEM_EVENT_CHOICES,
     build_schedule_map,
-    get_domain_default_templates,
-    get_global_default_templates,
     get_watched_item_detail,
     get_watched_item_list,
-    get_watched_item_notifications,
     get_watched_item_profiles,
     get_watched_items_total_count,
     unacknowledged_spec_change,
@@ -271,9 +268,6 @@ async def watched_item_detail_page(
             request, "pages/404.html", {"request": request}, status_code=404
         )
 
-    item_templates = await get_watched_item_notifications(session, wi.id)
-    global_templates = await get_global_default_templates(session)
-    domain_templates = await get_domain_default_templates(session, wi.domain_name)
     profiles = await get_watched_item_profiles(session, wi.id)
     # #274: the registry re-announced the specs and nobody has acknowledged it.
     spec_change_at = await unacknowledged_spec_change(session, wi)
@@ -301,9 +295,6 @@ async def watched_item_detail_page(
         "watched_item": wi,
         "flash": None,
         "field_contexts": field_contexts,
-        "templates": item_templates,
-        "global_templates": global_templates,
-        "domain_templates": domain_templates,
         "profiles": profiles,
         "spec_change_at": spec_change_at,
         # Recent Activity chip-filter context (table context — incl.

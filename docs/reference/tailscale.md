@@ -1,6 +1,6 @@
 # Tailscale — this node
 
-Watcher reaches the broker, the notifier and co-status over the tailnet, not over the
+Watcher reaches the broker and co-status over the tailnet, not over the
 public internet, so the node's identity is infrastructure rather than
 convenience. This is the reference for it (#296 step 25).
 
@@ -24,7 +24,7 @@ overrides the prefix — but it is never *just* a rename: set that variable in t
 same change, or the next nightly lands in the wrong timeline.
 
 The exe.dev proxy is a separate path: `https://co-watcher.exe.xyz` is the public
-dashboard (`WATCHER_PUBLIC_BASE_URL`), and from *inside* the VM that name
+dashboard, and from *inside* the VM that name
 resolves to the VM's own address and skips the proxy — so a proxy check has to
 come from outside.
 
@@ -41,12 +41,10 @@ The node name `watcher-lax` it carried at the end belongs to nothing.
 | Peer | Address | Used for |
 |---|---|---|
 | `broker` | `100.97.91.19` | the Redis bus — `WATCHER_BUS_REDIS_URL`, five streams out, four in |
-| `notifier` | `100.98.9.17` | `http://notifier:9000` (prod) and `:9001` (dev tenant) |
 | `status` | `100.88.216.92` | `http://status:9000` — co-status, the backup's dead-man check-in (#330); the ACL grants `tag:watcher → tag:status:9000` only |
 
-Notifier binds its **tailnet address alone**, so a watcher off the tailnet
-cannot reach it from loopback or from exe.dev's internal network — it starts
-clean and fails every dispatch at call time.
+Watcher held a notifier client until #379 (`notifier`, `100.98.9.17`, ports
+`9000`/`9001`); it no longer talks to notifier at all.
 
 ## The cold-boot race (R4)
 
@@ -92,7 +90,7 @@ the temporary one-way edge used to copy the workspace was removed on
 Mint a key that is `tag:watcher` only, pre-approved, tagged, and **not**
 ephemeral — an ephemeral node disappears from the tailnet on a clean shutdown
 and takes its ACL grants with it. Then confirm, in this order: `tailscale
-status` shows the tag; `curl http://notifier:9000/health` answers; `curl
+status` shows the tag; `curl
 http://status:9000/health` answers with `environment` `production` — without it
 the backup's check-in fails and only co-status's missed-check-in alarm says so
 (#330); the bus PING in the service log succeeds on boot. Removing the VM does **not** remove its

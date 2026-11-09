@@ -6,19 +6,13 @@ start, and that they stop.
 """
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from src.core.bus import BUS_ENABLED_ENV, BUS_REDIS_URL_ENV, BusNotEnabled
-from src.core.notifier_client import (
-    WATCHER_NOTIFIER_BASE_URL_ENV,
-    WATCHER_NOTIFIER_ENABLED_ENV,
-    NotifierCredentialMissing,
-    NotifierNotEnabled,
-)
-from src.core.public_base_url import PUBLIC_BASE_URL_ENV, PublicBaseUrlInvalid
 
 # Named here, not imported: the module that read it is gone (#376 part 2).
 _NOTIFY_CUTOVER_AT_ENV = "WATCHER_NOTIFY_CUTOVER_AT"
@@ -205,117 +199,6 @@ async def test_lifespan_accepts_a_bus_url_with_the_opt_in(monkeypatch):
             pass
 
 
-@pytest.mark.asyncio
-async def test_lifespan_refuses_a_notifier_url_without_the_opt_in(monkeypatch, caplog):
-    """#277: ``WATCHER_NOTIFIER_BASE_URL`` set and ``WATCHER_NOTIFIER_ENABLED`` absent aborts.
-
-    Third of the three startup gates, and the reason the loud half exists here
-    rather than only in the client: a notifier URL held without the opt-in means
-    either a service that lost its flag — which would otherwise stop notifying
-    with nothing but a per-dispatch error to say so — or a process that should
-    never have had the URL. Both are misconfigurations, so neither gets to serve.
-
-    Deliberately sets the variable ``tests/conftest.py`` clears at import.
-    Without that, nothing in the suite reaches this branch and the flag's first
-    exercise would be a production restart.
-    """
-    monkeypatch.setenv(WATCHER_NOTIFIER_BASE_URL_ENV, "http://notifier.invalid:9000")
-    monkeypatch.delenv(WATCHER_NOTIFIER_ENABLED_ENV, raising=False)
-
-    with (
-        patch("src.api.main.get_app") as get_app,
-        patch("src.api.main.get_shared_bus_client") as get_client,
-    ):
-        from src.api.main import lifespan
-
-        with caplog.at_level("CRITICAL", logger="src.api.main"):
-            with pytest.raises(NotifierNotEnabled):
-                async with lifespan(MagicMock()):
-                    pass
-
-    # Same ordering guarantee as the two gates beside it: the refusal precedes
-    # every resource, so a refused process never joins the consumer group or
-    # opens the worker.
-    get_client.assert_not_called()
-    get_app.assert_not_called()
-    assert any(WATCHER_NOTIFIER_ENABLED_ENV in r.getMessage() for r in caplog.records)
-
-
-@pytest.mark.asyncio
-async def test_lifespan_refuses_the_notifier_flag_without_a_url(monkeypatch, caplog):
-    """#278: the mirror image — opted in, with no notifier to reach.
-
-    Only ``deploy/watcher.service`` sets the flag, and since #278 the credential
-    it goes with lives in ``/etc/watcher/notifier.env`` — a separate file that
-    unit alone loads. So this combination means the file did not load, and the
-    service would come up green and then fail every dispatch one at a time.
-
-    The ``caplog`` assertion is the point of this test, not decoration. The
-    refusal happens whether or not ``src.api.main`` knows the exception type;
-    what breaks silently is the ``logger.critical`` line, whose whole purpose
-    (per the handler's own comment) is to keep the actionable text out of a
-    lifespan traceback in journald. An operator restarting a service whose
-    credential file vanished has exactly one place to look, and this is it.
-    (CR-2: the exception was missing from the handler's tuple. The #277 test
-    above asserts its own log record the same way — what was missing was a test
-    for *this* exception at all, not the habit of checking.)
-    """
-    monkeypatch.delenv(WATCHER_NOTIFIER_BASE_URL_ENV, raising=False)
-    monkeypatch.setenv(WATCHER_NOTIFIER_ENABLED_ENV, "1")
-
-    with (
-        patch("src.api.main.get_app") as get_app,
-        patch("src.api.main.get_shared_bus_client") as get_client,
-    ):
-        from src.api.main import lifespan
-
-        with caplog.at_level("CRITICAL", logger="src.api.main"):
-            with pytest.raises(NotifierCredentialMissing):
-                async with lifespan(MagicMock()):
-                    pass
-
-    assert any(
-        record.levelname == "CRITICAL" and "Refusing to start" in record.getMessage()
-        for record in caplog.records
-    ), "the refusal was not logged — src.api.main's handler does not catch this exception"
-    get_client.assert_not_called()
-    get_app.assert_not_called()
-    assert any(WATCHER_NOTIFIER_BASE_URL_ENV in r.getMessage() for r in caplog.records)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("value", ["co-watcher.exe.xyz", "https://[co-watcher.exe.xyz"])
-async def test_lifespan_refuses_a_malformed_public_base_url(monkeypatch, caplog, value):
-    """#296 D6: a malformed base is a typo, and it refuses the start.
-
-    Unset is allowed (links are omitted, and the check warns), but a value that
-    is set and wrong would otherwise ship every notification with its dashboard
-    link silently dropped. Logged CRITICAL for the same reason as the refusals
-    above: the handler's line is what an operator reads in journald — including
-    for the value ``urlsplit`` itself raises on, which once escaped as a bare
-    ``ValueError`` past the except clause.
-    """
-    monkeypatch.setenv(PUBLIC_BASE_URL_ENV, value)
-
-    with (
-        patch("src.api.main.get_app") as get_app,
-        patch("src.api.main.get_shared_bus_client") as get_client,
-    ):
-        from src.api.main import lifespan
-
-        with caplog.at_level("CRITICAL", logger="src.api.main"):
-            with pytest.raises(PublicBaseUrlInvalid):
-                async with lifespan(MagicMock()):
-                    pass
-
-    assert any(
-        record.levelname == "CRITICAL" and PUBLIC_BASE_URL_ENV in record.getMessage()
-        for record in caplog.records
-    )
-    get_client.assert_not_called()
-    get_app.assert_not_called()
-
-
 def _idle_proc_app():
     fake_proc_app = MagicMock()
     fake_proc_app.open_async = AsyncMock()
@@ -353,6 +236,48 @@ async def test_a_leftover_notify_cutover_line_is_ignored(monkeypatch, caplog, va
                 pass
 
     assert not [r for r in caplog.records if "notify cutover" in r.getMessage()]
+
+
+# Named here, not imported: #379 deleted every module that read them. The
+# values are fixtures, never a real host or key.
+_LEFTOVER_NOTIFICATION_SETTINGS = (
+    {"WATCHER_NOTIFIER_BASE_URL": "http://notifier.invalid:9000"},
+    {"WATCHER_NOTIFIER_ENABLED": "1"},
+    {"WATCHER_NOTIFIER_BASE_URL": "http://notifier.invalid:9000", "WATCHER_NOTIFIER_API_KEY": "k"},
+    {"WATCHER_PUBLIC_BASE_URL": "not a url"},
+    {"WATCHER_DIFF_MAX_INPUT_BYTES": "-1"},
+    {"GCS_BLOB_CREDENTIALS": "/nonexistent/key.json"},
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "settings",
+    _LEFTOVER_NOTIFICATION_SETTINGS,
+    ids=["url-without-flag", "flag-without-url", "url-key-no-flag", "bad-base", "diff", "gcs"],
+)
+async def test_leftover_notification_settings_are_ignored(monkeypatch, caplog, settings):
+    """#379: the notifier gates (#277, #278), the public-base check (#296 D6) and
+    the diff's settings went with the subsystem. Until the operator installs the
+    new unit and clears ``/etc/watcher/.env``, the service may still be handed
+    any of them, in combinations the old lifespan refused; each now starts the
+    process, and nothing names them."""
+    for name, value in settings.items():
+        monkeypatch.setenv(name, value)
+
+    with (
+        patch("src.api.main.get_app", return_value=_idle_proc_app()),
+        patch("src.api.main.get_shared_bus_client", return_value=None),
+        patch("src.api.main.aclose_shared_bus_client", AsyncMock()),
+    ):
+        from src.api.main import app
+
+        with caplog.at_level("INFO"):
+            async with app.router.lifespan_context(app):
+                pass
+
+    assert not [r for r in caplog.records if r.levelno >= logging.CRITICAL]
+    assert not [r for r in caplog.records if any(name in r.getMessage() for name in settings)]
 
 
 class TestBusReachabilityProbe:

@@ -44,7 +44,7 @@ exactly five columns — ``archiver_info_source_id``, ``effective_url``,
 moves. Everything else is Watcher's and survives: health, timings,
 ``domain_suspended``, ``archived_at``, ``throttle_floor_interval`` and
 ``default_schedule_config`` (both inert since #375), media type, tags,
-notification config, audit rows.
+notification templates (inert since #379), audit rows.
 
 *No DLQ, and no dead-letter path.* An undecodable frame is logged and skipped
 with ``seek``; there is no group here, so there is no ack to skip past one with,

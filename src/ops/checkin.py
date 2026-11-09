@@ -19,7 +19,7 @@ made it a constant so a one-character port typo could not point a dead-man's
 switch at notifier_dev (``:9001``, whose ``/health`` is byte-identical). This
 repo's rule wins in this repo: a service URL in ``src/`` is a real connection
 target, so a literal is the defect whatever host it names
-(``tests/test_notifier_isolation.py``, #280). And the typo is not silent: on
+(``tests/test_no_resolvable_service_hosts.py``, #280). And the typo is not silent: on
 notifier a production-marked key sent to ``:9001`` was a **401** (notifier#56),
 and co-status's ``:9001`` does not answer from co-watcher at all. Either way
 no check-in lands, and the monitor alarms.
@@ -34,8 +34,7 @@ is the unit's ``checkin-key`` credential, which systemd reads from the
 root-only ``/etc/watcher/backup-checkin.key`` and hands the run as a private
 file under ``$CREDENTIALS_DIRECTORY``. So it is in no process environment —
 not the job's, not a child's, not ``/proc/<pid>/environ`` — and the variable
-it once was is not read at all. ``/etc/watcher/notifier.env`` stays
-``watcher.service``'s and nothing else's (#278).
+it once was is not read at all.
 """
 
 import re

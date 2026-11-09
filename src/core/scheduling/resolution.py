@@ -24,10 +24,8 @@ re-export (#376).
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    # Annotation only. ``src.core.utils`` reads the resolved cadence for
-    # ``check_interval`` and the notification renderer imports ``utils``, so a
-    # runtime model import here would pull the store side into the renderer
-    # (``tests/core/notifications/test_diff_layering.py``, #222 CR 2).
+    # Annotation only: this module needs no model at runtime. The layering
+    # reason it once had (#222 CR 2) went with the notification renderer (#379).
     from src.core.models.watched_item import WatchedItem
 
 SYSTEM_DEFAULT_SCHEDULE_CONFIG: dict = {"interval": "1d"}

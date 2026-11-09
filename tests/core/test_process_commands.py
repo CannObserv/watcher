@@ -23,7 +23,6 @@ from sqlalchemy import text
 from src.core.fetch_commands import create_fetch_command
 from src.core.models.fetch_command import FetchCommand
 from src.core.models.process_command import ProcessCommand, ProcessCommandStatus
-from src.core.notifications.diff_loader import stored_text_location
 from src.core.process_commands import (
     DEFAULT_PROCESS_COMMAND_HARD_LIMIT_SECONDS,
     DEFAULT_PROCESS_COMMAND_TIMEOUT_SECONDS,
@@ -39,6 +38,7 @@ from src.core.process_commands import (
     reissue_process_command,
     select_pending_process_publish,
 )
+from src.core.stored_text import stored_text_location
 from tests.conftest import make_watched_item
 
 _integration = pytest.mark.integration
@@ -310,7 +310,7 @@ class TestSchema:
         }
         assert not columns & shadow
 
-    async def test_the_diff_lookup_has_its_partial_index(self, db_session):
+    async def test_the_stored_text_lookup_has_its_partial_index(self, db_session):
         """#345: ``stored_text_location`` finds a text by ``output_digest``.
 
         Partial on the lookup's own predicate, so the index holds only rows it

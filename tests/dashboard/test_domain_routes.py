@@ -130,6 +130,19 @@ class TestDomainDetail:
         response = await client.get("/domains/nonexistent.com")
         assert response.status_code == 404
 
+    async def test_detail_page_has_no_notification_defaults(self, client, db_session):
+        """#379: no Notification Defaults section, and its routes are gone."""
+        db_session.add(Domain(name="nodefaults.com"))
+        await db_session.flush()
+        body = (await client.get("/domains/nodefaults.com")).content
+        assert b"Notification Defaults" not in body
+        assert b"/domain-templates" not in body
+        for path in (
+            "/domains/nodefaults.com/domain-templates",
+            "/domains/nodefaults.com/notifications/new",
+        ):
+            assert (await client.get(path)).status_code == 404, path
+
     async def test_detail_page_shows_config_fields(self, client, db_session):
         db_session.add(Domain(name="config.com", min_interval=3.5))
         await db_session.flush()

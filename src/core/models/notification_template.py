@@ -1,4 +1,10 @@
-"""Notification template model — one scoped table for all dispatch sources (#200).
+"""Notification template model — **inert since #379**, kept for #380.
+
+Nothing reads or writes these rows any more: Archiver notifies (F3, #376) and
+#379 deleted the subsystem that rendered and sent them. The model stays so the
+``notification_templates`` table and ``alembic check`` agree, and so
+``src/ops/export_for_archiver.py`` can still re-export it; #380 drops the table
+and deletes this model in one migration. What follows is the design it had.
 
 Post-#200 the five legacy dispatch sources (global flag, ``domain_nc_refs``,
 ``watch_nc_refs``, ``watched_item_notification_templates``,

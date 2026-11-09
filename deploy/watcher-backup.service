@@ -33,8 +33,7 @@ Environment=GOOGLE_APPLICATION_CREDENTIALS=%d/gcs
 
 # WATCHER_BACKUP_BUCKET, and the check-in's base URL and monitor id — no secret.
 # NOT /etc/watcher/.env: that file carries the database URLs and the bus URL,
-# none of which this unit needs and all of which it must not have. And never
-# /etc/watcher/notifier.env, which is watcher.service's alone (#278). No leading
+# none of which this unit needs and all of which it must not have. No leading
 # '-': a backup unit without its configuration must fail loudly.
 EnvironmentFile=/etc/watcher/backup.env
 

@@ -12,12 +12,6 @@ from ulid import ULID
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.domain import Domain
-from src.core.models.notification_template import (
-    VISIBILITY_DOMAIN,
-    VISIBILITY_GLOBAL,
-    VISIBILITY_WATCHED_ITEM,
-    NotificationTemplate,
-)
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watched_item import WatchedItem
 from src.core.scheduling.schedule import ScheduleDisplay, resolve_schedule_display
@@ -280,21 +274,6 @@ async def get_watched_item_profiles(
     return list(result.scalars().all())
 
 
-async def get_watched_item_notifications(
-    session: AsyncSession, watched_item_id: ULID
-) -> list[NotificationTemplate]:
-    """Fetch the item-scoped notification templates for a WatchedItem (#200)."""
-    result = await session.execute(
-        select(NotificationTemplate)
-        .where(
-            NotificationTemplate.visibility == VISIBILITY_WATCHED_ITEM,
-            NotificationTemplate.watched_item_id == watched_item_id,
-        )
-        .order_by(NotificationTemplate.created_at)
-    )
-    return list(result.scalars().all())
-
-
 def _apply_domain_filters(stmt, *, search: str | None = None, status: str | None = None):
     """Apply search and status filters to a domain query."""
     if search:
@@ -476,44 +455,6 @@ async def get_watched_item_detail(
     except (ValueError, TypeError):
         return None
     return await session.get(WatchedItem, wi_ulid)
-
-
-async def get_global_default_templates(
-    session: AsyncSession,
-) -> list[NotificationTemplate]:
-    """Global templates (``visibility='global'``) — they fire for every item (#200).
-
-    Not filtered by ``is_active``, so an operator can see an inactive global
-    (status badge shows it won't fire). Dispatch additionally filters on
-    ``is_active`` and per-event membership.
-    """
-    result = await session.execute(
-        select(NotificationTemplate)
-        .where(NotificationTemplate.visibility == VISIBILITY_GLOBAL)
-        .order_by(NotificationTemplate.title)
-    )
-    return list(result.scalars().all())
-
-
-async def get_domain_default_templates(
-    session: AsyncSession, domain_name: str | None
-) -> list[NotificationTemplate]:
-    """Domain templates (``visibility='domain'``) for the item's domain (#200).
-
-    These fire at dispatch for items whose ``domain_name`` matches. Returns an
-    empty list when the item has no domain.
-    """
-    if not domain_name:
-        return []
-    result = await session.execute(
-        select(NotificationTemplate)
-        .where(
-            NotificationTemplate.visibility == VISIBILITY_DOMAIN,
-            NotificationTemplate.domain_name == domain_name,
-        )
-        .order_by(NotificationTemplate.title)
-    )
-    return list(result.scalars().all())
 
 
 def build_schedule_map(

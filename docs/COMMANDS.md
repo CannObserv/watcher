@@ -32,8 +32,7 @@ Two env files, loaded in order:
 source scripts/load-env.sh
 ```
 
-The systemd service loads **only** `/etc/watcher/.env`, plus its unit-only
-`notifier.env` — never the repo `.env`, whose agent tokens are no production
+The systemd service loads **only** `/etc/watcher/.env` — never the repo `.env`, whose agent tokens are no production
 configuration (#296 D5; `deploy/watcher.service`, [ENVIRONMENT.md](ENVIRONMENT.md)).
 A production setting put in the repo `.env` is one the service never sees.
 
@@ -102,8 +101,7 @@ bash scripts/dev_server.sh
 
 # Knobs: WATCHER_DEV_PORT (default 8001; 8000 refused — it belongs to
 # systemd), WATCHER_DEV_DATABASE_URL, WATCHER_DEV_SKIP_MIGRATE=1,
-# WATCHER_DEV_BUS_REDIS_URL, WATCHER_DEV_NOTIFIER_BASE_URL +
-# WATCHER_DEV_NOTIFIER_API_KEY (both or neither)
+# WATCHER_DEV_BUS_REDIS_URL
 ```
 
 Never launch uvicorn by hand with the prod env loaded — `/etc/watcher/.env`
@@ -129,13 +127,10 @@ missing — `schema --apply` is not idempotent. Without them the embedded
 worker's `register_worker` fails at boot.
 
 The database is not the only production resource an env file hands out. The
-script clears an inherited `WATCHER_BUS_REDIS_URL` (#262) and an inherited
-`WATCHER_NOTIFIER_BASE_URL`/`WATCHER_NOTIFIER_API_KEY` (#277) unless a scratch replacement is
-named, because a dev server runs the embedded worker against a real check
-pipeline — so an inherited notifier key delivers real notifications to real
-subscribers as the production tenant, and succeeds, leaving no error behind.
-Each resource has a unit-only opt-in flag; a URL held without its flag aborts
-startup rather than going quiet. See
+script clears an inherited `WATCHER_BUS_REDIS_URL` (#262) unless a scratch
+replacement is named, because a dev server runs the embedded worker against a
+real check pipeline. The bus has a unit-only opt-in flag; a URL held without it
+aborts startup rather than going quiet. See
 [ENVIRONMENT.md](ENVIRONMENT.md) → *Environment Variables*.
 
 Both sanctioned launch paths (`scripts/dev_server.sh` and the systemd
@@ -177,7 +172,7 @@ uv run pytest tests/path/to/test_file.py --no-cov
 # Run integration tests (need TEST_DATABASE_URL, nothing external)
 uv run pytest -m integration
 
-# Run live tests (real GCS; need GCS_BLOB_CREDENTIALS, skip without it)
+# Run live tests (a real external service; excluded from every gate)
 uv run pytest -m live
 ```
 
@@ -331,8 +326,9 @@ WATCHER_ALLOW_PRODUCTION_DB=1 .venv/bin/python -m src.ops.inflight --env-file /e
 
 Flipped at T = `2026-11-06T21:00:00Z`: Archiver live with T at 20:16:50Z,
 Watcher at 20:18:00Z, drained by 22:13Z, exports shredded. Part 2 deleted
-Watcher's dispatch path; Archiver sends every notification. The record is on
-#376 and #368; the one-time deploy order is [MIGRATIONS.md](MIGRATIONS.md) →
+Watcher's dispatch path; Archiver sends every notification, and #379 deleted
+the rest of Watcher's notification code. The record is on #376 and #368; the
+one-time deploy order is [MIGRATIONS.md](MIGRATIONS.md) →
 *Restart-before-migrate — one-time, `e2eab993d615`*.
 
 ## Tailwind CSS
@@ -401,8 +397,7 @@ job checks out a sibling repo — #254 removed the `archiver-client` path dep
 that `lint` and `migrations` needed, and #311 the `test` job's archiver alembic
 run. The four Python jobs authenticate **keyless via WIF**
 (`vars.GCP_WIF_PROVIDER` → `co-pypi-reader` SA), whose access token `uv sync`
-alone takes for the co-pypi index (#358); `notifier-client` installs as written, from
-its public HTTPS tag source — no URL rewrite (#284). The migrations job needs
+alone takes for the co-pypi index (#358). The migrations job needs
 nothing from archiver either — the #234 squash collapsed the pre-existing
 chain into a self-contained genesis baseline (`2addddea0b03`) that references
 no `information` schema, so `upgrade head` from empty is fully standalone (no

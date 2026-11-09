@@ -32,7 +32,7 @@ dependencies = [
     # Imported directly by the bus layer; docs/BUS-CONNECTION-POLICY.md was
     # measured on redis-py 7.4.1, so a major is ours to adopt, not co-core-aio's (#294).
     "redis>=7.4,<8",
-    "google-cloud-storage>=2,<4",
+    "google-cloud-storage>=3.17.1,<4",
     # src/ops/backup.py and restore.py import its exceptions; arrives via google-cloud-storage (#294).
     "google-api-core>=2.44.0,<3",
 ]

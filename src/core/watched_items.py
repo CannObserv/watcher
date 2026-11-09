@@ -2,8 +2,8 @@
 
 The API's lifecycle writers went with ``/api/v1`` (#378): pause and resume,
 the item cadence edit and their guards. The ``info.registry`` reconcile is
-now the only path that creates or edits an item; the break-glass domain
-suspension lives in ``src.core.domains``.
+now the only create path and no operator surface edits an item; the
+break-glass domain suspension lives in ``src.core.domains``.
 """
 
 from urllib.parse import urlsplit

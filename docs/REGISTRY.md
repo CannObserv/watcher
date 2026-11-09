@@ -1,6 +1,6 @@
 # Registry reconciliation
 
-How the `info.registry` announcements Archiver publishes become WatchedItems: what an announcement owns, what survives reconciliation, and the linkage lifecycle. Since #378 nothing local edits an item, so no local write is refused either. The entity itself is [WATCHED-ITEMS.md](WATCHED-ITEMS.md).
+How the `info.registry` announcements Archiver publishes become WatchedItems: what an announcement owns, what survives reconciliation, and the linkage lifecycle. Since #378 no operator surface in Watcher edits an item, so no local edit is refused either. The entity itself is [WATCHED-ITEMS.md](WATCHED-ITEMS.md).
 
 ## Registry reconciliation (#254)
 
@@ -77,7 +77,7 @@ the column.
 2026-08-13 cutover until #378 the API PATCH 409'd a toggle on a reconciled item
 (`applied_generation` set), naming Archiver as the authority — a control that
 silently reverts within the snapshot period is worse than a refusal that says
-where the control lives. Since #378 nothing local edits an item at all.
+where the control lives. Since #378 Watcher has no operator surface that edits an item.
 Item-level pause lives in Archiver's dashboard alone.
 
 **The snapshot cannot repair local drift.** The hourly republish carries the same
@@ -85,11 +85,11 @@ generation, which the `>` ordering guard ignores as stale — so a local write t
 announcement-owned column would diverge until the next *real* registry mutation,
 not the next snapshot. Until #378 the API refused one on every owned column of a
 reconciled item, and its restore cleared `archived_at` without re-activating;
-since #378 there is no local writer and no restore. Archiver's watch-active
+since #378 there is no local operator writer and no restore. Archiver's watch-active
 route writes and announces unconditionally, so pressing resume there propagates
 even when it already considers the item active. The Watcher-local fields (name,
-description, tags, item cadence, media type) lost their last editor with the API
-(#378); the columns are #380's. What remains legitimately Watcher's is
+description, tags, item cadence, the media-type override) lost their last
+operator editor with the API (#378); the columns are #380's. What remains legitimately Watcher's is
 *mechanism* — local backoff and `domain_suspended` as the host-level break-glass
 (the throttle floor was one until F2, #375). `archived_at` is never touched, so an `active: true` against an
 archived row reconciles the row's contents but no-ops on scheduling (`schedule_tick`

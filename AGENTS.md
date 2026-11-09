@@ -121,9 +121,9 @@ production.
 one URL = one fingerprint = one change signal. The user-facing noun is "Watched
 Item".
 
-**The `info.registry` reconcile is the only path that creates or edits an
-item** (#378); the registry owns cadence and active state, Watcher owns
-mechanism (#254). An announcement is authoritative for a named set of columns,
+**The `info.registry` reconcile is the only create path, and no operator
+surface edits an item** (#378); the registry owns cadence and active state,
+Watcher owns mechanism (#254). An announcement is authoritative for a named set of columns,
 and everything else survives reconciliation.
 
 **Empty extraction is a failure, not a change (#258)**, and **an unchanged

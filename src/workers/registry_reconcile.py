@@ -306,8 +306,8 @@ async def reconcile_announcement(session, payload: RegistryAnnouncementState) ->
         # "None" in the payload, an audit row belonging to no item.
         await session.flush()
         # No "before" to diff against — a create that also emitted a diff would
-        # report every column as changed. Parity with the API create path, which
-        # has always recorded a birth; without this, a registry-born item reads
+        # report every column as changed. Parity with the API create path (gone
+        # since #378), which always recorded a birth; without this, a registry-born item reads
         # in the Audit Log as having appeared from nowhere.
         audit(
             session,

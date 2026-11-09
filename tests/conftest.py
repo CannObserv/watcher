@@ -27,7 +27,6 @@ also dead-code-removed under #160.
 
 import os
 from collections.abc import AsyncGenerator
-from urllib.parse import urlparse
 
 import asyncpg
 import pytest
@@ -38,13 +37,12 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from ulid import ULID
 
-from src.api.deps import get_db_session, get_probe_fn, require_api_key
+from src.api.deps import get_db_session
 from src.core import db_safety
 from src.core.database import MIGRATION_DATABASE_URL_ENV
 from src.core.models import Base
 from src.core.models.domain import Domain
 from src.core.models.watched_item import WatchedItem
-from src.core.probe import ProbeResult
 from tests.network_guard import NetworkGuard, database_hosts, guards
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
@@ -109,22 +107,6 @@ os.environ.pop("PROCRASTINATE_DATABASE_URL", None)
 # At import, for the same reason as the two above, and never restored.
 os.environ.pop("WATCHER_BUS_REDIS_URL", None)
 os.environ.pop("WATCHER_DEV_BUS_REDIS_URL", None)
-
-
-def _make_mock_probe():
-    """Return a mock probe that resolves URLs without real HTTP calls."""
-
-    async def mock_probe(url: str) -> ProbeResult:
-        hostname = urlparse(url).hostname or ""
-        return ProbeResult(
-            effective_url=url,
-            effective_domain=hostname,
-            redirect_chain=[url],
-            status_code=200,
-            content_type="text/html",
-        )
-
-    return mock_probe
 
 
 @pytest.fixture(scope="session")
@@ -354,12 +336,7 @@ async def client(test_engine, db_session) -> AsyncGenerator[AsyncClient]:
     async def override_session() -> AsyncGenerator[AsyncSession]:
         yield db_session
 
-    async def override_probe_fn():
-        return _make_mock_probe()
-
     app.dependency_overrides[get_db_session] = override_session
-    app.dependency_overrides[get_probe_fn] = override_probe_fn
-    app.dependency_overrides[require_api_key] = lambda: "test-user-id"
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c

@@ -9,7 +9,7 @@ process keeps serving with every periodic task stopped, so the lifespan runs the
 worker through this loop rather than a bare task.
 
 Restarted in-process rather than by exiting for ``Restart=on-failure``: an exit
-drops in-flight API requests and consumer work to recover a component that
+drops in-flight probe requests and consumer work to recover a component that
 comes back on its own once the cluster does — the pool rides out the outage,
 only the listener gives up.
 

@@ -26,7 +26,7 @@ across broker outages. Its change, error and recovery edges go to Archiver as fa
 `info.watch-events` through a second outbox (#369; [docs/WATCH-EVENTS.md](docs/WATCH-EVENTS.md)),
 and Archiver notifies from those; Watcher sends no notification (#376, #379).
 
-Operate WatchedItems from Archiver's control plane; the `/api/v1/watched-items` API remains until #378.
+Operate WatchedItems from Archiver's control plane; Watcher serves only `/health` and `/ready` (#378).
 Full conventions: [AGENTS.md](AGENTS.md). Operator install: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md);
 env files and every variable: [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md).
 Fetch/revision path and the Archiver linkage: [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md).

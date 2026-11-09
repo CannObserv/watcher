@@ -70,16 +70,11 @@ tolerate all of them (reading the entry's native fields — `_SYSTEMD_UNIT`,
 `docs/DEPLOYMENT.md` is written to survive them — bare `jq` aborts on the first
 plain line and hides every record after it.
 
-## ULID format errors
+## ULIDs
 
-**ULID format errors:** Treatment depends on whether the ULID is a path parameter or a filter query parameter.
+**One spelling: canonical uppercase (#432).** Every parse of an id from outside — a bus message, a task argument — goes through `parse_canonical_ulid` ([src/core/ulids.py](../src/core/ulids.py)), which enforces `ULID_PATTERN` before `ULID.from_str`. The library is not the contract: python-ulid rejected lowercase from 2.6.0 and accepts it again from 4.1.0, and `info.registry`'s reconcile looks up a revocation's tombstone by the id's string, so a lowercase spelling that parsed would miss it and re-create a revoked item. `tests/core/test_ulids.py` fails a bare `ULID.from_str` anywhere in `src/` outside an allowlist that names its reason (today: the guard, and `ULIDType`'s read path, which parses only what `str(ULID)` stored).
 
-- **Path parameters** (e.g. `/watched-items/{id}`) → 404. Use `parse_ulid` from [src/api/routes/helpers.py](../src/api/routes/helpers.py), which raises `HTTPException(404)`.
-- **Filter query parameters** on list endpoints (e.g. `?watch_id=<value>`) → 400. Use `parse_filter_ulid` from [src/api/routes/helpers.py](../src/api/routes/helpers.py), which raises `HTTPException(400, "Invalid <field> format")`. Pass the parameter name as `field` (e.g. `parse_filter_ulid(watch_id, "watch_id")`).
-
-Do not use `parse_ulid` for filter query params — the endpoint itself exists; an unparseable filter value is a bad request, not a missing resource.
-
-**One spelling: canonical uppercase (#432).** Every parse of an id from outside — path, filter, body, bus message, task argument — goes through `parse_canonical_ulid` ([src/core/ulids.py](../src/core/ulids.py)), which enforces `ULID_PATTERN` before `ULID.from_str`. The library is not the contract: python-ulid rejected lowercase from 2.6.0 and accepts it again from 4.1.0, and `info.registry`'s reconcile looks up a revocation's tombstone by the id's string, so a lowercase spelling that parsed would miss it and re-create a revoked item. `tests/core/test_ulids.py` fails a bare `ULID.from_str` anywhere in `src/` outside an allowlist that names its reason (today: the guard, and `ULIDType`'s read path, which parses only what `str(ULID)` stored).
+The path → 404 and filter → 400 rules, and their `parse_ulid` / `parse_filter_ulid` helpers, went with `/api/v1` (#378); no HTTP route takes an id now.
 
 ## DB triggers
 

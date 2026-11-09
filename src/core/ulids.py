@@ -1,12 +1,12 @@
 """The canonical-ULID parse guard (#432).
 
 Watcher accepts one spelling of a ULID: 26 characters of **uppercase**
-Crockford base32, first character ≤ 7 — the form ``str(ULID)`` produces and
-the OpenAPI document advertises. The library is not that contract: python-ulid
-rejected lowercase from 2.6.0 and accepts it again from 4.1.0. So every parse of
-an id that arrives from outside — a path, a filter, a request body, a bus
-message, a task argument — goes through :func:`parse_canonical_ulid`, and a
-dependency bump cannot change what Watcher accepts.
+Crockford base32, first character ≤ 7 — the form ``str(ULID)`` produces. The
+library is not that contract: python-ulid rejected lowercase from 2.6.0 and
+accepts it again from 4.1.0. So every parse of an id that arrives from outside
+— a bus message, a task argument — goes through :func:`parse_canonical_ulid`,
+and a dependency bump cannot change what Watcher accepts. (The HTTP paths,
+filters and bodies that also parsed ids went with ``/api/v1``, #378.)
 
 ``tests/core/test_ulids.py`` fails any bare ``ULID.from_str`` in ``src/``
 outside an allowlist that names its reason.

@@ -6,7 +6,6 @@ integration"``, so a guard living there would never run where it matters.
 """
 
 from src.core.fetch_commands import WATCHER_USER_AGENT
-from src.core.probe import PROBE_USER_AGENT
 
 
 def test_user_agent_literal_is_pinned():
@@ -24,8 +23,3 @@ def test_user_agent_literal_is_pinned():
     "no re-baseline needed" result depended on this value staying constant.
     """
     assert WATCHER_USER_AGENT == "watcher/0.1.0"
-
-
-def test_probe_user_agent_derives_from_the_fetch_user_agent():
-    """One version string, two UAs (CR-26) — they must not drift apart."""
-    assert PROBE_USER_AGENT == f"{WATCHER_USER_AGENT} (probe)"

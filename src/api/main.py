@@ -4,14 +4,9 @@ import asyncio
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import FastAPI
 
-from src.api.deps import require_api_key
-from src.api.routes.audit_log import router as audit_router
-from src.api.routes.domains import router as domains_router
 from src.api.routes.health import router as health_router
-from src.api.routes.probe import router as probe_router
-from src.api.routes.watched_items import router as watched_items_router
 from src.core.bus import (
     BUS_REDIS_URL_ENV,
     BusNotEnabled,
@@ -176,12 +171,14 @@ async def lifespan(application: FastAPI):
     await proc_app.close_async()
 
 
-app = FastAPI(title="watcher", version="0.1.0", lifespan=lifespan)
-
-v1_router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_api_key)])
-v1_router.include_router(audit_router)
-v1_router.include_router(domains_router)
-v1_router.include_router(probe_router)
-v1_router.include_router(watched_items_router)
-app.include_router(v1_router)
+# Headless (#378, design D1): the HTTP surface is the two probes, and a
+# bus-only service publishes no API contract, so FastAPI's generated docs are off.
+app = FastAPI(
+    title="watcher",
+    version="0.1.0",
+    lifespan=lifespan,
+    openapi_url=None,
+    docs_url=None,
+    redoc_url=None,
+)
 app.include_router(health_router)

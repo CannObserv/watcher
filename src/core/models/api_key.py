@@ -1,4 +1,8 @@
-"""ApiKey model — hashed API credentials owned by an AppUser."""
+"""ApiKey model — hashed API credentials owned by an AppUser.
+
+Inert since #378 deleted ``/api/v1`` and its ``X-API-Key`` check: nothing reads
+or writes it. The ``api_keys`` table goes in #380.
+"""
 
 from datetime import UTC, datetime
 

@@ -46,18 +46,18 @@ until F4 (#376), and Watcher holds group read only, so it cannot `XADD` one.
 
 ## Pre-flight: `src/core/check_now.py`
 
-The route `POST /api/v1/watched-items/{id}/check-now` and the consumer share
-one verdict, `preflight_check`, so the consumer imports nothing from `src.api`
-(#378 deletes `/api/v1`). Checked in order, first match wins:
+The consumer's verdict is `preflight_check`, a core service rather than a route
+helper. Its other caller, `POST /api/v1/watched-items/{id}/check-now`, went with
+`/api/v1` (#378). Checked in order, first match wins:
 
-| Refusal | Route | `check_rejected.reason` |
-|---|---|---|
-| archived | 409 | `paused` (no token of its own; an archived item is inactive — operator decision on #371) |
-| paused (`is_active` false) | 409 | `paused` |
-| domain suspended | 409 | `domain_suspended` |
-| no `effective_url` | 422 | `no_url` |
-| a fetch command open (pending publish, in flight, processing) | 409 | `fetch_open` |
-| no WatchedItem for `info_item_id`, or the id is not a ULID | n/a | `unknown_item`, `info_source_id` null |
+| Refusal | `check_rejected.reason` |
+|---|---|
+| archived | `paused` (no token of its own; an archived item is inactive — operator decision on #371; nothing sets `archived_at` since #378, and #380 decides the column) |
+| paused (`is_active` false) | `paused` |
+| domain suspended | `domain_suspended` |
+| no `effective_url` | `no_url` |
+| a fetch command open (pending publish, in flight, processing) | `fetch_open` |
+| no WatchedItem for `info_item_id`, or the id is not a ULID | `unknown_item`, `info_source_id` null |
 
 ## The outcome is a level
 

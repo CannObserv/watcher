@@ -1,16 +1,14 @@
 """Check-now's pre-flight: may a WatchedItem be checked now? (#371).
 
-One verdict for both callers — the ``check-now`` route and the
-``info.watch-check`` consumer — so the consumer imports nothing from
-``src.api`` (#378 deletes ``/api/v1``) and the two cannot drift, the shape
-#372 gave ``set_domain_active``.
+A core service, as #372 made ``set_domain_active``. Its caller is the
+``info.watch-check`` consumer, the only check-now path since the API's
+``check-now`` route went with ``/api/v1`` (#378).
 
 Each refusal mirrors a short-circuit in ``check_watched_item`` or its issue
 path, so a request that could not do anything is refused up front instead of
 accepted over a silent no-op. In order, first match wins: archived, paused,
-domain suspended, no URL, a fetch command already open. Each caller words the
-refusal its own way: HTTP codes for the route, the closed
-``CheckRejectionReason`` tokens for the consumer.
+domain suspended, no URL, a fetch command already open. The consumer words
+each refusal as one of the closed ``CheckRejectionReason`` tokens.
 """
 
 import enum

@@ -10,9 +10,9 @@ from ulid import ULID
 
 from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
 
-# Upper bound for the stored raw media type (operator-overridable; real
-# Content-Type headers are tiny — this is a sanity cap shared by the column, the
-# API schema, and the detection truncation in src/workers/tasks.py).
+# Upper bound for the stored raw media type (real Content-Type headers are tiny
+# — this is a sanity cap shared by the column and the detection truncation in
+# src/workers/tasks.py; the API schema shared it until #378).
 CONTENT_MEDIA_TYPE_MAX_LEN = 2048
 
 
@@ -99,8 +99,8 @@ class WatchedItem(Base, TimestampMixin):
     )
     # The `type/subtype` essence is *not* stored — it's a pure function of
     # content_media_type + effective_url (`media_type.resolve_dispatch_essence`),
-    # the same value the pipeline dispatches on. The API surfaces it as a computed
-    # field on WatchedItemResponse; no DB column to keep in sync (#168).
+    # the same value the pipeline dispatches on. No DB column to keep in sync
+    # (#168); the API's computed field went with /api/v1 (#378).
     default_tags: Mapped[list[str] | None] = mapped_column(
         ARRAY(String), nullable=True, default=None
     )
@@ -116,10 +116,10 @@ class WatchedItem(Base, TimestampMixin):
     )
     # Denormalized copy of the parent Domain's default cadence — was the Domain
     # tier of schedule resolution (#205). Inert since F2 (#375): Archiver resolves
-    # the domain default and announces the item's interval. Still maintained on
-    # every create/PATCH path via ensure_domain_and_resolve_suspension and
-    # back-filled on domain-default edit until #377/#378 delete those writers;
-    # the column goes in #380. none_as_null=True per #198.
+    # the domain default and announces the item's interval. Still copied by
+    # ensure_domain_and_resolve_suspension when an item is created or its URL
+    # moves; the domain-edit back-fill went with /api/v1 (#378). The column goes
+    # in #380. none_as_null=True per #198.
     domain_default_schedule_config: Mapped[dict | None] = mapped_column(
         JSONB(none_as_null=True), nullable=True, default=None
     )

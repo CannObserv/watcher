@@ -1,6 +1,6 @@
 # Registry reconciliation
 
-How the `info.registry` announcements Archiver publishes become WatchedItems: what an announcement owns, what survives reconciliation, every 409 a reconciled item answers, and the linkage lifecycle. The entity itself is [WATCHED-ITEMS.md](WATCHED-ITEMS.md).
+How the `info.registry` announcements Archiver publishes become WatchedItems: what an announcement owns, what survives reconciliation, and the linkage lifecycle. Since #378 nothing local edits an item, so no local write is refused either. The entity itself is [WATCHED-ITEMS.md](WATCHED-ITEMS.md).
 
 ## Registry reconciliation (#254)
 
@@ -21,7 +21,7 @@ no opinion on — the `src.ops.suspend_domain` break-glass (#372) relies on it.
 
 **What an announcement records (#274).** Every applied announcement leaves an
 audit row. A create emits `watched_item.created` with `source: "registry"` —
-parity with the API create path, so a registry-born item does not read as having
+parity with the API create path (deleted at #378), so a registry-born item does not read as having
 appeared from nowhere. An update emits `watched_item.announcement_applied`
 carrying `changes: {column: {old, new}}` over the five owned columns above,
 **only when that diff is non-empty**: the hourly snapshot re-announces every item
@@ -73,26 +73,23 @@ the registry has no opinion yet, so the column is left exactly as it is. Reading
 what the rollout window looks like before CannObserv/archiver#150's import populates
 the column.
 
-**A local pause is not sticky — and since the 2026-08-13 cutover, not offered.**
-`active` applies unconditionally, and once an item is reconciled
-(`applied_generation` set) the API PATCH 409s (the dashboard toggle flashed, until #377)
-naming Archiver as the authority (`RegistryOwnedActivationError` in
-`set_watched_item_active`) — a control that silently reverts within the snapshot
-period is worse than a refusal that says where the control lives. Never-announced
-rows keep the local toggle. Item-level pause lives in Archiver's dashboard alone.
+**A local pause is not offered.** `active` applies unconditionally. From the
+2026-08-13 cutover until #378 the API PATCH 409'd a toggle on a reconciled item
+(`applied_generation` set), naming Archiver as the authority — a control that
+silently reverts within the snapshot period is worse than a refusal that says
+where the control lives. Since #378 nothing local edits an item at all.
+Item-level pause lives in Archiver's dashboard alone.
 
-**The guard covers all five owned columns, because the snapshot cannot repair local
-drift.** The hourly republish carries the same generation, which the `>` ordering
-guard ignores as stale — so a local write to an announcement-owned column diverges
-until the next *real* registry mutation, not the next snapshot. Hence: PATCH 409s
-`effective_url` / `source_specs` / `archiver_info_source_id` on reconciled items
-(the dashboard URL edit flashed the same rule until #377), and **restore clears `archived_at`
-without re-activating** a reconciled item — archive→restore was otherwise a
-two-step bypass of the pause guard. A restored registry-owned item stays paused
-until Archiver re-arms it — one click, not a round-trip: Archiver's watch-active
+**The snapshot cannot repair local drift.** The hourly republish carries the same
+generation, which the `>` ordering guard ignores as stale — so a local write to an
+announcement-owned column would diverge until the next *real* registry mutation,
+not the next snapshot. Until #378 the API refused one on every owned column of a
+reconciled item, and its restore cleared `archived_at` without re-activating;
+since #378 there is no local writer and no restore. Archiver's watch-active
 route writes and announces unconditionally, so pressing resume there propagates
-even when it already considers the item active. Watcher-local fields (name, description, tags, item
-cadence, media type) stay editable everywhere. What remains legitimately Watcher's is
+even when it already considers the item active. The Watcher-local fields (name,
+description, tags, item cadence, media type) lost their last editor with the API
+(#378); the columns are #380's. What remains legitimately Watcher's is
 *mechanism* — local backoff and `domain_suspended` as the host-level break-glass
 (the throttle floor was one until F2, #375). `archived_at` is never touched, so an `active: true` against an
 archived row reconciles the row's contents but no-ops on scheduling (`schedule_tick`
@@ -115,49 +112,39 @@ the announced cadence and silently cleared on the next announcement. Since F2
 (#375) neither column is read; both are kept until #380.
 
 **The floor was releasable, and only by an operator (inert since F2, #375).** Writing an explicit item
-cadence — `PATCH /api/v1/watched-items/{id}` with `default_schedule_config` (and,
-until #377, the dashboard's inline interval field) — clears `throttle_floor_interval`,
-through `set_item_schedule_config` (`src/core/watched_items.py`), the single owner of
-that write. Without that the escape hatch would be gone: before the
+cadence — the API's item PATCH until #378, the dashboard's inline interval field
+until #377 — cleared `throttle_floor_interval` through one writer,
+`set_item_schedule_config`. Without that the escape hatch would be gone: before the
 split, editing the interval *was* how a throttle was undone, and a floor nothing
 clears means one temporal profile firing caps an item at 1d forever while the
 operator's edits appear to do nothing. Reconciliation deliberately does not clear it;
 the registry has no opinion on mechanism. Since F2 nothing writes the floor and the
-resolver ignores it; the writer still clears it until #377/#378 delete both surfaces.
+resolver ignores it; the writer that cleared it went with `/api/v1` (#378).
 
-**A registry-owned WatchedItem cannot be deleted here.** `DELETE
-/api/v1/watched-items/{id}` 409s once `applied_generation` is set, naming Archiver as
-the authority: the stream is level-triggered, so the next announcement recreates the
-row, and absence is not revocation — only a `revoked: true` tombstone retires a key.
-Rows the registry has never announced still delete.
+**A WatchedItem cannot be deleted here.** The stream is level-triggered, so the
+next announcement would recreate the row, and absence is not revocation — only a
+`revoked: true` tombstone retires a key. The API's `DELETE` (which 409'd on a
+reconciled item) went at #378.
 
 ## Registry linkage and lifecycle
 
 **Every WatchedItem is an Archiver InfoItem being watched (#251).**
 `archiver_info_item_id` and `archiver_info_source_id` are both **NOT NULL** —
 bare-URL WatchedItems were rolled back (epic: CannObserv/archiver#137 step 1).
-Two create paths since #254. `POST /api/v1/watched-items` requires all four of
-`archiver_info_item_id` + `url` + `archiver_info_source_id` + a **non-empty**
-`source_specs` (both ids validated as canonical uppercase ULIDs at the boundary,
-a constraint the OpenAPI document advertises; `source_specs` became required in
-#260 — a spec-less item has no defined extraction, and Archiver never provisions
-one, so PATCH holds the same non-empty floor); **no dashboard create**. The
-`info.registry` reconcile is the second: it creates from an announcement alone,
-so a cold start converges from the snapshot without anyone calling the API — and
-it is **not** gated on `source_specs`, because an announcement is authoritative
-for that column ([CONTENT-PIPELINE.md](CONTENT-PIPELINE.md) → *Extraction
-outcomes* has the residual that leaves). The POST no longer validates the
-InfoItem over HTTP — that was watcher's last outbound call and it went with the
-SDK — which makes the endpoint redundant once archiver#141's producer is live. It
-has had **no caller since archiver#158 (2026-08-17)**; it still works, and is kept
-for manual provisioning and tests. The nullability had been paying for two
+**One create path since #378:** the `info.registry` reconcile. It creates from an
+announcement alone, so a cold start converges from the snapshot — and it is
+**not** gated on `source_specs`, because an announcement is authoritative for that
+column ([CONTENT-PIPELINE.md](CONTENT-PIPELINE.md) → *Extraction outcomes* has the
+residual that leaves). From #254 to #378 `POST /api/v1/watched-items` was a second
+path, with **no caller after archiver#158 (2026-08-17)**; #378 deleted it with the
+rest of `/api/v1`. The nullability had been paying for two
 silent-drop branches on the SourceRevision path — both gone, so a captured
 revision is always enqueued. Full detail, including why a fresh item starts
 `unknown` rather than `probing`:
-**[docs/CONTENT-PIPELINE.md](../docs/CONTENT-PIPELINE.md)**. On any PATCH that sets
-`effective_url` (the URL-succession path), `domain_name` is re-derived from the
-URL **without** re-probing and `domain_suspended` is re-evaluated; every
-create/PATCH/URL-change path (API and registry reconcile) shares
+**[docs/CONTENT-PIPELINE.md](../docs/CONTENT-PIPELINE.md)**. When an announcement
+moves `effective_url` (the URL-succession path), `domain_name` is re-derived from the
+URL **without** re-probing and `domain_suspended` is re-evaluated; the reconcile and
+the fetch-commands worker share
 `ensure_domain_and_resolve_suspension` in
 `src/core/domains.py` (#196). SourceRevisions are published to Archiver as
 `source_revision_observed` facts on `content.revisions` (#253) on every detected

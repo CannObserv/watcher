@@ -1,20 +1,18 @@
 """Tests for src/core/ulids.py — the canonical-ULID parse guard (#432).
 
 python-ulid 4.1.0 made ``ULID.from_str`` case-insensitive; 2.6.0–4.0.x rejected
-lowercase. Watcher's contract is the uppercase canonical form it advertises
+lowercase. Watcher's contract is the uppercase canonical form
 (``ULID_PATTERN``), so every inbound parse goes through ``parse_canonical_ulid``
 and the accepted set no longer moves with the library.
 """
 
 import ast
-import re
 from pathlib import Path
 
 import pytest
 from ulid import ULID
 
-from src.api.schemas import types as schema_types
-from src.core.ulids import ULID_PATTERN, parse_canonical_ulid
+from src.core.ulids import parse_canonical_ulid
 
 CANONICAL = "01ABCDEFGHJKMNPQRSTVWXYZ00"
 SRC = Path(__file__).resolve().parents[2] / "src"
@@ -54,11 +52,6 @@ class TestParseCanonicalULID:
     def test_non_string_is_a_type_error(self, bad):
         with pytest.raises(TypeError):
             parse_canonical_ulid(bad)
-
-    def test_schema_types_advertise_the_same_pattern(self):
-        """One pattern: the OpenAPI document and the guard cannot drift apart."""
-        assert schema_types.ULID_PATTERN is ULID_PATTERN
-        assert re.fullmatch(ULID_PATTERN, CANONICAL)
 
 
 class TestNoBareFromStr:

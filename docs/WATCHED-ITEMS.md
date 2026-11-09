@@ -65,9 +65,8 @@ date had passed a post-action: `deactivate` and `archive` wrote `is_active` /
 `archived_at` (without the registry guard), `reduce_frequency` set the floor to
 `1d` and audited `WATCHED_ITEM_THROTTLED`. The `/api/v1/watched-items/{id}/profiles`
 routes managed profiles. F2 deleted the tiers' reads, the floor, the profile
-evaluation, the post-actions and the routes; the columns, the `temporal_profiles`
-table and the writers stay, inert, until the jump (#377/#378 delete the surfaces,
-#380 the columns) — `src/ops/export_for_archiver.py` still reads them all.
+evaluation, the post-actions and the routes; #377 and #378 deleted the writers, and
+the columns and the `temporal_profiles` table stay, inert, until #380 — `src/ops/export_for_archiver.py` still reads them all.
 
 **Display** of the resolved interval + next-check goes through one helper,
 `resolve_schedule_display` (`src/core/scheduling/schedule.py`, #206): it composes
@@ -78,24 +77,24 @@ detail interval field, and the domain-detail table — renders from it, so the U
 matches `schedule_tick`. Before F2 it also reported the `item`/`domain` sources, a
 `throttled` flag and an active profile's override (`· profile`). Both domain facts
 (`domain_suspended`, `domain_default_schedule_config`) are still denormalized onto
-the WatchedItem via `ensure_domain_and_resolve_suspension` on every create/PATCH
-path and back-filled across a domain's items on domain edit
-(`backfill_domain_schedule_config`); only `domain_suspended` is read now.
+the WatchedItem via `ensure_domain_and_resolve_suspension` when an item is created
+or its URL moves; the back-fill on domain edit went with the API (#378). Only
+`domain_suspended` is read now.
 
-Cadence is validated at the API write boundary by the same helper as the Domain
-boundary (`validate_optional_schedule_config`, #205): a non-`None` config must carry
+Until #378, cadence was validated at the API write boundary by the same helper as
+the Domain boundary (`validate_optional_schedule_config`, #205): a non-`None` config had to carry
 a parseable `interval`, and `{}` is rejected — delegation has exactly one spelling,
 `None`/omit (the direction cannobserv#324 settled for the registry document). The
 rule was held there because `schedule_tick` resolves every item in one task, so an
 unparseable stored interval would raise out of `compute_next_check` and stop
-scheduling for the whole system. Since F2 those writes reach inert columns; the
-reconcile's own parse is what keeps the announced column safe.
+scheduling for the whole system. Since F2 those writes reached inert columns, and
+#378 deleted them; the reconcile's own parse is what keeps the announced column safe.
 
 Per-domain cadence is `Domain.default_schedule_config`
 (a `schedule_config` interval string — operator check cadence, distinct from the
-`Domain.min_interval` rate-limiter floor), still editable via `PATCH
-/api/v1/domains/{name}` (the domain detail page until #377), and inert since F2
-(#375). Archiver holds the domain default it resolves from.
+`Domain.min_interval` rate-limiter floor), inert since F2 (#375) and with no
+writer since #378 deleted `PATCH /api/v1/domains/{name}` (the domain detail page
+went at #377). Archiver holds the domain default it resolves from.
 
 ## Registry reconciliation (#254)
 
@@ -108,15 +107,15 @@ Per-domain cadence is `Domain.default_schedule_config`
 enum — the old `default_content_type` enum (`html`/`pdf`/`file`) was retired.
 It is auto-detected by `check_watched_item`, seeded **once** from the first
 successful GET response header when NULL (never auto-clobbered — refresh-on-change
-is deferred to drift detection), and operator-overridable on the detail page and
-via PATCH. Bounded to `CONTENT_MEDIA_TYPE_MAX_LEN` (2048) at the column, the API
-schema, and the detection truncation. The **media-type essence** (lowercased
+is deferred to drift detection); the operator override went with the dashboard
+(#377) and the API (#378). Bounded to `CONTENT_MEDIA_TYPE_MAX_LEN` (2048) at the
+column and the detection truncation. The **media-type essence** (lowercased
 `type/subtype`, params stripped, with a URL-extension tiebreaker for
 octet-stream/text-plain/absent headers) is **not stored** — it's a pure function,
 `media_type.resolve_dispatch_essence(content_media_type, effective_url)`, the single
 source of truth used by **both** the issuer (the `content.process` command
-carries it; the processor picks the extractor, #350) **and** the API
-(`WatchedItemResponse.media_type_essence` is a computed field). An extractor
+carries it; the processor picks the extractor, #350); the API's computed
+`media_type_essence` field went at #378. An extractor
 that fails on mismatched bytes comes back as a terminal failure and is recorded
 like a fetch failure (ERROR health + `CHECK_EXTRACTION_FAILED` + `WATCH_ERROR`).
 
@@ -146,8 +145,8 @@ the `/api/v1` and dashboard template surfaces, and the notifier client.
 item-scoped rows.
 
 Audits carry the WatchedItem as `watched_item_id` inside the JSONB `payload`
-(filter via `GET /api/v1/audit?watched_item_id=<ulid>`); the `AuditLog.watch_id`
-FK column was retired.
+(the API's audit filter went at #378; query `audit_log` directly); the
+`AuditLog.watch_id` FK column was retired.
 
 ## What the #191 collapse removed
 

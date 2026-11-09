@@ -60,8 +60,9 @@ Field mappings the consumer cannot check for us:
   trigger, so it shows at the next periodic republish.
 * Tombstones ride ``revoked_info_items`` into every full set. A never-
   reconciled item deleted locally gets **no tombstone** — it was never
-  announced, so Archiver holds no entry to retire (and the DELETE route 409s
-  on reconciled items, so that case cannot arise).
+  announced, so Archiver holds no entry to retire. Nothing deletes an item
+  locally since #378; the API's DELETE was the last path, and it 409'd on
+  reconciled items.
 """
 
 from collections.abc import Sequence

@@ -135,8 +135,8 @@ async def check_watched_item(
 
     ``bus_client`` is a test seam; production uses the shared lifespan client.
     ``force_full_fetch`` suppresses conditional GET for this occasion (#269): the
-    check-now route sets it, so an operator who suspects a stale validator can
-    force a real re-read without touching the database.
+    ``info.watch-check`` consumer sets it, so an operator who suspects a stale
+    validator can force a real re-read from Archiver without touching the database.
     """
     async with get_session_factory()() as session:
         watched_item = await session.get(WatchedItem, parse_canonical_ulid(watched_item_id))

@@ -121,18 +121,17 @@ production.
 one URL = one fingerprint = one change signal. The user-facing noun is "Watched
 Item".
 
-**The `info.registry` reconcile is the creation path**; the registry owns
-cadence and active state, Watcher owns mechanism (#254). An announcement is
-authoritative for a named set of columns, everything else survives
-reconciliation, and **a local pause is not sticky** — every announcement-owned
-field 409s locally on a reconciled item.
+**The `info.registry` reconcile is the only path that creates or edits an
+item** (#378); the registry owns cadence and active state, Watcher owns
+mechanism (#254). An announcement is authoritative for a named set of columns,
+and everything else survives reconciliation.
 
 **Empty extraction is a failure, not a change (#258)**, and **an unchanged
 fingerprint still announces (#293)**:
 [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md),
 [docs/CONTENT-REVISIONS.md](docs/CONTENT-REVISIONS.md).
 
-What each 409 is, where pause does live, the authoritative column list: [docs/REGISTRY.md](docs/REGISTRY.md).
+Where pause does live, the authoritative column list: [docs/REGISTRY.md](docs/REGISTRY.md).
 
 ## Conventions
 
@@ -161,7 +160,7 @@ JSON records with a four-key floor pinned by `tests/core/test_logging.py`; why u
 - Test structure mirrors source (`src/foo.py` → `tests/test_foo.py`)
 - Optional JSONB columns: declare as `JSONB(none_as_null=True)` so Python `None` persists as SQL `NULL`, not a JSONB `'null'` literal (otherwise `WHERE col IS NULL` silently misses those rows — #198)
 
-**ULID format errors:** path → 404, filter → 400. **DB triggers:** none; one added in a migration is also recreated in `tests/conftest.py`. Both: [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
+**ULIDs:** canonical uppercase only (`parse_canonical_ulid`). **DB triggers:** none; one added in a migration is also recreated in `tests/conftest.py`. Both: [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
 
 ## Agent Skills
 
@@ -171,7 +170,7 @@ A skill is symlinked, unforked, into both `skills/` and `.claude/skills/` (#413)
 
 ## Detail Docs
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, fetch contracts, the probe destination guard
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, fetch contracts
 - [docs/BUS.md](docs/BUS.md) — the broker, stream inventory and retention, consumer groups
 - [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md) — #287 timeouts, retries, redaction, startup PING; #288 the `noeviction` cap
 - [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the test database, CI
@@ -180,7 +179,7 @@ A skill is symlinked, unforked, into both `skills/` and `.claude/skills/` (#413)
 - [docs/WATCH-EVENTS.md](docs/WATCH-EVENTS.md) — #369 edge facts: outbox, ordered drain, broker#93 gate
 - [docs/WATCH-CHECK.md](docs/WATCH-CHECK.md) — #371 `info.watch-check`: shared pre-flight, rejections, DLQ, the completion republish
 - [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md) — #269 validators: gate, snapshot, invalidation
-- [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID errors, DB triggers
+- [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID parsing, DB triggers
 - [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) — the co-pypi index, the certifi and advisory floors, Dependabot PRs: auth, pins, upgrades
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, the install runbook, timers, OS patching (#382)
 - [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — every env file and variable, load order, the unit-only opt-ins
@@ -192,4 +191,4 @@ A skill is symlinked, unforked, into both `skills/` and `.claude/skills/` (#413)
 - [docs/SOCRATICODE.md](docs/SOCRATICODE.md) — tool table, index scope, green-failing traps, link stubs
 - [docs/CO-INDEX.md](docs/CO-INDEX.md) — the shared store on `co-index`: the client contract, verifying it before trusting a miss
 - [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the entity: fields, schedule resolution, domain keying, media-type dispatch
-- [docs/REGISTRY.md](docs/REGISTRY.md) — `info.registry` reconciliation: what an announcement owns, every 409, linkage
+- [docs/REGISTRY.md](docs/REGISTRY.md) — `info.registry` reconciliation: what an announcement owns, linkage

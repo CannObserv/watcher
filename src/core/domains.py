@@ -1,10 +1,10 @@
 """Domain state: resolution for the WatchedItem paths, and host suspension.
 
-Resolution mirrors the create-time probe path's domain handling but takes a URL
-or hostname that is already known (Archiver is authoritative for
-``effective_url``), so no network probe is performed. Centralising the upsert +
-suspension-resolution logic keeps the API create branch, the API PATCH branch
-and the registry reconcile from drifting (#196).
+Resolution takes a URL or hostname that is already known (Archiver is
+authoritative for ``effective_url``), so no network probe is performed.
+Centralising the upsert + suspension-resolution logic keeps its callers — the
+registry reconcile and the fetch-commands worker — from drifting (#196); the
+API's create and PATCH branches went with ``/api/v1`` (#378).
 
 ``set_domain_active`` is the one writer of ``Domain.is_active`` (#372).
 Deactivating a domain suspends every WatchedItem on it — the denormalized
@@ -32,14 +32,13 @@ from src.core.models.watched_item import WatchedItem
 
 
 class DomainResolution(NamedTuple):
-    """Domain facts denormalized onto a WatchedItem at create/PATCH time (#196, #205).
+    """Domain facts denormalized onto a WatchedItem at create or URL move (#196, #205).
 
     ``suspended`` gates scheduling (domain archived or inactive);
     ``default_schedule_config`` is the domain's cadence, copied to
     ``WatchedItem.domain_default_schedule_config``. It was the resolver's Domain
-    tier and is inert since F2 (#375); the copy is still maintained until
-    #377/#378 delete the writers. Both are re-evaluated together on every
-    create/PATCH path.
+    tier and is inert since F2 (#375); the column goes in #380. Both are
+    re-evaluated together on each of those paths.
     """
 
     suspended: bool
@@ -90,25 +89,6 @@ async def ensure_domain_and_resolve_suspension(
             default_schedule_config=existing.default_schedule_config,
         )
     return DomainResolution(suspended=False, default_schedule_config=None)
-
-
-async def backfill_domain_schedule_config(
-    session: AsyncSession, domain_name: str, config: dict | None
-) -> None:
-    """Propagate a domain's cadence to every WatchedItem on it (#205).
-
-    Mirrors the ``domain_suspended`` back-fill (``set_domain_active``): the
-    denormalized ``WatchedItem.domain_default_schedule_config`` is kept in sync
-    when an operator edits the domain cadence. Inert since F2 (#375) — the
-    resolver no longer reads the copy — and kept until #377/#378 delete the
-    domain cadence writers. One bounded UPDATE on a rare operator action. Does
-    not commit.
-    """
-    await session.execute(
-        update(WatchedItem)
-        .where(WatchedItem.domain_name == domain_name)
-        .values(domain_default_schedule_config=config)
-    )
 
 
 class DomainNotFound(LookupError):

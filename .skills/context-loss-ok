@@ -381,3 +381,18 @@ docs/COMMANDS.md :: retarget :: vendored gate in `shipping-work-python-fastapi`,
 # #413 CR 1: the override's six tracked skills/*/scripts/ links are gone (git ls-files 'skills/*/scripts/*' → 0), so `scripts/` no longer over-matches them.
 docs/SKILLS.md :: disproven :: `deploy/` reaching `tests/deploy/`, and `scripts/` reaching `tests/scripts/` and the vendored
 docs/SKILLS.md :: disproven :: skill symlinks, are kept over-matches — for a spot-check that exits 1
+
+# #378: /api/v1 deleted. Each line below stated an API behaviour that no longer
+# exists; tests/test_operator_api_retired.py refutes it (every /api/v1 path 404s,
+# helpers.py and probe.py are gone). The surviving rules were rewritten in place:
+# the reconcile is the only create/edit path, ULIDs are canonical-only.
+AGENTS.md :: disproven :: **The `info.registry` reconcile is the creation path**; the registry owns
+AGENTS.md :: disproven :: cadence and active state, Watcher owns mechanism (#254). An announcement is
+AGENTS.md :: disproven :: authoritative for a named set of columns, everything else survives
+AGENTS.md :: disproven :: reconciliation, and **a local pause is not sticky** — every announcement-owned
+AGENTS.md :: disproven :: field 409s locally on a reconciled item.
+AGENTS.md :: disproven :: What each 409 is, where pause does live, the authoritative column list:
+AGENTS.md :: disproven :: **ULID format errors:** path → 404, filter → 400. **DB triggers:**
+AGENTS.md :: disproven :: - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, fetch contracts, the probe destination guard
+AGENTS.md :: disproven :: - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID errors, DB triggers
+AGENTS.md :: disproven :: - [docs/REGISTRY.md](docs/REGISTRY.md) — `info.registry` reconciliation: what an announcement owns, every 409, linkage

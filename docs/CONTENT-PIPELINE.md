@@ -106,8 +106,8 @@ yielding non-empty text wins.
 **A spec-less item is unextractable, not a whole-page watch (#260).** The
 synthetic `[{}]` full-page default — inherited unremarked from #185's pipeline
 rewrite, never ratified — is gone, and with it the "optional at create"
-affordance: `WatchedItemCreate.source_specs` is required and non-empty, `PATCH`
-holds the same floor, and a row that carries none is unsendable at the blob
+affordance: until #378 the API's create and `PATCH` required non-empty
+`source_specs`, and a row that carries none is unsendable at the blob
 apply (`UnsendableProcessCommand`) and fails the check there. Settled that way
 because Archiver, the only caller, always has specs in hand: its registry
 refuses to announce a source as live without non-empty `source_specs`, and
@@ -288,9 +288,7 @@ watched-item routes, and the dashboard Backoff badge/filter.
 `last_request_at` survived step 5 as inert columns and were dropped in #272
 (migration `10783d8a2405`, restart-before-migrate — see
 [docs/MIGRATIONS.md](MIGRATIONS.md)) together with the API create/PATCH write
-sites and the `DomainResponse` fields. An old client still sending the retired
-request knobs gets the repo-wide unknown-field treatment: silently ignored,
-not a 422.
+sites and the `DomainResponse` fields; the API itself went at #378.
 
 #245 was the cutover's ordering blocker — politeness must not lapse when the
 fetch path becomes a publish path — and shipped first.
@@ -299,22 +297,11 @@ fetch path becomes a publish path — and shipped first.
 
 `archiver_info_item_id` and `archiver_info_source_id` are both **NOT NULL**;
 bare-URL WatchedItems were rolled back (epic: CannObserv/archiver#137 step 1;
-production had zero bare rows). One create path remains, `POST
-/api/v1/watched-items`, requiring `archiver_info_item_id` + `url` +
-`archiver_info_source_id` — the Archiver "Begin Watching" provisioning call.
-Both ids are validated as ULIDs at the boundary (`ULIDRefStr`,
-[`src/api/schemas/types.py`](../src/api/schemas/types.py)), so a malformed
-reference is a 422 rather than a row that fails later against a real captured
-revision. **Canonical uppercase Crockford base32 only** — the same standard
-`parse_ulid` holds path parameters to, since it is the same parser
-(`parse_canonical_ulid`, which rejects the lowercase form whatever python-ulid
-accepts — #432). The OpenAPI document
-carries the matching `format: ulid` + `pattern`, so a generated client sees the
-constraint rather than a bare string; a schema test pins the pattern and the
-parser to the same accept-set. Archiver's provisioning call satisfies this by
-construction — it sends `str()` of a `ULID`. There is **no dashboard create** (`/watched-items/new`, its form
-template, and the "New Watched Item" CTA are gone); the list's empty state
-points at Archiver.
+production had zero bare rows). The `info.registry` reconcile is the only create
+path since #378, which deleted `POST /api/v1/watched-items` (Archiver's old "Begin
+Watching" provisioning call); the dashboard create went at #377. Both ids are
+parsed as **canonical uppercase Crockford base32 only** (`parse_canonical_ulid`,
+which rejects the lowercase form whatever python-ulid accepts — #432).
 
 What the nullability had been buying was two silent-drop branches on the
 SourceRevision path — the pipeline's `if watched_item.archiver_info_source_id:`
@@ -324,12 +311,12 @@ drain keeps only its `wi is None` half (a WatchedItem deleted mid-batch,
 reachable only across concurrent transactions since the pending row is
 `ON DELETE CASCADE`).
 
-`effective_url` is stored verbatim from the create call and `domain_name`
-derived from it — no probe on any create path (#241), and a fresh item starts
+`effective_url` is stored verbatim from the announcement and `domain_name`
+derived from it — no probe on the create path (#241), and a fresh item starts
 `health_status='unknown'`, not `probing`: Archiver is authoritative for the URL.
-On any PATCH that sets `effective_url` (the URL-succession path), `domain_name`
+When an announcement moves `effective_url` (the URL-succession path), `domain_name`
 is re-derived from the URL **without** re-probing and `domain_suspended` is
-re-evaluated; every create/PATCH path (API and registry reconcile) shares
+re-evaluated; the reconcile and the fetch-commands worker share
 `ensure_domain_and_resolve_suspension` in
 [`src/core/domains.py`](../src/core/domains.py) (#196).
 

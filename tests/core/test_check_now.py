@@ -1,7 +1,7 @@
 """Check-now's pre-flight as a core service (#371).
 
-The route and the ``info.watch-check`` consumer share it, so the consumer
-imports nothing from ``src.api`` (#378 deletes ``/api/v1``). Each refusal
+Its caller is the ``info.watch-check`` consumer; the API route that shared
+it went with ``/api/v1`` (#378). Each refusal
 mirrors a short-circuit in ``check_watched_item`` or its issue path: a check
 that could not run is refused up front rather than accepted over a no-op.
 """

@@ -231,10 +231,13 @@ def test_uv_ignores_exactly_the_exact_pins(uv_block: dict) -> None:
     pins = _exact_pins()
     assert pins, "found no `==` pin in [project].dependencies — the derivation broke"
     entries = uv_block.get("ignore", [])
-    names = [canonicalize_name(e.get("dependency-name", "")) for e in entries]
+    # As written, not canonicalized: whether Dependabot normalizes a
+    # `dependency-name` before matching is unverified, so spell it canonically.
+    names = [e.get("dependency-name", "") for e in entries]
     assert sorted(names) == sorted(pins), (
         f"ignore: {sorted(names)}, but the exact pins are {sorted(pins)}; each "
-        "`==` runtime pin needs a name-only ignore entry, and nothing else does"
+        "`==` runtime pin needs a name-only ignore entry, spelled canonically "
+        "(lowercase, hyphens), and nothing else does"
     )
     narrowed = [e for e in entries if set(e) != {"dependency-name"}]
     assert not narrowed, (

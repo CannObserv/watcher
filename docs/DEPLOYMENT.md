@@ -158,8 +158,9 @@ is declined (#323), and the pinned SocratiCode install.
 ## Database Migrations
 
 Split out to [MIGRATIONS.md](MIGRATIONS.md) — the manual `alembic upgrade head`
-step, the two-role grant model (#259), the autogenerate scratch-database rule,
-and the `information`-schema drop (#234).
+step and the two-role grant model (#259). The applied one-time orderings and the
+`information`-schema drop (#271) are in [MIGRATIONS-HISTORY.md](MIGRATIONS-HISTORY.md);
+the autogenerate scratch-database rule is in [COMMANDS.md](COMMANDS.md).
 
 ## Archiver Service
 

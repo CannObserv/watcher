@@ -20,7 +20,7 @@ default in AGENTS.md, same reasoning as ``f4a8b26c9d31`` (#261): the
 column in its SELECTs, so dropping first fails every load of a WatchedItem
 until the restart lands. Restart-first has no window: the new code never names
 the column, and it is nullable, so the old schema accepts the new code's
-INSERTs. Recorded in `docs/MIGRATIONS.md` → *Restart-before-migrate —
+INSERTs. Recorded in `docs/MIGRATIONS-HISTORY.md` → *Restart-before-migrate —
 one-time, `e2eab993d615`*.
 """
 

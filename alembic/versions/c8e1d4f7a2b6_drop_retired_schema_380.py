@@ -24,7 +24,7 @@ references. No grants step: ``watcher`` owns every table here (#259).
 ``watched_items.name`` is NOT NULL with no server default, so the new code's
 reconcile INSERTs, which no longer name it, would fail against the old schema
 until the drop landed. Stopping first leaves no window. Recorded in
-`docs/MIGRATIONS.md` → *Stop-migrate-start — one-time, `c8e1d4f7a2b6`*.
+`docs/MIGRATIONS-HISTORY.md` → *Stop-migrate-start — one-time, `c8e1d4f7a2b6`*.
 
 Downgrade restores the genesis (``2addddea0b03``) and ``b3f1a7c50d94`` shapes,
 empty, with one exception. ``watched_items.name`` comes back **nullable**:

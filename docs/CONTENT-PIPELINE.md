@@ -268,7 +268,7 @@ hit the same path, so prefer a quiet window.
 
 The **migration** has its own ordering problem, unrelated to Replicator: no
 order of `alembic upgrade head` and `systemctl restart` avoids a brief window of
-failing command INSERTs. [`MIGRATIONS.md`](MIGRATIONS.md) → "No safe order" has
+failing command INSERTs. [`MIGRATIONS-HISTORY.md`](MIGRATIONS-HISTORY.md) → "No safe order" has
 the procedure and what it looks like in the journal.
 
 **Async create (step 3).** Nothing on a create path probes. Since #251 the only
@@ -286,7 +286,7 @@ watched-item routes, and the dashboard Backoff badge/filter.
 `Domain.current_interval` / `max_concurrency` / `decay_window` /
 `last_request_at` survived step 5 as inert columns and were dropped in #272
 (migration `10783d8a2405`, restart-before-migrate — see
-[docs/MIGRATIONS.md](MIGRATIONS.md)) together with the API create/PATCH write
+[docs/MIGRATIONS-HISTORY.md](MIGRATIONS-HISTORY.md)) together with the API create/PATCH write
 sites and the `DomainResponse` fields; the API itself went at #378.
 
 #245 was the cutover's ordering blocker — politeness must not lapse when the
@@ -320,5 +320,5 @@ re-evaluated through `ensure_domain_and_resolve_suspension` in
 reconcile since #380.
 
 **Deploy note.** `d5a71c93e0f2` is the one migration that inverts the standard
-order — restart first, then upgrade. See `docs/MIGRATIONS.md` →
+order — restart first, then upgrade. See `docs/MIGRATIONS-HISTORY.md` →
 "Restart-before-migrate".

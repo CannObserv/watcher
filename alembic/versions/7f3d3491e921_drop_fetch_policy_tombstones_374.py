@@ -20,7 +20,7 @@ default in AGENTS.md, same reasoning as ``10783d8a2405`` (#272): the
 *previous* release still maps the table and writes it on every domain create
 and delete, so dropping first fails those paths until the restart lands.
 Restart-first has no window: the new code never names the table, and nothing
-reads it since F1. Recorded in `docs/MIGRATIONS.md` → *Restart-before-migrate —
+reads it since F1. Recorded in `docs/MIGRATIONS-HISTORY.md` → *Restart-before-migrate —
 one-time, `7f3d3491e921`*.
 """
 

@@ -318,7 +318,7 @@ Flipped at T = `2026-11-06T21:00:00Z`: Archiver live with T at 20:16:50Z,
 Watcher at 20:18:00Z, drained by 22:13Z, exports shredded. Part 2 deleted
 Watcher's dispatch path; Archiver sends every notification, and #379 deleted
 the rest of Watcher's notification code. The record is on #376 and #368; the
-one-time deploy order is [MIGRATIONS.md](MIGRATIONS.md) →
+one-time deploy order is [MIGRATIONS-HISTORY.md](MIGRATIONS-HISTORY.md) →
 *Restart-before-migrate — one-time, `e2eab993d615`*.
 
 ## Git Submodules
@@ -342,7 +342,7 @@ that.
 **No sibling checkout (#311).** The suite used to subprocess-run the Archiver
 checkout's alembic, located by `ARCHIVER_REPO_PATH`, to build an `information`
 schema its factories wrote rows into. Those rows only minted two ULIDs:
-production has had no `information` schema since #271 (see `docs/MIGRATIONS.md`
+production has had no `information` schema since #271 (see `docs/MIGRATIONS-HISTORY.md`
 → "Drop the dead `information` schema"), and the WatchedItem links carry no FK.
 `make_watched_item` now mints both links, `test_engine` drops a leftover
 `information` schema from a pre-#311 session, and
@@ -378,7 +378,7 @@ Both database jobs pull `postgres:16` as `mirror.gcr.io/library/postgres:16`:
 GitHub's shared runners exhaust Docker Hub's anonymous pull limit, and the mirror
 needs no credential (`tests/ci/test_service_images.py`).
 **Squash cutover:** already-migrated DBs need a one-time `alembic
-stamp 2addddea0b03 --purge` before their next upgrade — see `docs/MIGRATIONS.md`
+stamp 2addddea0b03 --purge` before their next upgrade — see `docs/MIGRATIONS-HISTORY.md`
 → "Migration baseline (squash)". Only `live` tests (real GCS) run in no CI
 job. **One-time GCP grant** (operator, for WIF) — bind watcher's repo
 to the read-only SA; the org-scoped `github-ci` provider needs no change:

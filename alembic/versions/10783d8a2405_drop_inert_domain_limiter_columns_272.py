@@ -28,7 +28,7 @@ in its SELECTs, so migrating first fails every Domain query with
 window: the new code never references them, and all four carry server defaults
 or are nullable, so the pre-migration schema accepts the new code's INSERTs
 during the restart-to-migrate gap. Recorded in
-`docs/MIGRATIONS.md` → *Restart-before-migrate — one-time, `10783d8a2405`*.
+`docs/MIGRATIONS-HISTORY.md` → *Restart-before-migrate — one-time, `10783d8a2405`*.
 """
 
 from collections.abc import Sequence

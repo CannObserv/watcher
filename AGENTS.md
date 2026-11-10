@@ -5,7 +5,7 @@ Be terse. Prefer fragments over full sentences. Skip filler and preamble. Sacrif
 ## Project Overview
 
 General-purpose web monitoring service: fingerprints the content at URLs Archiver registers on a schedule and reports each change.
-Headless: no operator surface; Archiver is the control plane. Cohort roles and placement rules: the [boundary charter](https://github.com/CannObserv/cannobserv/blob/main/docs/BOUNDARIES.md) (private repo).
+Headless: serves only `/health` and `/ready`; Archiver is the control plane (break-glass CLIs: `src/ops/`). Cohort roles and placement rules: the [boundary charter](https://github.com/CannObserv/cannobserv/blob/main/docs/BOUNDARIES.md) (private repo).
 
 ## Development Methodology
 

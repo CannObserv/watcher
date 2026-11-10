@@ -35,7 +35,7 @@ from co_core.pure.models.changes import (
     WatchErrorEmit,
 )
 from redis.exceptions import ResponseError
-from sqlalchemy import select
+from sqlalchemy import event, select
 from ulid import ULID
 
 import src.workers.fetch_facts as ff_mod
@@ -276,9 +276,51 @@ class TestGroup:
         assert CONSUMER_NAME == "watcher-watch-check-1"
 
 
+class _SharedSession:
+    """The test's ``db_session``, taken in turns by the loop and the poll (#434).
+
+    The loop's writes sit uncommitted in the test transaction, so only this
+    session can see them: the poll can't move to a second one. Two users of
+    one ``AsyncSession`` must not overlap, though. One that is beginning a
+    transaction raises at any other caller. So the loop's factory holds the
+    lock for each message, and the poll holds it for each read.
+    """
+
+    def __init__(self, session):
+        self.session = session
+        self.lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def turn(self):
+        """The session, held until the block exits. Also the loop's factory."""
+        async with self.lock:
+            yield self.session
+
+
 @asynccontextmanager
-async def _session_ctx(db_session):
-    yield db_session
+async def _loop_running(client, session_factory):
+    """Run the loop for the block. A clean pass stops it and asserts it
+    exits; a failing one cancels it, so teardown never closes the session
+    under a live loop and buries the real failure (CR 8, #434)."""
+    stop = asyncio.Event()
+    task = asyncio.create_task(
+        run_watch_check_consumer(
+            client,
+            session_factory,
+            stop=stop,
+            block_ms=10,
+            error_backoff_seconds=0.01,
+        )
+    )
+    try:
+        yield
+    except BaseException:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+        raise
+    stop.set()
+    await asyncio.wait_for(task, timeout=5)
 
 
 async def _until(predicate, *, timeout=5):
@@ -290,32 +332,21 @@ async def _until(predicate, *, timeout=5):
 
 
 class TestRunWatchCheckConsumer:
-    async def _run(self, db_session, client, stop):
-        return asyncio.create_task(
-            run_watch_check_consumer(
-                client,
-                lambda: _session_ctx(db_session),
-                stop=stop,
-                block_ms=10,
-                error_backoff_seconds=0.01,
-            )
-        )
+    """Every poll of ``db_session`` takes its turn through ``_SharedSession``."""
 
     async def test_a_command_issued_before_the_group_existed_is_answered(self, db_session):
         """Broker's rule: the group is created at ``0``. At ``$`` a command
         Archiver issued before Watcher's first boot would never be read."""
         client = fakeredis.FakeAsyncRedis()
         await client.xadd(streams.INFO_WATCH_CHECK, to_wire(_command(ULID()).payload))
-        stop = asyncio.Event()
-
-        task = await self._run(db_session, client, stop)
+        shared = _SharedSession(db_session)
 
         async def _answered():
-            return len(await _rejections(db_session)) == 1
+            async with shared.turn() as session:
+                return len(await _rejections(session)) == 1
 
-        await _until(_answered)
-        stop.set()
-        await asyncio.wait_for(task, timeout=5)
+        async with _loop_running(client, shared.turn):
+            await _until(_answered)
         pending = await client.xpending(streams.INFO_WATCH_CHECK, CONSUMER_GROUP)
         assert pending["pending"] == 0
 
@@ -325,19 +356,15 @@ class TestRunWatchCheckConsumer:
             streams.INFO_WATCH_CHECK, {"event_type": "watch_check", "payload": "{not json"}
         )
         await client.xadd(streams.INFO_WATCH_CHECK, to_wire(_command(ULID()).payload))
-        stop = asyncio.Event()
-
-        task = await self._run(db_session, client, stop)
+        shared = _SharedSession(db_session)
 
         async def _both_handled():
-            return (
-                len(await _rejections(db_session)) == 1
-                and await client.xlen(dlq_name(streams.INFO_WATCH_CHECK)) == 1
-            )
+            async with shared.turn() as session:
+                rejected = len(await _rejections(session)) == 1
+            return rejected and await client.xlen(dlq_name(streams.INFO_WATCH_CHECK)) == 1
 
-        await _until(_both_handled)
-        stop.set()
-        await asyncio.wait_for(task, timeout=5)
+        async with _loop_running(client, shared.turn):
+            await _until(_both_handled)
 
         ((_id, raw),) = await client.xrange(dlq_name(streams.INFO_WATCH_CHECK))
         fields = {k.decode(): v.decode() for k, v in raw.items()}
@@ -354,21 +381,60 @@ class TestRunWatchCheckConsumer:
         client = fakeredis.FakeAsyncRedis()
         message = _command(wi.archiver_info_item_id)
         await client.xadd(streams.INFO_WATCH_CHECK, to_wire(message.payload))
-        stop = asyncio.Event()
-
-        task = await self._run(db_session, client, stop)
 
         async def _published():
             return await client.xlen(streams.CONTENT_FETCH) == 1
 
-        await _until(_published)
-        stop.set()
-        await asyncio.wait_for(task, timeout=5)
+        async with _loop_running(client, _SharedSession(db_session).turn):
+            await _until(_published)
         ((entry_id, raw),) = await client.xrange(streams.CONTENT_FETCH)
         fields = {k.decode(): v.decode() for k, v in raw.items()}
         fetch = from_wire(fields, topic=streams.CONTENT_FETCH, message_id=entry_id.decode())
         assert isinstance(fetch.payload, ContentFetchCommand)
         assert "if-none-match" not in (fetch.payload.headers or {})
+
+    async def test_the_poll_never_overlaps_the_loop_on_the_shared_session(
+        self, db_session, monkeypatch
+    ):
+        """#434: the loop and the test's poll share one ``AsyncSession``.
+
+        A query in flight is safe: the asyncpg adapter's mutex queues the
+        other caller. Beginning a transaction is not: a session caught
+        provisioning its connection raises ``InvalidRequestError`` at anyone
+        else who touches it. That window is a SAVEPOINT round trip, so the
+        flake hit 1 run in 6 to 12. Here the loop holds it open for 200 ms
+        (``after_begin`` fires inside it), so an unserialized 20 ms poll
+        lands in it on every run.
+        """
+        real = wc_mod.process_watch_check_message
+        holding = False
+
+        @event.listens_for(db_session.sync_session, "after_begin")
+        def _hold_the_window(_session, _transaction, connection):
+            if holding:
+                connection.exec_driver_sql("SELECT pg_sleep(0.2)")
+
+        async def _begins_slowly(session, message, *, bus_client):
+            nonlocal holding
+            await session.commit()  # so the next statement begins a transaction
+            holding = True
+            try:
+                await session.execute(select(1))
+            finally:
+                holding = False
+            return await real(session, message, bus_client=bus_client)
+
+        monkeypatch.setattr(wc_mod, "process_watch_check_message", _begins_slowly)
+        client = fakeredis.FakeAsyncRedis()
+        await client.xadd(streams.INFO_WATCH_CHECK, to_wire(_command(ULID()).payload))
+        shared = _SharedSession(db_session)
+
+        async def _answered():
+            async with shared.turn() as session:
+                return len(await _rejections(session)) == 1
+
+        async with _loop_running(client, shared.turn):
+            await _until(_answered)
 
 
 @asynccontextmanager
@@ -393,30 +459,8 @@ class TestDeliveryThreshold:
     ``info.watch-check.dlq`` after ``MAX_DELIVERY_ATTEMPTS`` and stops blocking
     the commands behind it. Before #389 it was reclaimed forever."""
 
-    @asynccontextmanager
-    async def _running(self, db_session, client):
-        """Run the loop for the block. A clean pass stops it and asserts it
-        exits; a failing one cancels it, so teardown never closes the session
-        under a live loop and buries the real failure (CR 8)."""
-        stop = asyncio.Event()
-        task = asyncio.create_task(
-            run_watch_check_consumer(
-                client,
-                lambda: _rolling_back_session_ctx(db_session),
-                stop=stop,
-                block_ms=10,
-                error_backoff_seconds=0.01,
-            )
-        )
-        try:
-            yield
-        except BaseException:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await task
-            raise
-        stop.set()
-        await asyncio.wait_for(task, timeout=5)
+    def _running(self, db_session, client):
+        return _loop_running(client, lambda: _rolling_back_session_ctx(db_session))
 
     def _count_attempts(self, monkeypatch, *, fail=None):
         """Wrap the real processor; ``fail(message, attempt)`` may raise first.

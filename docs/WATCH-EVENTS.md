@@ -18,14 +18,14 @@ ULID, and the payload keeps it verbatim.
 | Fact | Staged in | When |
 |---|---|---|
 | `change_detected` | `apply_extraction_outcome` (`src/workers/pipeline.py`) | A content change: the fingerprint moved and Option A did not call it a re-baseline |
-| `watch_error` | `record_check_failure` (`src/workers/fetch_commands.py`) | The edge **into** ERROR from any other health, `unknown` and `probing` included |
+| `watch_error` | `record_check_failure` (`src/workers/fetch_commands.py`) | The edge **into** ERROR from any other health, `unknown` included |
 | `watch_recovered` | `_record_check_success` (same file) | ERROR → OK |
 
 **Nothing else is an edge.** A baseline, a cache hit (including the #293
 renewal), an Option A re-baseline (`CHECK_REBASELINED`), a later failure inside
 the episode stage nothing: reminder cadence is Archiver's, from the error edge
 plus `info.watch-status` `health`. Since F3 (#376) these facts are the only
-notification signal Watcher produces; it dispatches nothing itself. PROBING →
+notification signal Watcher produces; it dispatches nothing itself. UNKNOWN →
 OK is not a recovery.
 
 **What each fact carries:**

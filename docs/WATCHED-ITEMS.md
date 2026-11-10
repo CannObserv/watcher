@@ -9,15 +9,12 @@ needs on nearly every task; the detail is here.
 ## Fields and schedule resolution
 
 A `WatchedItem` owns everything: the canonical `effective_url` and `source_specs`
-used by the pipeline; `default_schedule_config` (the operator's item cadence, inert since F2, #375), `default_tags`;
+used by the pipeline; `announced_schedule_config` (the registry's cadence, #254);
 `content_media_type` (#168); `domain_name` (FK → `Domain.name`, set at create time);
 `domain_suspended` (set True/False by domain deactivation/reactivation, through
 `set_domain_active` — the `src.ops.suspend_domain` break-glass, #372; the
-dashboard toggle until #377 — it gates scheduling directly, no live Domain join); `domain_default_schedule_config`
-(denormalized copy of the parent Domain's cadence — was the Domain tier of schedule
-resolution, #205; inert since F2, #375); a single optional
-`TemporalProfile` (1:1, `temporal_profiles.watched_item_id`; inert since F2 —
-Archiver evaluates profiles, and the row is kept for #380); `health_status`;
+dashboard toggle until #377 — it gates scheduling directly, no live Domain join);
+`health_status`;
 `health_reason` / `health_status_code` (#370 — why it is in ERROR now: the latest
 failed check's `WatchHealthReason` token and, for `http_status`, the origin's
 status; written on every failure, cleared on leaving ERROR, published on
@@ -66,7 +63,7 @@ date had passed a post-action: `deactivate` and `archive` wrote `is_active` /
 `1d` and audited `WATCHED_ITEM_THROTTLED`. The `/api/v1/watched-items/{id}/profiles`
 routes managed profiles. F2 deleted the tiers' reads, the floor, the profile
 evaluation, the post-actions and the routes; #377 and #378 deleted the writers, and
-the columns and the `temporal_profiles` table stay, inert, until #380 — `src/ops/export_for_archiver.py` still reads them all.
+#380 dropped the columns and the `temporal_profiles` table.
 
 **Display** of the resolved interval + next-check goes through one helper,
 `resolve_schedule_display` (`src/core/scheduling/schedule.py`, #206): it composes
@@ -75,11 +72,10 @@ the columns and the `temporal_profiles` table stay, inert, until #380 — `src/o
 property that renders the source). Every surface — list (`build_schedule_map`),
 detail interval field, and the domain-detail table — renders from it, so the UI
 matches `schedule_tick`. Before F2 it also reported the `item`/`domain` sources, a
-`throttled` flag and an active profile's override (`· profile`). Both domain facts
-(`domain_suspended`, `domain_default_schedule_config`) are still denormalized onto
-the WatchedItem via `ensure_domain_and_resolve_suspension` when an item is created
-or its URL moves; the back-fill on domain edit went with the API (#378). Only
-`domain_suspended` is read now.
+`throttled` flag and an active profile's override (`· profile`).
+`domain_suspended` is denormalized onto the WatchedItem via
+`ensure_domain_and_resolve_suspension` when an item is created or its host moves;
+the domain cadence copy beside it went with its column (#380).
 
 Until #378, cadence was validated at the API write boundary by the same helper as
 the Domain boundary (`validate_optional_schedule_config`, #205): a non-`None` config had to carry
@@ -90,11 +86,10 @@ unparseable stored interval would raise out of `compute_next_check` and stop
 scheduling for the whole system. Since F2 those writes reached inert columns, and
 #378 deleted them; the reconcile's own parse is what keeps the announced column safe.
 
-Per-domain cadence is `Domain.default_schedule_config`
-(a `schedule_config` interval string — operator check cadence, distinct from the
-`Domain.min_interval` rate-limiter floor), inert since F2 (#375) and with no
-writer since #378 deleted `PATCH /api/v1/domains/{name}` (the domain detail page
-went at #377). Archiver holds the domain default it resolves from.
+Per-domain cadence was `Domain.default_schedule_config`, inert since F2 (#375);
+#380 dropped it with `Domain.min_interval` (the politeness floor), `notes` and
+`archived_at`. A `Domain` row now carries its name and `is_active`, the
+break-glass suspension. Archiver holds the domain default it resolves from.
 
 ## Registry reconciliation (#254)
 
@@ -137,12 +132,9 @@ Watcher's dispatcher, its three sites, #71's error reminder and the T gate;
 the `/api/v1` and dashboard template surfaces, and the notifier client.
 `tests/test_notification_subsystem_retired.py` fails on any of it coming back.
 
-**Kept, inert, for #380:** the `NotificationTemplate` model and its
-`notification_templates` table (one row per target, with an intrinsic
-`visibility` — `global`, `domain` or `watched_item`, #200), which
-`src/ops/export_for_archiver.py` still re-exports, and the audit
-`EventType.NOTIFICATION_*` strings. Deleting an item still cascades to its
-item-scoped rows.
+#380 dropped the `notification_templates` table and its model, and the
+`EventType.NOTIFICATION_*` constants; `audit_log` rows already written keep
+their strings.
 
 Audits carry the WatchedItem as `watched_item_id` inside the JSONB `payload`
 (the API's audit filter went at #378; query `audit_log` directly); the

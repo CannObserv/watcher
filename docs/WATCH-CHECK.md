@@ -52,7 +52,6 @@ helper. Its other caller, `POST /api/v1/watched-items/{id}/check-now`, went with
 
 | Refusal | `check_rejected.reason` |
 |---|---|
-| archived | `paused` (no token of its own; an archived item is inactive — operator decision on #371; nothing sets `archived_at` since #378, and #380 decides the column) |
 | paused (`is_active` false) | `paused` |
 | domain suspended | `domain_suspended` |
 | no `effective_url` | `no_url` |

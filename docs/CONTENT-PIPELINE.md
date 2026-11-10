@@ -273,11 +273,10 @@ the procedure and what it looks like in the journal.
 
 **Async create (step 3).** Nothing on a create path probes. Since #251 the only
 producer of `health_status='probing'` was the dashboard's `effective_url` edit
-(`resolve_watch_target`), and #377 deleted both, so nothing enters PROBING now.
-An item already there still resolves on its next fact (`final_url` → `effective_url` +
-domain re-derivation via the #196 helper, PROBING → OK/ERROR). Steady-state
-redirects — and every Archiver-provisioned create, which starts `unknown` —
-stay audit-only (`CHECK_REDIRECT_OBSERVED`).
+(`resolve_watch_target`), and #377 deleted both. With no row left in the state
+(0 on 2026-11-10), #380 deleted PROBING and the fetch apply's branch that moved
+`effective_url` to `final_url` for it. Every redirect is now audit-only
+(`CHECK_REDIRECT_OBSERVED`).
 
 **Retired in step 5, with the fetch path:** the in-process `DomainRateLimiter`
 and its config poller + startup hydration, the 429 backoff/decay helpers,
@@ -316,9 +315,9 @@ derived from it — no probe on the create path (#241), and a fresh item starts
 `health_status='unknown'`, not `probing`: Archiver is authoritative for the URL.
 When an announcement moves `effective_url` (the URL-succession path), `domain_name`
 is re-derived from the URL **without** re-probing and `domain_suspended` is
-re-evaluated; the reconcile and the fetch-commands worker share
-`ensure_domain_and_resolve_suspension` in
-[`src/core/domains.py`](../src/core/domains.py) (#196).
+re-evaluated through `ensure_domain_and_resolve_suspension` in
+[`src/core/domains.py`](../src/core/domains.py) (#196), whose one caller is the
+reconcile since #380.
 
 **Deploy note.** `d5a71c93e0f2` is the one migration that inverts the standard
 order — restart first, then upgrade. See `docs/MIGRATIONS.md` →

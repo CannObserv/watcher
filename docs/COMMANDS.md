@@ -297,17 +297,9 @@ sudo bash -c "WATCHER_SYSTEM_ENV_FILE=/etc/watcher/backup.env WATCHER_PROJECT_EN
 source scripts/load-env.sh
 WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.prune_job_history --dry-run
 
-# Export for Archiver's migration (#373; deleted in the jump, #380). Read-only
-# transaction; writes the file 0600 and prints counts and a sha256, never contents.
-# Holds notifier channel ids: into /root/ via `sudo install`, scratch copy shredded
-# (the module docstring has the three steps); carry it to Archiver yourself, never
-# attach it to an issue. Re-run before each flip (#374–#376) and diff — only
-# exported_at should move:
-WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.export_for_archiver --output PATH
-
 # Break-glass: stop checking every item on one host (#372), Archiver up or down.
 # Database only — no bus, no Archiver. Audited `source: "cli"`; exit 0 on a change
-# or a no-op (it says which), 1 for an unknown or archived host, 2 if it could not run
+# or a no-op (it says which), 1 for an unknown host, 2 if it could not run
 # (config, usage, database). The service acts on it from its next tick; since F1
 # (#374) nothing downstream sees it. The venv's interpreter, so a break-glass run
 # never syncs the service's venv (#401), the form suggested for archiver#372's runbook:

@@ -43,11 +43,11 @@ one.
 No notification fires: the audit row and the detail-page badge carry the
 signal.
 
-**Spec acknowledgement (#274).** `last_reviewed_at` means *the operator has
+**Spec acknowledgement (#274) — retired.** `last_reviewed_at` meant *the operator has
 acknowledged the current `source_specs`* — compared against the newest
 `announcement_applied` event whose diff touched `source_specs`
-(the dashboard's `unacknowledged_spec_change` until #377 deleted it; nothing reads
-the column now, and it goes in #380). `NULL` reads as
+(the dashboard's `unacknowledged_spec_change` until #377 deleted it; #380 dropped
+the column). `NULL` read as
 *never acknowledged*, not *acknowledged at the dawn of time*. Narrow on purpose:
 a cadence re-announcement does **not** raise it, because
 `announced_schedule_config` changes *when* the fingerprint is taken, not what it
@@ -56,11 +56,11 @@ matters with it.
 
 **What survives reconciliation**: `health_status`, `health_reason`,
 `health_status_code`, `error_since`, `last_checked_at`,
-`last_observed_at`, `last_changed_at`, `last_reviewed_at`,
-`domain_suspended`, `archived_at`,
-`throttle_floor_interval` and `default_schedule_config` (both inert since F2, #375), `content_media_type`,
-`default_tags`, `description`, `name`, notification templates (inert, #379), audit rows, fetch-command
-history. Pinned by `TestLocalColumnsSurvive` — "we did not write it" is a weaker
+`last_observed_at`, `last_changed_at`, `last_full_fetch_at`,
+`domain_suspended`, `content_media_type`, the validator state, audit rows,
+fetch-command history. #380 dropped the rest of the old list: `last_reviewed_at`,
+`archived_at`, `throttle_floor_interval`, `default_schedule_config`, `default_tags`,
+`description`, `name` and the notification templates. Pinned by `TestLocalColumnsSurvive` — "we did not write it" is a weaker
 guarantee than "a test fails if someone does".
 
 **Three signals, and a fourth that is not a signal.** `revoked: true` deletes the
@@ -89,11 +89,10 @@ since #378 there is no local operator writer and no restore. Archiver's watch-ac
 route writes and announces unconditionally, so pressing resume there propagates
 even when it already considers the item active. The Watcher-local fields (name,
 description, tags, item cadence, the media-type override) lost their last
-operator editor with the API (#378); the columns are #380's. What remains legitimately Watcher's is
+operator editor with the API (#378), and #380 dropped their columns. What remains legitimately Watcher's is
 *mechanism* — local backoff and `domain_suspended` as the host-level break-glass
-(the throttle floor was one until F2, #375). `archived_at` is never touched, so an `active: true` against an
-archived row reconciles the row's contents but no-ops on scheduling (`schedule_tick`
-gates on `archived_at IS NULL` too) rather than resurrecting it.
+(the throttle floor was one until F2, #375). Until #380 an archived row no-op'd an
+`active: true` on scheduling; nothing archives an item now, and the column is gone.
 
 **Two cadence absences, one answer.** `watch_spec` is required on a live
 announcement since cannobserv#324, so delegation is spelled exactly one way:
@@ -103,13 +102,13 @@ way and **must not stop scheduling**; co-core deliberately does not validate the
 document's contents, because raising at decode on a no-DLQ stream would drop the
 message and leave the key stale.
 
-**The announced cadence does not live in `default_schedule_config`.** That column
+**The announced cadence never lived in `default_schedule_config`.** That column
 had an operator writing to it, so reconciling into it would have let the hourly
-snapshot revert every operator edit — and it is what archiver#150 and the #373
-export import out of Watcher. The `reduce_frequency` throttle moved to a floor for
+snapshot revert every operator edit — and it was what archiver#150 and the #373
+export imported out of Watcher. The `reduce_frequency` throttle moved to a floor for
 the same reason in the other direction: as a tier it would have been outranked by
 the announced cadence and silently cleared on the next announcement. Since F2
-(#375) neither column is read; both are kept until #380.
+(#375) neither column was read, and #380 dropped both.
 
 **The floor was releasable, and only by an operator (inert since F2, #375).** Writing an explicit item
 cadence — the API's item PATCH until #378, the dashboard's inline interval field
@@ -143,10 +142,10 @@ revision is always enqueued. Full detail, including why a fresh item starts
 `unknown` rather than `probing`:
 **[docs/CONTENT-PIPELINE.md](../docs/CONTENT-PIPELINE.md)**. When an announcement
 moves `effective_url` (the URL-succession path), `domain_name` is re-derived from the
-URL **without** re-probing and `domain_suspended` is re-evaluated; the reconcile and
-the fetch-commands worker share
+URL **without** re-probing and `domain_suspended` is re-evaluated through
 `ensure_domain_and_resolve_suspension` in
-`src/core/domains.py` (#196). SourceRevisions are published to Archiver as
+`src/core/domains.py` (#196) — the reconcile is its one caller since #380 removed
+the PROBING branch. SourceRevisions are published to Archiver as
 `source_revision_observed` facts on `content.revisions` (#253) on every detected
 change, and again for the latest revision when a full fetch renews its blob
 reference (#293); the local `pending_archiver_sync` outbox + drain worker

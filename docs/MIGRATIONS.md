@@ -287,6 +287,45 @@ sudo grep -c '^WATCHER_NOTIFY_CUTOVER_AT' /etc/watcher/.env   # expect 0
 No restart is needed for it: nothing reads the line any more. Subsequent
 deploys use the standard order above.
 
+## Stop-migrate-start — one-time, `c8e1d4f7a2b6` (#380)
+
+`c8e1d4f7a2b6` **drops** the headless jump's retired schema: the tables
+`notification_templates`, `temporal_profiles`, `api_keys` and `app_users`;
+eight `watched_items` columns (`name`, `description`, `default_tags`,
+`default_schedule_config`, `domain_default_schedule_config`,
+`throttle_floor_interval`, `last_reviewed_at`, `archived_at`); and four
+`domains` columns (`min_interval`, `default_schedule_config`, `notes`,
+`archived_at`).
+
+Neither order of the two earlier sections is safe here:
+
+- **Migrate first:** the previous release still maps every column, and
+  SQLAlchemy names them in its SELECTs, so every load of a WatchedItem or a
+  Domain fails until the restart.
+- **Restart first:** `watched_items.name` is NOT NULL with **no server
+  default**, and the new code's reconcile INSERTs no longer name it, so every
+  create fails until the drop lands. (`domains.min_interval` is NOT NULL too,
+  but its `server_default` covers it.)
+
+So stop the service across the migration. That leaves no window, only seconds
+of downtime: `info.registry` replays from `0-0` at boot, and the consumer
+groups resume where they stopped.
+
+```bash
+source scripts/load-env.sh
+sudo systemctl stop watcher
+uv run alembic upgrade head          # c8e1d4f7a2b6
+sudo systemctl start watcher
+```
+
+Before running it, confirm the latest nightly backup succeeded: it holds the
+values that leave the live database. Keep the stop window clear of the backup
+timer. On 2026-11-10 production held no archived item or domain and no
+`probing` item, so the drop lifts no pause or suspension. The downgrade
+recreates everything empty, with `watched_items.name` **nullable**: re-adding
+NOT NULL to a table with rows fails. No grants step: `watcher` owns every
+table here (#259 above). Subsequent deploys use the standard order above.
+
 ## No safe order — one-time, `e7c4b2a91f60` (#252)
 
 `e7c4b2a91f60` adds `fetch_commands.info_source_id` NOT NULL, and the release

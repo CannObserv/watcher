@@ -281,9 +281,10 @@ class _SharedSession:
 
     The loop's writes sit uncommitted in the test transaction, so only this
     session can see them: the poll can't move to a second one. Two users of
-    one ``AsyncSession`` must not overlap, though. One that is beginning a
-    transaction raises at any other caller. So the loop's factory holds the
-    lock for each message, and the poll holds it for each read.
+    one ``AsyncSession`` must not overlap, though. A query in flight only
+    queues the other caller, but while the session is beginning a transaction
+    any other caller raises ``InvalidRequestError``. So the loop's factory
+    holds the lock for each message, and the poll holds it for each read.
     """
 
     def __init__(self, session):

@@ -19,9 +19,9 @@ it: Replicator takes host policy from Archiver. A suspension survives
 re-announcement: the registry reconcile re-derives the domain only when an
 item's host moves.
 
-Exit 0 on a change or a no-op (it says which), 1 for an unknown or archived
-host, 2 when it could not run: a configuration or usage error, or a database it
-could not use. The opt-in is the service's own (``src.core.db_safety``, #233),
+Exit 0 on a change or a no-op (it says which), 1 for an unknown host, 2 when
+it could not run: a configuration or usage error, or a database it could not
+use. The opt-in is the service's own (``src.core.db_safety``, #233),
 given for this one command, never in an env file.
 """
 
@@ -40,7 +40,7 @@ from src.core.db_safety import (
     ProductionDatabaseRefused,
     assert_environment_db_allowed,
 )
-from src.core.domains import DomainArchived, DomainNotFound, set_domain_active
+from src.core.domains import DomainNotFound, set_domain_active
 from src.core.logging import configure_logging
 
 AUDIT_SOURCE = "cli"
@@ -74,14 +74,6 @@ async def apply(session: AsyncSession, host: str, *, resume: bool) -> Outcome:
     except DomainNotFound:
         return Outcome(
             1, f"no domain named {host!r} — nothing to {'resume' if resume else 'suspend'}"
-        )
-    except DomainArchived:
-        # Archiving revokes the host's fetch policy but flags no item, so its
-        # live items are still scheduled: say how to stop them (CR 1).
-        return Outcome(
-            1,
-            f"{host} is archived: suspension does not apply to an archived domain, and "
-            "archiving does not stop its items — restore it, then suspend it",
         )
     if result.changed:
         verb = "resumed" if resume else "suspended"

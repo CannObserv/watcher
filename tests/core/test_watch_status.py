@@ -7,7 +7,7 @@ consumer cannot check for us:
 * every publish is built from **committed rows**, so ``applied_generation``
   can never travel before its reconcile commits (the premature-stamp hazard);
 * ``applied_active`` is what the scheduler actually gates on — the conjunction
-  of ``is_active``, un-archived, and un-suspended — never a bare echo of the
+  of ``is_active`` and un-suspended — never a bare echo of the
   announcement;
 * ``applied_interval`` is the concrete resolved cadence (announced, else the
   system default since #375), so a cadence-only divergence (unparseable spec,
@@ -57,7 +57,6 @@ FULL_FETCH = datetime(2026, 8, 14, 10, 0, 0, tzinfo=UTC)
 def _item(**overrides) -> WatchedItem:
     kwargs = {
         "archiver_info_item_id": ULID(),
-        "name": "LCB rules",
         "effective_url": "https://lcb.wa.gov/rules",
         "archiver_info_source_id": str(ULID()),
         "applied_generation": 7,
@@ -115,12 +114,6 @@ class TestHealthMapping:
         events = build_status_events([_item(health_status=WatchHealthStatus.UNKNOWN)], [], now=NOW)
         assert events[0].health == "unknown"
 
-    def test_probing_maps_to_unknown(self):
-        # PROBING is producer mechanism (bus-mode URL-first create awaiting its
-        # first fact, #241); the registry only needs "not yet verified".
-        events = build_status_events([_item(health_status=WatchHealthStatus.PROBING)], [], now=NOW)
-        assert events[0].health == "unknown"
-
     def test_null_health_maps_to_unknown(self):
         events = build_status_events([_item(health_status=None)], [], now=NOW)
         assert events[0].health == "unknown"
@@ -172,9 +165,7 @@ class TestFailureLevels:
         assert events[0].health_reason is None
         assert events[0].health_status_code is None
 
-    @pytest.mark.parametrize(
-        "status", [WatchHealthStatus.OK, WatchHealthStatus.UNKNOWN, WatchHealthStatus.PROBING, None]
-    )
+    @pytest.mark.parametrize("status", [WatchHealthStatus.OK, WatchHealthStatus.UNKNOWN, None])
     def test_stale_levels_outside_error_are_dropped_not_the_frame(self, status):
         # The Emit refuses a reason or code unless health is "error"; a row that
         # left error without clearing them must still publish, minus the pair.
@@ -239,12 +230,6 @@ class TestAppliedActive:
         events = build_status_events([_item(is_active=False)], [], now=NOW)
         assert events[0].applied_active is False
 
-    def test_archived_item_is_not_active(self):
-        # The scheduler gates on archived_at IS NULL independently of
-        # is_active; an active-but-archived row is not being fetched.
-        events = build_status_events([_item(archived_at=NOW)], [], now=NOW)
-        assert events[0].applied_active is False
-
     def test_suspended_domain_stops_the_item(self):
         events = build_status_events([_item(domain_suspended=True)], [], now=NOW)
         assert events[0].applied_active is False
@@ -257,41 +242,9 @@ class TestAppliedInterval:
         )
         assert events[0].applied_interval == "15m"
 
-    def test_an_item_default_without_an_announcement_reports_the_system_default(self):
-        # #375: delegation / unparseable land announced_schedule_config = NULL,
-        # and the chain is announced-else-default, so the item tier no longer
-        # shows here: the wire carries the 1d the scheduler actually runs.
-        events = build_status_events(
-            [
-                _item(
-                    announced_schedule_config=None,
-                    default_schedule_config={"interval": "6h"},
-                    domain_default_schedule_config={"interval": "7d"},
-                )
-            ],
-            [],
-            now=NOW,
-        )
-        assert events[0].applied_interval == "1d"
-
     def test_system_default_is_still_a_concrete_interval(self):
         events = build_status_events([_item(announced_schedule_config=None)], [], now=NOW)
         assert events[0].applied_interval == "1d"
-
-    def test_a_set_floor_no_longer_overrides_the_announced_interval(self):
-        # #375: the floor was the reduce_frequency post-action's output and
-        # binds nothing now, so applied_interval equals the announcement.
-        events = build_status_events(
-            [
-                _item(
-                    announced_schedule_config={"interval": "15m"},
-                    throttle_floor_interval="1d",
-                )
-            ],
-            [],
-            now=NOW,
-        )
-        assert events[0].applied_interval == "15m"
 
     def test_explicit_empty_config_reports_none(self):
         events = build_status_events([_item(announced_schedule_config={})], [], now=NOW)

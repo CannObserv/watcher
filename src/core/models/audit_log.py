@@ -17,6 +17,12 @@ class EventType:
 
     # Legacy watch.* events were removed in the #191 collapse; the WATCH_*
     # constants and their stray audit_log rows were purged (pre-production noise).
+    # #380 removed the 22 types only the retired operator surface emitted — the
+    # notification.*, notification_template.* and profile.* sets, the domain
+    # create/update/archive/restore/delete events, and the watched_item
+    # update/throttle/archive/restore/delete/pause/resume/review events. Rows
+    # already in audit_log keep their strings (the #200 precedent): a constant
+    # names what code may write, not what the table may hold.
     CHECK_SNAPSHOT_CREATED = "check.snapshot_created"
     CHECK_NO_CHANGE = "check.no_change"
     CHECK_FETCH_FAILED = "check.fetch_failed"
@@ -37,35 +43,9 @@ class EventType:
     # a new processor version, the spec unchanged — so the revision is
     # recorded and announced, and nobody is notified.
     CHECK_REBASELINED = "check.rebaselined"
-    NOTIFICATION_DISPATCHED = "notification.dispatched"
-    NOTIFICATION_TEST = "notification.test"
-    # #200: every notification target is a NotificationTemplate (any visibility);
-    # the legacy notification_config.*, watch_nc.*, watched_item_template.*, and
-    # domain_nc_default.* events were unified into this single set. Historical
-    # audit_log rows keep their old event_type strings.
-    NOTIFICATION_TEMPLATE_CREATED = "notification_template.created"
-    NOTIFICATION_TEMPLATE_UPDATED = "notification_template.updated"
-    NOTIFICATION_TEMPLATE_DELETED = "notification_template.deleted"
-    NOTIFICATION_TEMPLATE_TESTED = "notification_template.tested"
-    PROFILE_CREATED = "profile.created"
-    PROFILE_UPDATED = "profile.updated"
-    PROFILE_DELETED = "profile.deleted"
-    DOMAIN_CREATED = "domain.created"
-    DOMAIN_UPDATED = "domain.updated"
     DOMAIN_DEACTIVATED = "domain.deactivated"
     DOMAIN_ACTIVATED = "domain.activated"
-    DOMAIN_ARCHIVED = "domain.archived"
-    DOMAIN_RESTORED = "domain.restored"
-    DOMAIN_DELETED = "domain.deleted"
-    WATCHED_ITEM_THROTTLED = "watched_item.throttled"
     WATCHED_ITEM_CREATED = "watched_item.created"
-    WATCHED_ITEM_UPDATED = "watched_item.updated"
-    WATCHED_ITEM_ARCHIVED = "watched_item.archived"
-    WATCHED_ITEM_RESTORED = "watched_item.restored"
-    WATCHED_ITEM_DELETED = "watched_item.deleted"
-    WATCHED_ITEM_PAUSED = "watched_item.paused"
-    WATCHED_ITEM_RESUMED = "watched_item.resumed"
-    WATCHED_ITEM_REVIEWED = "watched_item.reviewed"
     # #274: the registry re-announced an item and something it owns actually
     # moved. Carries a `changes` diff over the five announcement-authoritative
     # columns; emitted only when that diff is non-empty, so the hourly snapshot's

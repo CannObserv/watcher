@@ -25,7 +25,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.bus import BUS_REDIS_URL_ENV, get_shared_bus_client
 from src.core.database import get_session_factory
-from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_suspension
 from src.core.fetch_commands import (
     create_fetch_command,
     fetch_command_timeout_seconds,
@@ -553,33 +552,6 @@ async def apply_fetch_blob(command_id: str, bus_client=None) -> dict:
                 watched_item, transition=False, check_command_id=row.check_command_id
             )
             return {"skipped": True, "reason": "superseded"}
-
-        # Async-probe resolution (#241 step 3): a PROBING item's first fact is
-        # its probe. When the origin redirected, final_url becomes the
-        # effective_url — exactly what the inline probe used to discover — and
-        # the domain facts are re-derived through the shared #196 helper. PROBING
-        # clears to OK via _record_check_success below. Steady-state redirects
-        # (non-PROBING) stay audit-only: Archiver is authoritative then.
-        if (
-            watched_item.health_status == WatchHealthStatus.PROBING
-            and row.final_url
-            and row.final_url != watched_item.effective_url
-        ):
-            new_domain = domain_name_for_url(row.final_url)
-            # Upsert the Domain row before the item references it (FK ordering:
-            # ensure_domain's nested commit flushes the dirty item too).
-            resolution = await ensure_domain_and_resolve_suspension(session, new_domain)
-            watched_item.effective_url = row.final_url
-            watched_item.domain_name = new_domain
-            watched_item.domain_suspended = resolution.suspended
-            watched_item.domain_default_schedule_config = resolution.default_schedule_config
-            audit(
-                session,
-                EventType.WATCHED_ITEM_UPDATED,
-                watched_item_id=str(watched_item.id),
-                updated_fields=["effective_url", "domain_name"],
-                source="probe_resolution",
-            )
 
         # Seed the observed media type once, from the RAW header (#168 semantics:
         # an absent header is not application/octet-stream; the consumer stored

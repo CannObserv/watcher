@@ -15,19 +15,16 @@ import fakeredis
 import pytest
 from co_core.pure.models.changes import WatchErrorEmit, WatchRecoveredEmit
 from sqlalchemy import select
-from ulid import ULID
 
 import src.workers.fetch_commands as fc_mod
 import src.workers.process_issue as pi_mod
 from src.core.fetch_commands import create_fetch_command, get_open_command
 from src.core.models.audit_log import AuditLog, EventType
-from src.core.models.domain import Domain
 from src.core.models.fetch_command import (
     OPEN_STATUSES,
     FetchCommand,
     FetchCommandStatus,
 )
-from src.core.models.notification_template import VISIBILITY_GLOBAL, NotificationTemplate
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.pending_watch_event import PendingWatchEvent
 from src.core.models.process_command import ProcessCommand, ProcessCommandStatus
@@ -244,7 +241,7 @@ class TestApplyFetchBlob:
         assert command.status == ProcessCommandStatus.PENDING_PUBLISH
         assert row.status == FetchCommandStatus.PROCESSING
 
-    async def test_redirect_divergence_is_audited(self, db_session, monkeypatch):
+    async def test_redirect_divergence_is_audited_only(self, db_session, monkeypatch):
         wi, row = await _row_with_fact(db_session, final_url="https://lcb.wa.gov/moved-here")
         original_url = wi.effective_url
         _wire(db_session, monkeypatch)
@@ -254,26 +251,24 @@ class TestApplyFetchBlob:
         events = await _audit_events(db_session, EventType.CHECK_REDIRECT_OBSERVED)
         assert len(events) == 1
         assert events[0].payload["final_url"] == "https://lcb.wa.gov/moved-here"
-        # Non-PROBING items keep the audit-only behaviour: Archiver stays
-        # authoritative for effective_url after the probe phase.
+        # Audit only, whatever the item's health: Archiver is authoritative
+        # for effective_url (the PROBING exception went with #380).
         assert wi.effective_url == original_url
 
-    async def test_final_url_resolves_a_probing_item(self, db_session, monkeypatch):
-        """#241 step 3: a PROBING item's first fact is its probe. PROBING
-        clears to OK with the derived fact, like any other outcome."""
+    async def test_a_first_fact_redirect_moves_nothing(self, db_session, monkeypatch):
+        """An item's first fact (UNKNOWN health) is no longer its probe: the
+        redirect is audited and the item keeps its URL and domain (#380)."""
         wi, row = await _row_with_fact(db_session, final_url="https://www.lcb.wa.gov/notices")
-        wi.health_status = WatchHealthStatus.PROBING
+        wi.health_status = WatchHealthStatus.UNKNOWN
+        original = (wi.effective_url, wi.domain_name)
         await db_session.flush()
         _wire(db_session, monkeypatch)
 
         await apply_fetch_blob(row.command_id, bus_client=fakeredis.FakeAsyncRedis())
 
-        assert wi.effective_url == "https://www.lcb.wa.gov/notices"
-        assert wi.domain_name == "www.lcb.wa.gov"
-        domain = (
-            await db_session.execute(select(Domain).where(Domain.name == "www.lcb.wa.gov"))
-        ).scalar_one_or_none()
-        assert domain is not None  # ensure_domain upserted the new host
+        assert (wi.effective_url, wi.domain_name) == original
+        events = await _audit_events(db_session, EventType.CHECK_REDIRECT_OBSERVED)
+        assert len(events) == 1
 
 
 class TestApplyFetchFailure:
@@ -808,24 +803,14 @@ class TestNoDispatch:
     """#376 part 2: Watcher sends nothing on a health edge. Archiver notifies
     from the ``watch_error`` / ``watch_recovered`` facts (#369), its reminder
     cadence included, so an error, a long episode and a recovery each leave
-    their bookkeeping and no ``notification.dispatched`` — even with an active
-    template subscribed to every event."""
+    their bookkeeping and no ``notification.dispatched``. The template table
+    went with #380, so the event's string is spelled here, not imported."""
 
     @pytest.fixture(autouse=True)
     async def _wired(self, db_session, monkeypatch):
         _wire(db_session, monkeypatch)
         self.republish = AsyncMock()
         monkeypatch.setattr(fc_mod, "defer_status_republish", self.republish)
-        db_session.add(
-            NotificationTemplate(
-                title="Every event",
-                visibility=VISIBILITY_GLOBAL,
-                remote_channel_id=str(ULID()),
-                channel_hint="json",
-                events=["change_detected", "watch_error", "watch_recovered"],
-            )
-        )
-        await db_session.flush()
 
     async def _item(self, db_session, health=WatchHealthStatus.OK):
         wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
@@ -855,7 +840,7 @@ class TestNoDispatch:
         await self._fail(db_session, wi)
 
         assert wi.health_status == WatchHealthStatus.ERROR
-        assert await _audit_events(db_session, EventType.NOTIFICATION_DISPATCHED) == []
+        assert await _audit_events(db_session, "notification.dispatched") == []
 
     async def test_a_long_episode_sends_no_reminder(self, db_session):
         """#71's reminder is Archiver's: an episode older than a day still
@@ -867,7 +852,7 @@ class TestNoDispatch:
 
         await self._fail(db_session, wi)
 
-        assert await _audit_events(db_session, EventType.NOTIFICATION_DISPATCHED) == []
+        assert await _audit_events(db_session, "notification.dispatched") == []
         assert self.republish.await_count == 1  # the edge only
 
     async def test_recovery_sends_nothing(self, db_session):
@@ -876,7 +861,7 @@ class TestNoDispatch:
         await self._recover(db_session, wi)
 
         assert wi.health_status == WatchHealthStatus.OK
-        assert await _audit_events(db_session, EventType.NOTIFICATION_DISPATCHED) == []
+        assert await _audit_events(db_session, "notification.dispatched") == []
 
     def test_the_reminder_stamp_is_gone(self):
         """``last_error_notified_at`` was #71's clock; nothing reads it now."""
@@ -1078,7 +1063,7 @@ class TestWatchEventFacts:
 
     @pytest.mark.parametrize(
         "previous",
-        [WatchHealthStatus.OK, WatchHealthStatus.UNKNOWN, WatchHealthStatus.PROBING],
+        [WatchHealthStatus.OK, WatchHealthStatus.UNKNOWN],
     )
     async def test_the_edge_into_error_commits_its_fact(self, db_session, previous):
         """From any other health, ``unknown`` included: a new item whose first
@@ -1137,8 +1122,8 @@ class TestWatchEventFacts:
 
         assert await self._facts(db_session) == []
 
-    async def test_probing_to_ok_is_not_a_recovery(self, db_session):
-        wi = await self._item(db_session, WatchHealthStatus.PROBING)
+    async def test_unknown_to_ok_is_not_a_recovery(self, db_session):
+        wi = await self._item(db_session, WatchHealthStatus.UNKNOWN)
 
         await self._recover(db_session, wi)
 

@@ -50,9 +50,7 @@ BROKER_REFUSALS = [
 async def _setup_pending_row(db_session: AsyncSession, **over) -> tuple:
     """Create WatchedItem + ChangeRevision + a fully-provisioned outbox row."""
     now = datetime.now(UTC)
-    wi = await make_watched_item(
-        db_session, name="DrainTest", archiver_info_source_id=ARCHIVER_SOURCE_ID
-    )
+    wi = await make_watched_item(db_session, archiver_info_source_id=ARCHIVER_SOURCE_ID)
     await db_session.flush()
 
     rev = ChangeRevision(

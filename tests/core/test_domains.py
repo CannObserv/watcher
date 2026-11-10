@@ -1,19 +1,17 @@
 """Unit + integration tests for src.core.domains (#196, #372).
 
 ``set_domain_active`` is the one writer of ``Domain.is_active`` and the
-``WatchedItem.domain_suspended`` back-fill that follows it. The dashboard toggle
-and the break-glass CLI both delegate to it, so the CLI never imports the
-dashboard (#377 deletes it) and the two cannot drift.
+``WatchedItem.domain_suspended`` back-fill that follows it. The break-glass CLI
+delegates to it, the one control left since #377 deleted the dashboard's
+toggle.
 """
 
-from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import select
 
 from src.core.domains import (
-    DomainArchived,
     DomainNotFound,
     domain_name_for_url,
     ensure_domain_and_resolve_suspension,
@@ -21,6 +19,7 @@ from src.core.domains import (
 )
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
+from src.core.models.watched_item import WatchHealthStatus
 from tests.conftest import make_watched_item
 
 
@@ -47,38 +46,10 @@ class TestDomainNameForUrl:
 
 
 @pytest.mark.integration
-class TestDomainDefaultScheduleConfig:
-    """#205: Domain.default_schedule_config — operator cadence, not the rate-limiter floor."""
-
-    async def test_defaults_null_and_matches_is_null(self, db_session):
-        db_session.add(Domain(name="dom-null.example"))
-        await db_session.flush()
-        found = (
-            await db_session.execute(
-                select(Domain).where(
-                    Domain.name == "dom-null.example",
-                    Domain.default_schedule_config.is_(None),
-                )
-            )
-        ).scalar_one()
-        assert found.default_schedule_config is None
-
-    async def test_round_trips(self, db_session):
-        db_session.add(
-            Domain(name="dom-cadence.example", default_schedule_config={"interval": "6h"})
-        )
-        await db_session.flush()
-        found = (
-            await db_session.execute(select(Domain).where(Domain.name == "dom-cadence.example"))
-        ).scalar_one()
-        assert found.default_schedule_config == {"interval": "6h"}
-
-
-@pytest.mark.integration
 class TestEnsureDomainAndResolveSuspension:
     async def test_creates_missing_domain_and_returns_not_suspended(self, db_session):
         result = await ensure_domain_and_resolve_suspension(db_session, "fresh-core.example")
-        assert result.suspended is False
+        assert result is False
         domain = (
             await db_session.execute(select(Domain).where(Domain.name == "fresh-core.example"))
         ).scalar_one_or_none()
@@ -88,33 +59,17 @@ class TestEnsureDomainAndResolveSuspension:
         db_session.add(Domain(name="inactive-core.example", is_active=False))
         await db_session.flush()
         result = await ensure_domain_and_resolve_suspension(db_session, "inactive-core.example")
-        assert result.suspended is True
+        assert result is True
 
     async def test_active_domain_returns_not_suspended(self, db_session):
         db_session.add(Domain(name="active-core.example", is_active=True))
         await db_session.flush()
         result = await ensure_domain_and_resolve_suspension(db_session, "active-core.example")
-        assert result.suspended is False
+        assert result is False
 
     async def test_none_domain_returns_not_suspended(self, db_session):
         result = await ensure_domain_and_resolve_suspension(db_session, None)
-        assert result.suspended is False
-        assert result.default_schedule_config is None
-
-    async def test_returns_domain_default_schedule_config(self, db_session):
-        """#205: the helper surfaces the domain's cadence for denormalization."""
-        db_session.add(
-            Domain(name="cadence-core.example", default_schedule_config={"interval": "7d"})
-        )
-        await db_session.flush()
-        result = await ensure_domain_and_resolve_suspension(db_session, "cadence-core.example")
-        assert result.suspended is False
-        assert result.default_schedule_config == {"interval": "7d"}
-
-    async def test_fresh_domain_has_no_default(self, db_session):
-        """#205: a freshly-upserted domain has a NULL cadence (system default applies)."""
-        result = await ensure_domain_and_resolve_suspension(db_session, "fresh-cadence.example")
-        assert result.default_schedule_config is None
+        assert result is False
 
     async def test_a_lost_create_race_resolves_from_the_winning_row(self, db_session, monkeypatch):
         """The create runs in a savepoint so a concurrent insert of the same host
@@ -140,7 +95,7 @@ class TestEnsureDomainAndResolveSuspension:
         monkeypatch.setattr(db_session, "execute", _first_lookup_misses)
         result = await ensure_domain_and_resolve_suspension(db_session, "lost-race.example")
 
-        assert result.suspended is True
+        assert result is True
         assert calls == 2
 
 
@@ -180,13 +135,13 @@ class TestSetDomainActiveSuspend:
         db_session.add(Domain(name="s2.example"))
         live = await _item(db_session, "s2.example", path="a", is_active=True)
         paused = await _item(db_session, "s2.example", path="b", is_active=False)
-        archived = await _item(
-            db_session, "s2.example", path="c", is_active=False, archived_at=datetime.now(UTC)
+        failing = await _item(
+            db_session, "s2.example", path="c", health_status=WatchHealthStatus.ERROR
         )
 
         result = await set_domain_active(db_session, "s2.example", active=False, source="cli")
 
-        for wi in (live, paused, archived):
+        for wi in (live, paused, failing):
             await db_session.refresh(wi)
             assert wi.domain_suspended is True
         assert result.items_updated == 3
@@ -285,18 +240,3 @@ class TestSetDomainActiveRefusals:
     async def test_an_unknown_host_raises(self, db_session):
         with pytest.raises(DomainNotFound):
             await set_domain_active(db_session, "absent.example", active=False, source="cli")
-
-    @pytest.mark.parametrize("active", [False, True])
-    async def test_an_archived_host_raises_and_writes_nothing(self, db_session, active):
-        """Flipping ``is_active`` under an archive would make restore resurrect a
-        state nobody chose; the caller restores first."""
-        name = f"arch-{active}.example".lower()
-        db_session.add(Domain(name=name, is_active=True, archived_at=datetime.now(UTC)))
-        wi = await _item(db_session, name, domain_suspended=True)
-
-        with pytest.raises(DomainArchived):
-            await set_domain_active(db_session, name, active=active, source="cli")
-
-        await db_session.refresh(wi)
-        assert wi.domain_suspended is True
-        assert await _audits(db_session, name) == []

@@ -149,17 +149,6 @@ class TestColdStartCreate:
         assert wi.domain_name == "lcb.wa.gov"
         assert wi.domain_suspended is False
 
-    async def test_create_derives_a_name_because_the_announcement_carries_none(self, db_session):
-        """`RegistryAnnouncementState` has no `name` field. The column is NOT NULL,
-        so the reconcile derives a legible placeholder from the URL rather than
-        inventing registry data."""
-        info_item_id = ULID()
-        await reconcile_announcement(
-            db_session, _announcement(info_item_id, url="https://lcb.wa.gov/notices/board")
-        )
-        wi = await _get(db_session, info_item_id)
-        assert wi.name == "lcb.wa.gov/notices/board"
-
     async def test_health_starts_unknown_not_ok(self, db_session):
         info_item_id = ULID()
         await reconcile_announcement(db_session, _announcement(info_item_id))
@@ -362,43 +351,6 @@ class TestActiveStates:
         assert (await _get(db_session, info_item_id)).is_active is True
 
 
-class TestArchived:
-    """An `active: true` announcement against an archived row no-ops and reports —
-    it does not resurrect. Archiver's dashboard already handles Watcher 409ing
-    pause/resume on an archived item, so the behaviour exists; this makes it
-    deliberate on the reconcile side."""
-
-    async def test_an_active_announcement_does_not_clear_archived_at(self, db_session):
-        info_item_id = ULID()
-        await reconcile_announcement(db_session, _announcement(info_item_id, generation=1))
-        wi = await _get(db_session, info_item_id)
-        wi.archived_at = NOW - timedelta(days=3)
-        await db_session.commit()
-
-        await reconcile_announcement(
-            db_session, _announcement(info_item_id, generation=2, active=True)
-        )
-
-        wi = await _get(db_session, info_item_id)
-        assert wi.archived_at == NOW - timedelta(days=3)
-
-    async def test_an_archived_item_still_reconciles_its_specs(self, db_session):
-        """No-op means *not scheduled*, not *not reconciled* — the row must be
-        correct if it is ever restored."""
-        info_item_id = ULID()
-        await reconcile_announcement(db_session, _announcement(info_item_id, generation=1))
-        wi = await _get(db_session, info_item_id)
-        wi.archived_at = NOW
-        await db_session.commit()
-
-        await reconcile_announcement(
-            db_session,
-            _announcement(info_item_id, generation=2, source_specs=[{"selector": "#new"}]),
-        )
-
-        assert (await _get(db_session, info_item_id)).source_specs == [{"selector": "#new"}]
-
-
 class TestCadence:
     async def test_a_parseable_interval_lands_in_the_announced_tier(self, db_session):
         info_item_id = ULID()
@@ -414,14 +366,13 @@ class TestCadence:
         """cannobserv#324: `{"schema_version": 1}` with no `interval` is how the
         producer says *apply your own default*. Before F2 that was the per-domain
         tier; since #375 Archiver resolves the domain default itself, so the only
-        default left here is the system one — a stale domain value is ignored."""
+        default left here is the system one."""
         info_item_id = ULID()
         await reconcile_announcement(
             db_session, _announcement(info_item_id, watch_spec={"schema_version": 1})
         )
         wi = await _get(db_session, info_item_id)
         assert wi.announced_schedule_config is None
-        wi.domain_default_schedule_config = {"interval": "7d"}
         assert resolved_schedule_config(wi) == SYSTEM_DEFAULT_SCHEDULE_CONFIG
 
     async def test_an_unparseable_interval_does_not_stop_scheduling(self, db_session):
@@ -483,12 +434,9 @@ class TestLocalColumnsSurvive:
         wi.health_status = WatchHealthStatus.ERROR
         wi.last_checked_at = NOW - timedelta(hours=2)
         wi.last_changed_at = NOW - timedelta(days=1)
-        wi.last_reviewed_at = NOW - timedelta(days=5)
         wi.health_reason, wi.health_status_code = "http_status", 503  # #370
         wi.error_since = NOW - timedelta(hours=4)  # #369
         wi.content_media_type = "application/pdf"
-        wi.default_tags = ["lcb", "notices"]
-        wi.description = "Operator's note"
         await db_session.commit()
 
         await reconcile_announcement(db_session, _announcement(info_item_id, generation=2))
@@ -497,12 +445,9 @@ class TestLocalColumnsSurvive:
         assert wi.health_status == WatchHealthStatus.ERROR
         assert wi.last_checked_at == NOW - timedelta(hours=2)
         assert wi.last_changed_at == NOW - timedelta(days=1)
-        assert wi.last_reviewed_at == NOW - timedelta(days=5)
         assert (wi.health_reason, wi.health_status_code) == ("http_status", 503)
         assert wi.error_since == NOW - timedelta(hours=4)
         assert wi.content_media_type == "application/pdf"
-        assert wi.default_tags == ["lcb", "notices"]
-        assert wi.description == "Operator's note"
 
     async def test_domain_suspended_survives(self, db_session):
         """Host-level mechanism, on Watcher's side of the epic's role table. An
@@ -520,45 +465,6 @@ class TestLocalColumnsSurvive:
         )
 
         assert (await _get(db_session, info_item_id)).domain_suspended is True
-
-    async def test_the_throttle_floor_survives(self, db_session):
-        info_item_id = ULID()
-        await reconcile_announcement(db_session, _announcement(info_item_id, generation=1))
-        wi = await _get(db_session, info_item_id)
-        wi.throttle_floor_interval = "1d"
-        await db_session.commit()
-
-        await reconcile_announcement(
-            db_session,
-            _announcement(
-                info_item_id, generation=2, watch_spec={"schema_version": 1, "interval": "15m"}
-            ),
-        )
-
-        wi = await _get(db_session, info_item_id)
-        # The column is Watcher's and survives; since #375 it binds nothing.
-        assert wi.throttle_floor_interval == "1d"
-        assert resolved_schedule_config(wi) == {"interval": "15m"}
-
-    async def test_the_local_cadence_tier_survives(self, db_session):
-        """`default_schedule_config` is not *overwritten* — the #373 export reads it
-        out of Watcher for Archiver's import until #380 drops it. Inert since
-        #375: it is no longer the fallback when an announcement withdraws its
-        interval; the system default is."""
-        info_item_id = ULID()
-        await reconcile_announcement(db_session, _announcement(info_item_id, generation=1))
-        wi = await _get(db_session, info_item_id)
-        wi.default_schedule_config = {"interval": "6h"}
-        await db_session.commit()
-
-        await reconcile_announcement(
-            db_session,
-            _announcement(
-                info_item_id, generation=2, watch_spec={"schema_version": 1, "interval": "15m"}
-            ),
-        )
-
-        assert (await _get(db_session, info_item_id)).default_schedule_config == {"interval": "6h"}
 
 
 class TestDomainMovement:
@@ -680,17 +586,6 @@ class TestPreexistingRow:
         refreshed = await _get(db_session, wi.archiver_info_item_id)
         assert refreshed.id == wi.id
         assert refreshed.effective_url == "https://lcb.wa.gov/renamed"
-
-    async def test_adoption_keeps_the_operator_supplied_name(self, db_session):
-        """The announcement carries no `name`, so it has no opinion to apply."""
-        wi = await make_watched_item(db_session, name="WSLCB Board Notices")
-        await db_session.commit()
-
-        await reconcile_announcement(
-            db_session, _announcement(wi.archiver_info_item_id, generation=1)
-        )
-
-        assert (await _get(db_session, wi.archiver_info_item_id)).name == "WSLCB Board Notices"
 
 
 class TestConsumerLoop:

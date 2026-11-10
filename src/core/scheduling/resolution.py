@@ -9,16 +9,10 @@ leaves ``announced_schedule_config`` NULL and lands on the system default, the
 only default Watcher keeps.
 
 **Before F2 there were four tiers and a floor.** The chain was announced →
-``WatchedItem.default_schedule_config`` → the Domain default (read from the
-denormalized ``WatchedItem.domain_default_schedule_config``) → system default
-(#205, #254), and the ``reduce_frequency`` post-action's
-``throttle_floor_interval`` applied over it as a floor that could only slow an
-item. The announced cadence had its own column so the hourly snapshot could not
-overwrite the operator's item default or revert a throttle. Those three columns
-and their writers are kept, inert, until the jump: the dashboard went in #377,
-the API goes in #378, the columns in #380, and
-``src/ops/export_for_archiver.py`` still reads all of them for the pre-F3
-re-export (#376).
+the item's own default → the Domain default (denormalized onto the item) →
+system default (#205, #254), with the ``reduce_frequency`` post-action's
+throttle floor applied over it. Those columns and their writers went with the
+jump (#377, #378), the columns themselves in #380.
 """
 
 from typing import TYPE_CHECKING

@@ -274,14 +274,13 @@ async def _procrastinate_schema(test_engine) -> AsyncGenerator[None]:
 # ---------------------------------------------------------------------------
 # Module-level async factory (NOT a pytest fixture).
 #
-# Tests call it directly:  ``wi = await make_watched_item(db_session, name="X")``
+# Tests call it directly:  ``wi = await make_watched_item(db_session)``
 # ---------------------------------------------------------------------------
 
 
 async def make_watched_item(
     session,
     *,
-    name="Test Watched Item",
     archiver_info_item_id=None,
     archiver_info_source_id=None,
     primary_url="https://example.com",
@@ -296,8 +295,8 @@ async def make_watched_item(
     is created at the other end (#311).
 
     Extra ``**kwargs`` flow into the WatchedItem constructor — e.g.
-    ``is_active``, ``content_media_type``, ``default_tags``, ``description``,
-    ``default_schedule_config``, ``domain_suspended``, ``archived_at``.
+    ``is_active``, ``content_media_type``, ``announced_schedule_config``,
+    ``domain_suspended``.
     ``primary_url`` seeds ``effective_url``.
     Pass ``domain_name=`` to set ``WatchedItem.domain_name`` (auto-creating the
     Domain row).
@@ -319,7 +318,6 @@ async def make_watched_item(
     wi = WatchedItem(
         archiver_info_item_id=archiver_info_item_id,
         archiver_info_source_id=archiver_info_source_id,
-        name=name,
         effective_url=primary_url,
         domain_name=domain_name,
         **kwargs,

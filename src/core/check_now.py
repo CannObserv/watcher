@@ -6,8 +6,9 @@ A core service, as #372 made ``set_domain_active``. Its caller is the
 
 Each refusal mirrors a short-circuit in ``check_watched_item`` or its issue
 path, so a request that could not do anything is refused up front instead of
-accepted over a silent no-op. In order, first match wins: archived, paused,
-domain suspended, no URL, a fetch command already open. The consumer words
+accepted over a silent no-op. In order, first match wins: paused, domain
+suspended, no URL, a fetch command already open. (``archived`` went with the
+column, #380: nothing archives an item since #378.) The consumer words
 each refusal as one of the closed ``CheckRejectionReason`` tokens.
 """
 
@@ -24,7 +25,6 @@ from src.core.models.watched_item import WatchedItem
 class CheckRefusal(enum.StrEnum):
     """Why a check cannot run now."""
 
-    ARCHIVED = "archived"
     PAUSED = "paused"  # is_active=False
     DOMAIN_SUSPENDED = "domain_suspended"
     NO_URL = "no_url"  # effective_url empty: nothing to fetch
@@ -42,8 +42,6 @@ class CheckVerdict(NamedTuple):
 
 async def preflight_check(session: AsyncSession, watched_item: WatchedItem) -> CheckVerdict:
     """The verdict for checking ``watched_item`` now. Reads only; writes nothing."""
-    if watched_item.archived_at is not None:
-        return CheckVerdict(CheckRefusal.ARCHIVED)
     if not watched_item.is_active:
         return CheckVerdict(CheckRefusal.PAUSED)
     if watched_item.domain_suspended:

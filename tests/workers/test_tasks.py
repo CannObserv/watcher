@@ -13,7 +13,7 @@ plus `schedule_tick`'s due-calculation (post-actions are gone since #375).
 """
 
 from contextlib import asynccontextmanager
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -24,7 +24,6 @@ import src.workers.tasks as tasks_mod
 from src.core.models.audit_log import AuditLog
 from src.core.models.domain import Domain
 from src.core.models.fetch_command import FetchCommand
-from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.validators import CONDITIONAL_GET_ENV, validator_source_key
 from src.workers.tasks import check_watched_item, schedule_tick
 from tests.conftest import make_watched_item
@@ -86,7 +85,7 @@ async def _run_tick(db_session, monkeypatch, now) -> tuple[list, AsyncMock]:
 class TestCheckWatchedItemGuards:
     """Every short-circuit must return before a command is issued.
 
-    The guards are what keeps a paused / archived / domain-suspended / url-less
+    The guards are what keeps a paused / domain-suspended / url-less
     item from putting load on the bus and the origin. Post-cutover the observable
     is "no fetch_commands row", not "the fetcher was not called".
     """
@@ -98,7 +97,7 @@ class TestCheckWatchedItemGuards:
         return await check_watched_item(str(watched_item.id))
 
     async def test_skips_inactive_watched_item(self, db_session, monkeypatch):
-        wi = await make_watched_item(db_session, name="Inactive", is_active=False)
+        wi = await make_watched_item(db_session, is_active=False)
         await db_session.commit()
 
         result = await self._run(db_session, monkeypatch, wi)
@@ -107,8 +106,8 @@ class TestCheckWatchedItemGuards:
         assert await _command_count(db_session) == 0
 
     async def test_skips_paused_watched_item(self, db_session, monkeypatch):
-        """#188 CR-2: paused (is_active=False, NOT archived) is a normal state."""
-        wi = await make_watched_item(db_session, name="Paused", is_active=True)
+        """#188 CR-2: paused (is_active=False) is a normal state."""
+        wi = await make_watched_item(db_session, is_active=True)
         wi.is_active = False
         wi.effective_url = "https://example.com/page"
         await db_session.commit()
@@ -118,19 +117,8 @@ class TestCheckWatchedItemGuards:
         assert result.get("skipped") is True
         assert await _command_count(db_session) == 0
 
-    async def test_skips_archived_watched_item(self, db_session, monkeypatch):
-        wi = await make_watched_item(db_session, name="Archived")
-        wi.archived_at = datetime.now(UTC)
-        wi.effective_url = "https://example.com/page"
-        await db_session.commit()
-
-        result = await self._run(db_session, monkeypatch, wi)
-
-        assert result.get("skipped") is True
-        assert await _command_count(db_session) == 0
-
     async def test_skips_domain_suspended_watched_item(self, db_session, monkeypatch):
-        wi = await make_watched_item(db_session, name="Suspended")
+        wi = await make_watched_item(db_session)
         wi.domain_suspended = True
         wi.effective_url = "https://example.com/page"
         await db_session.commit()
@@ -143,7 +131,7 @@ class TestCheckWatchedItemGuards:
     async def test_skips_watched_item_without_effective_url(self, db_session, monkeypatch):
         # The column is NOT NULL with a "" default, so "unset" is the empty
         # string — that is the state a never-resolved item is actually in.
-        wi = await make_watched_item(db_session, name="NoUrl")
+        wi = await make_watched_item(db_session)
         wi.effective_url = ""
         await db_session.commit()
 
@@ -176,7 +164,7 @@ class TestScheduleTickAggregation:
     async def test_enqueues_when_watched_item_overdue(self, db_session, monkeypatch):
         """A WatchedItem whose last_checked_at is older than the interval is due."""
         # Announced cadence = 1h (the only tier since F2, #375).
-        wi = await make_watched_item(db_session, name="A")
+        wi = await make_watched_item(db_session)
         wi.announced_schedule_config = {"interval": "1h"}
         wi.last_checked_at = self.NOW - timedelta(hours=2)
         await db_session.commit()
@@ -186,7 +174,7 @@ class TestScheduleTickAggregation:
 
     async def test_does_not_enqueue_when_watched_item_fresh(self, db_session, monkeypatch):
         """If the WatchedItem was checked recently, it is not due."""
-        wi = await make_watched_item(db_session, name="Fresh")
+        wi = await make_watched_item(db_session)
         wi.announced_schedule_config = {"interval": "1h"}
         wi.last_checked_at = self.NOW - timedelta(minutes=5)
         await db_session.commit()
@@ -196,7 +184,7 @@ class TestScheduleTickAggregation:
 
     async def test_null_last_checked_at_is_due_immediately(self, db_session, monkeypatch):
         """A WatchedItem with NULL last_checked_at is always overdue."""
-        wi = await make_watched_item(db_session, name="Never")
+        wi = await make_watched_item(db_session)
         wi.announced_schedule_config = {"interval": "1h"}
         # explicitly leave wi.last_checked_at as None.
         await db_session.commit()
@@ -204,16 +192,12 @@ class TestScheduleTickAggregation:
         defer_calls, _ = await _run_tick(db_session, monkeypatch, self.NOW)
         assert [c["watched_item_id"] for c in defer_calls] == [str(wi.id)]
 
-    async def test_skips_inactive_or_archived_watched_items(self, db_session, monkeypatch):
-        """is_active=False and archived_at IS NOT NULL exclude a WatchedItem."""
+    async def test_skips_inactive_watched_items(self, db_session, monkeypatch):
+        """is_active=False excludes a WatchedItem."""
         wi_inactive = await make_watched_item(
-            db_session, name="Inactive WI", primary_url="https://inactive.example.com"
+            db_session, primary_url="https://inactive.example.com"
         )
         wi_inactive.is_active = False
-        wi_archived = await make_watched_item(
-            db_session, name="Archived WI", primary_url="https://archived.example.com"
-        )
-        wi_archived.archived_at = self.NOW - timedelta(days=1)
         await db_session.commit()
 
         defer_calls, _ = await _run_tick(db_session, monkeypatch, self.NOW)
@@ -231,7 +215,6 @@ class TestScheduleTickInactiveDomain:
         # domain-deactivation cascade sets), not via a live Domain join.
         await make_watched_item(
             db_session,
-            name="On Paused Domain",
             domain_name="paused.com",
             is_active=True,
             domain_suspended=True,
@@ -242,90 +225,15 @@ class TestScheduleTickInactiveDomain:
         assert defer_calls == []
 
 
-# ---------------------------------------------------------------------------
-# F2 (#375): the chain is announced-else-default; profiles fire nothing.
-# ---------------------------------------------------------------------------
+class TestTheTickWritesNothing:
+    """#375: the tick runs no profiles and no post-actions — Archiver does
+    (CannObserv/archiver#365) — so a due item is deferred and nothing written."""
 
-
-class TestScheduleTickChain:
-    """The due check reads announced, else the system default — nothing else."""
-
-    NOW = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
-
-    async def test_an_item_default_no_longer_makes_an_item_due(self, db_session, monkeypatch):
-        """1h item default, checked 2h ago, nothing announced → the 1d default
-        governs, so the item is not due."""
-        wi = await make_watched_item(db_session, name="ItemTier")
-        wi.default_schedule_config = {"interval": "1h"}
-        wi.last_checked_at = self.NOW - timedelta(hours=2)
-        await db_session.commit()
-
-        defer_calls, _ = await _run_tick(db_session, monkeypatch, self.NOW)
-        assert defer_calls == []
-
-    async def test_a_domain_default_no_longer_makes_an_item_due(self, db_session, monkeypatch):
-        wi = await make_watched_item(db_session, name="DomainTier")
-        wi.domain_default_schedule_config = {"interval": "1h"}
-        wi.last_checked_at = self.NOW - timedelta(hours=2)
-        await db_session.commit()
-
-        defer_calls, _ = await _run_tick(db_session, monkeypatch, self.NOW)
-        assert defer_calls == []
-
-    async def test_a_set_floor_no_longer_slows_an_item(self, db_session, monkeypatch):
-        """15m announced under a 1d floor, checked 30m ago → due."""
-        wi = await make_watched_item(db_session, name="Floored")
-        wi.announced_schedule_config = {"interval": "15m"}
-        wi.throttle_floor_interval = "1d"
-        wi.last_checked_at = self.NOW - timedelta(minutes=30)
-        await db_session.commit()
-
-        defer_calls, _ = await _run_tick(db_session, monkeypatch, self.NOW)
-        assert [c["watched_item_id"] for c in defer_calls] == [str(wi.id)]
-
-    async def test_an_in_window_profile_no_longer_shortens_the_cadence(
-        self, db_session, monkeypatch
-    ):
-        """A 1m event rule 2 days out, 1d announced, checked 1h ago → not due."""
-        wi = await make_watched_item(db_session, name="InWindow")
-        wi.announced_schedule_config = {"interval": "1d"}
-        wi.last_checked_at = self.NOW - timedelta(hours=1)
-        db_session.add(
-            TemporalProfile(
-                watched_item_id=wi.id,
-                profile_type=ProfileType.EVENT,
-                reference_date=date(2026, 5, 19),
-                rules=[{"days_before": 7, "interval": "1m"}],
-                post_action=PostAction.REDUCE_FREQUENCY,
-            )
-        )
-        await db_session.commit()
-
-        defer_calls, _ = await _run_tick(db_session, monkeypatch, self.NOW)
-        assert defer_calls == []
-
-
-class TestPostActionsAreGone:
-    """#375: a profile whose date has passed fires nothing. Archiver runs the
-    profile boundary and its post-actions (CannObserv/archiver#365); Watcher
-    writing ``is_active`` here was the unguarded write the issue names."""
-
-    @pytest.mark.parametrize(
-        "action", [PostAction.DEACTIVATE, PostAction.ARCHIVE, PostAction.REDUCE_FREQUENCY]
-    )
-    async def test_a_passed_profile_changes_nothing(self, db_session, monkeypatch, action):
+    async def test_a_due_item_is_deferred_and_nothing_written(self, db_session, monkeypatch):
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
-        wi = await make_watched_item(db_session, name=f"Passed {action.value}")
+        wi = await make_watched_item(db_session)
         wi.announced_schedule_config = {"interval": "1h"}
         wi.last_checked_at = now - timedelta(hours=2)
-        profile = TemporalProfile(
-            watched_item_id=wi.id,
-            profile_type=ProfileType.EVENT,
-            reference_date=date(2026, 5, 1),  # past → the post-action used to fire
-            rules=[{"days_before": 7, "interval": "1m"}],
-            post_action=action,
-        )
-        db_session.add(profile)
         await db_session.commit()
         audits_before = (
             await db_session.execute(select(func.count()).select_from(AuditLog))
@@ -334,17 +242,12 @@ class TestPostActionsAreGone:
         defer_calls, republish = await _run_tick(db_session, monkeypatch, now)
 
         await db_session.refresh(wi)
-        await db_session.refresh(profile)
         assert wi.is_active is True
-        assert wi.archived_at is None
-        assert wi.throttle_floor_interval is None
-        assert profile.is_active is True  # not consumed either: the row is Archiver's to import
         audits_after = (
             await db_session.execute(select(func.count()).select_from(AuditLog))
         ).scalar_one()
         assert audits_after == audits_before
         republish.assert_not_awaited()
-        # And it is still scheduled at its announced cadence.
         assert [c["watched_item_id"] for c in defer_calls] == [str(wi.id)]
 
 

@@ -1228,29 +1228,27 @@ class TestProcessorEndToEnd:
         change.assert_called_once()
         assert await get_open_command(db_session, wi.id) is None
 
-    async def test_a_probe_resolves_and_keys_the_pair_to_the_final_url(
-        self, db_session, monkeypatch
-    ):
-        """CR-4 across both legs: the blob leg moves ``effective_url``, the
-        derived leg stores the pair — keyed to where the bytes came from."""
+    async def test_a_redirect_keys_the_pair_to_the_items_own_url(self, db_session, monkeypatch):
+        """Both legs, through a redirect: Archiver is authoritative for
+        ``effective_url``, so the blob leg leaves it alone and the derived leg
+        keys the pair to it. Until #380 a PROBING item's first fact moved the
+        URL to ``final_url`` instead (CR-4)."""
         self._wired(db_session, monkeypatch)
         client = fakeredis.FakeAsyncRedis()
         wi = await make_watched_item(
             db_session, primary_url="https://lcb.wa.gov/notices", source_specs=self.SPECS
         )
-        wi.health_status = WatchHealthStatus.PROBING
-        await db_session.flush()
 
         await self._occasion(
             db_session, wi, client, etag='W/"v2"', final_url="https://www.lcb.wa.gov/notices"
         )
         await self._decide(db_session, client, b"Notices")
 
-        assert wi.effective_url == "https://www.lcb.wa.gov/notices"
+        assert wi.effective_url == "https://lcb.wa.gov/notices"
         assert wi.health_status == WatchHealthStatus.OK
         assert wi.etag == 'W/"v2"'
         assert wi.validator_source_key == validator_source_key(
-            effective_url="https://www.lcb.wa.gov/notices",
+            effective_url="https://lcb.wa.gov/notices",
             source_specs=self.SPECS,
             generation="0.19.7+1",
         )

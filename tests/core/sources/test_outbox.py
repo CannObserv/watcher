@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import select
 
-from src.core.models.base import generate_ulid
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.sources.outbox import (
@@ -24,7 +23,7 @@ FP = "sha256:" + "a" * 64
 async def _make_pending(session, *, offset_seconds: int = 0) -> tuple:
     """Create WatchedItem + ChangeRevision + PendingArchiverSync."""
     now = datetime.now(UTC)
-    wi = await make_watched_item(session, name=f"OutboxTest-{generate_ulid()}")
+    wi = await make_watched_item(session)
 
     rev = ChangeRevision(
         watched_item_id=wi.id,

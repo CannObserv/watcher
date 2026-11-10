@@ -9,7 +9,6 @@ import asyncio
 import json
 import subprocess
 import sys
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -218,34 +217,6 @@ async def test_an_unknown_host_is_refused(db_session) -> None:
     outcome = await suspend_domain.apply(db_session, "cli-absent.example", resume=False)
     assert outcome.code == 1
     assert "cli-absent.example" in outcome.message
-
-
-@pytest.mark.integration
-@pytest.mark.parametrize("resume", [False, True])
-async def test_an_archived_host_is_refused(db_session, resume) -> None:
-    name = f"cli-arch-{resume}.example".lower()
-    db_session.add(Domain(name=name, archived_at=datetime.now(UTC)))
-    await db_session.flush()
-
-    outcome = await suspend_domain.apply(db_session, name, resume=resume)
-
-    assert outcome.code == 1
-    assert "archived" in outcome.message
-    assert await _audits(db_session, name) == []
-
-
-@pytest.mark.integration
-async def test_the_archived_refusal_does_not_claim_the_host_is_stopped(db_session) -> None:
-    """CR 1: archiving revokes the fetch policy but back-fills no item, so a live
-    item on an archived host is still scheduled. The refusal must say how to
-    stop it, not that it is already stopped."""
-    db_session.add(Domain(name="cli-arch-msg.example", archived_at=datetime.now(UTC)))
-    await db_session.flush()
-
-    outcome = await suspend_domain.apply(db_session, "cli-arch-msg.example", resume=False)
-
-    assert "already stops" not in outcome.message
-    assert "restore" in outcome.message
 
 
 # --- main: end to end ---------------------------------------------------------

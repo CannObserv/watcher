@@ -32,7 +32,6 @@ async def test_a_runnable_item_is_not_refused(db_session):
 @pytest.mark.parametrize(
     ("fields", "refusal"),
     [
-        ({"archived_at": NOW, "is_active": False}, CheckRefusal.ARCHIVED),
         ({"is_active": False}, CheckRefusal.PAUSED),
         ({"domain_suspended": True}, CheckRefusal.DOMAIN_SUSPENDED),
     ],
@@ -50,13 +49,11 @@ async def test_no_url_is_refused(db_session):
     assert (await preflight_check(db_session, wi)).refusal is CheckRefusal.NO_URL
 
 
-async def test_archived_wins_over_paused(db_session):
-    """An archived item is inactive too; the route has always said "archived"."""
-    wi = await make_watched_item(
-        db_session, archived_at=NOW, is_active=False, domain_suspended=True
-    )
+async def test_paused_wins_over_domain_suspended(db_session):
+    """First match wins: the item's own state before its host's."""
+    wi = await make_watched_item(db_session, is_active=False, domain_suspended=True)
 
-    assert (await preflight_check(db_session, wi)).refusal is CheckRefusal.ARCHIVED
+    assert (await preflight_check(db_session, wi)).refusal is CheckRefusal.PAUSED
 
 
 @pytest.mark.parametrize(

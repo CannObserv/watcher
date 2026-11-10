@@ -13,8 +13,8 @@ Scope, as #377's guard: routes served, paths present, names imported under
 speaks ``/api/v1`` and ``X-API-Key`` to a different service (the status
 monitor's check-in), and that is not this surface.
 
-The ``api_keys`` and ``app_users`` tables, and their models, stay inert until
-#380 drops them.
+The ``api_keys`` and ``app_users`` tables and their models went in #380
+(``tests/test_schema_retired.py``).
 
 Kept apart from ``tests/test_dashboard_retired.py``: a different surface,
 retired by a different issue.

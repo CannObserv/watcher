@@ -31,7 +31,7 @@ column. On a *create* there is nothing to abstain from, so the model default
 cannobserv#324 the document is required on a live announcement, so the only
 delegation spelling is ``{"schema_version": 1}`` with no ``interval`` — meaning
 *apply your own default*, which for Watcher is the system default since F2
-(#375); before it, the per-domain ``default_schedule_config``. An unparseable
+(#375); before it, the domain's cadence. An unparseable
 interval resolves the same way and **must not stop scheduling**: co-core
 deliberately does not validate the document's contents, because raising at
 decode on a **no-DLQ** stream would drop the message entirely and leave the LWW
@@ -42,9 +42,7 @@ exactly five columns — ``archiver_info_source_id``, ``effective_url``,
 ``source_specs``, ``announced_schedule_config``, ``is_active`` — plus
 ``domain_name`` and its denormalized state, and only when the host actually
 moves. Everything else is Watcher's and survives: health, timings,
-``domain_suspended``, ``archived_at``, ``throttle_floor_interval`` and
-``default_schedule_config`` (both inert since #375), media type, tags,
-notification templates (inert since #379), audit rows.
+``domain_suspended``, media type, validators, audit rows.
 
 *No DLQ, and no dead-letter path.* An undecodable frame is logged and skipped
 with ``seek``; there is no group here, so there is no ack to skip past one with,
@@ -73,7 +71,6 @@ from src.core.models.watched_item import WatchedItem
 from src.core.scheduling.cadence import parse_interval
 from src.core.ulids import parse_canonical_ulid
 from src.core.validators import canonical_specs
-from src.core.watched_items import derive_watched_item_name
 from src.workers.watch_status import defer_status_republish
 
 logger = get_logger(__name__)
@@ -249,7 +246,6 @@ async def reconcile_announcement(session, payload: RegistryAnnouncementState) ->
     if created:
         row = WatchedItem(
             archiver_info_item_id=info_item_ulid,
-            name=derive_watched_item_name(payload.url),
             effective_url=payload.url,
             archiver_info_source_id=payload.info_source_id,
         )
@@ -278,9 +274,7 @@ async def reconcile_announcement(session, payload: RegistryAnnouncementState) ->
     # `active is None` is an abstention, not a default — leave the column alone.
     # There is nothing to abstain from on a create, where the model default
     # (active) stands. Applied unconditionally otherwise: a local pause is NOT
-    # sticky (archiver#150), and `archived_at` is untouched either way, so an
-    # `active: true` against an archived row no-ops on scheduling rather than
-    # resurrecting it — the scheduler gates on `archived_at IS NULL` too.
+    # sticky (archiver#150).
     if payload.active is not None:
         row.is_active = payload.active
 
@@ -289,10 +283,9 @@ async def reconcile_announcement(session, payload: RegistryAnnouncementState) ->
     # mechanism the registry has no opinion on.
     domain_name = domain_name_for_url(payload.url)
     if domain_name != row.domain_name:
-        domain_state = await ensure_domain_and_resolve_suspension(session, domain_name)
+        suspended = await ensure_domain_and_resolve_suspension(session, domain_name)
         row.domain_name = domain_name
-        row.domain_suspended = domain_state.suspended
-        row.domain_default_schedule_config = domain_state.default_schedule_config
+        row.domain_suspended = suspended
 
     row.applied_generation = payload.generation
 

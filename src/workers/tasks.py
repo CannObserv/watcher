@@ -144,13 +144,9 @@ async def check_watched_item(
             logger.warning("watched_item not found", extra={"watched_item_id": watched_item_id})
             return {"skipped": True}
 
-        if (
-            not watched_item.is_active
-            or watched_item.archived_at is not None
-            or watched_item.domain_suspended
-        ):
+        if not watched_item.is_active or watched_item.domain_suspended:
             logger.info(
-                "watched_item inactive, archived, or domain-suspended",
+                "watched_item inactive or domain-suspended",
                 extra={"watched_item_id": watched_item_id},
             )
             return {"skipped": True}
@@ -183,20 +179,16 @@ async def schedule_tick(timestamp: int) -> None:
 
     Since F2 (#375) the tick evaluates no temporal profiles and runs no
     post-actions: Archiver runs the profile boundary and announces the outcome
-    (CannObserv/archiver#365). The ``deactivate``/``archive`` post-actions wrote
-    ``is_active``/``archived_at`` here without the registry guard, and
-    ``reduce_frequency`` wrote ``throttle_floor_interval``; the tick writes
-    nothing now.
+    (CannObserv/archiver#365). The tick writes nothing.
     """
     now = datetime.now(UTC)
 
     async with get_session_factory()() as session:
-        # Load active, non-archived, non-domain-suspended WatchedItems — the
-        # single monitored entity (#191). domain_suspended cascades from domain
-        # deactivation and gates scheduling directly.
+        # Load active, non-domain-suspended WatchedItems — the single monitored
+        # entity (#191). domain_suspended cascades from domain deactivation and
+        # gates scheduling directly.
         wi_stmt = select(WatchedItem).where(
             WatchedItem.is_active.is_(True),
-            WatchedItem.archived_at.is_(None),
             WatchedItem.domain_suspended.is_(False),
         )
         watched_items = list((await session.execute(wi_stmt)).scalars().all())

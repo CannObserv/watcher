@@ -77,7 +77,6 @@ GROUP_START_ID = "0"
 
 #: Check-now's refusal → the wire's closed ``CheckRejectionReason``.
 REJECTION_REASONS: dict[CheckRefusal, CheckRejectionReason] = {
-    CheckRefusal.ARCHIVED: "paused",
     CheckRefusal.PAUSED: "paused",
     CheckRefusal.DOMAIN_SUSPENDED: "domain_suspended",
     CheckRefusal.NO_URL: "no_url",

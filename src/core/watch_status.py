@@ -40,16 +40,15 @@ Field mappings the consumer cannot check for us:
   every boot, and the first real mutation bumps to ``>= 1`` and drifts
   loudly if unapplied.
 * ``applied_active`` — the conjunction the scheduler actually gates on
-  (``is_active`` AND un-archived AND domain not suspended), never a bare echo
+  (``is_active`` AND domain not suspended), never a bare echo
   of the announcement.
 * ``applied_interval`` — the concrete resolved cadence: announced, else the
   system default (#375; before F2 it was the four-tier chain under the throttle
   floor), so cadence-only divergence (unparseable spec, delegation) is
   visible while ``applied_active`` never moves, and Archiver's derived
   ``next_due_at`` stays truthful.
-* ``health`` — ``"ok"`` / ``"error"`` / ``"unknown"`` (#328); both
-  pre-first-check states (UNKNOWN, PROBING) map to ``"unknown"`` because the
-  probe/first-fact distinction is producer mechanism, not registry state.
+* ``health`` — ``"ok"`` / ``"error"`` / ``"unknown"`` (#328); the
+  pre-first-check state (UNKNOWN) maps to ``"unknown"``.
 * ``last_full_fetch_at`` — the item's own column (#370): ``stamp_full_fetch``
   moves it on a 200 only, before extraction, which is the contract's "bytes
   arrived" (cannobserv#565).
@@ -110,7 +109,6 @@ _HEALTH_WIRE = {
     WatchHealthStatus.OK: "ok",
     WatchHealthStatus.ERROR: "error",
     WatchHealthStatus.UNKNOWN: "unknown",
-    WatchHealthStatus.PROBING: "unknown",
 }
 
 
@@ -153,9 +151,7 @@ def build_status_events(
             applied_generation=(
                 item.applied_generation if item.applied_generation is not None else 0
             ),
-            applied_active=(
-                item.is_active and item.archived_at is None and not item.domain_suspended
-            ),
+            applied_active=item.is_active and not item.domain_suspended,
             health=health,
             last_attempt_at=item.last_checked_at,
             last_observed_at=item.last_observed_at,

@@ -2,9 +2,9 @@
 
 Resolution takes a URL or hostname that is already known (Archiver is
 authoritative for ``effective_url``), so no network probe is performed.
-Centralising the upsert + suspension-resolution logic keeps its callers — the
-registry reconcile and the fetch-commands worker — from drifting (#196); the
-API's create and PATCH branches went with ``/api/v1`` (#378).
+Its one caller is the registry reconcile, the only create path since the
+API's create and PATCH branches went with ``/api/v1`` (#378) and the deferred
+probe's resolution went with PROBING (#380).
 
 ``set_domain_active`` is the one writer of ``Domain.is_active`` (#372).
 Deactivating a domain suspends every WatchedItem on it — the denormalized
@@ -27,22 +27,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.models.audit_log import EventType, audit
-from src.core.models.domain import DEFAULT_MIN_INTERVAL, Domain
+from src.core.models.domain import Domain
 from src.core.models.watched_item import WatchedItem
-
-
-class DomainResolution(NamedTuple):
-    """Domain facts denormalized onto a WatchedItem at create or URL move (#196, #205).
-
-    ``suspended`` gates scheduling (domain archived or inactive);
-    ``default_schedule_config`` is the domain's cadence, copied to
-    ``WatchedItem.domain_default_schedule_config``. It was the resolver's Domain
-    tier and is inert since F2 (#375); the column goes in #380. Both are
-    re-evaluated together on each of those paths.
-    """
-
-    suspended: bool
-    default_schedule_config: dict | None
 
 
 def domain_name_for_url(url: str | None) -> str | None:
@@ -58,50 +44,35 @@ def domain_name_for_url(url: str | None) -> str | None:
 
 async def ensure_domain_and_resolve_suspension(
     session: AsyncSession, domain_name: str | None
-) -> DomainResolution:
-    """Upsert the Domain row for ``domain_name`` and return its denormalizable state.
+) -> bool:
+    """Upsert the Domain row for ``domain_name`` and return whether it is suspended.
 
     Idempotent and ``IntegrityError``-safe (mirrors the create-time upsert).
-    Returns a :class:`DomainResolution`: ``suspended`` is True when the domain
-    exists and is archived or inactive; ``default_schedule_config`` is the
-    domain's cadence (#205; inert since #375). Callers copy both onto the
-    WatchedItem so the scheduler needs no live Domain join. A freshly-created
-    domain (or an empty/None ``domain_name``) resolves to ``(False, None)``.
+    True when the domain exists and is deactivated. The caller copies it onto
+    ``WatchedItem.domain_suspended`` so the scheduler needs no live Domain
+    join (#196). A freshly-created domain, or an empty/None ``domain_name``,
+    is not suspended.
     """
     if not domain_name:
-        return DomainResolution(suspended=False, default_schedule_config=None)
+        return False
     existing = (
         await session.execute(select(Domain).where(Domain.name == domain_name))
     ).scalar_one_or_none()
     if existing is None:
         try:
             async with session.begin_nested():
-                session.add(Domain(name=domain_name, min_interval=DEFAULT_MIN_INTERVAL))
+                session.add(Domain(name=domain_name))
         except IntegrityError:
             existing = (
                 await session.execute(select(Domain).where(Domain.name == domain_name))
             ).scalar_one_or_none()
-    if existing is not None:
-        return DomainResolution(
-            # Domain.is_suspended, not an inline repeat of it: one spelling of
-            # the suspension predicate (#250, CR-1 finding 7).
-            suspended=existing.is_suspended,
-            default_schedule_config=existing.default_schedule_config,
-        )
-    return DomainResolution(suspended=False, default_schedule_config=None)
+    # Domain.is_suspended, not an inline repeat of it: one spelling of the
+    # suspension predicate (#250, CR-1 finding 7).
+    return existing is not None and existing.is_suspended
 
 
 class DomainNotFound(LookupError):
     """No ``Domain`` row has this name."""
-
-
-class DomainArchived(ValueError):
-    """The domain is archived; ``is_active`` is not toggled under an archive.
-
-    Archiving makes ``Domain.is_suspended`` true but back-fills no
-    ``domain_suspended``, so the items already on it are
-    still scheduled. To stop them: restore, then deactivate.
-    """
 
 
 class DomainActivation(NamedTuple):
@@ -124,8 +95,8 @@ async def set_domain_active(
     """Activate or deactivate domain ``name`` and back-fill its items.
 
     Locks the domain row (``FOR UPDATE``) so two concurrent writers cannot
-    interleave. Raises :class:`DomainNotFound` for an unknown name and
-    :class:`DomainArchived` for an archived domain, writing nothing. Audits
+    interleave. Raises :class:`DomainNotFound` for an unknown name, writing
+    nothing. Audits
     ``domain.activated`` / ``domain.deactivated`` with ``source`` only when
     ``is_active`` actually moves; the back-fill runs either way, so "already
     suspended" is true of the items as well as the row. Does not commit.
@@ -135,8 +106,6 @@ async def set_domain_active(
     ).scalar_one_or_none()
     if domain is None:
         raise DomainNotFound(name)
-    if domain.archived_at is not None:
-        raise DomainArchived(name)
 
     changed = domain.is_active != active
     domain.is_active = active

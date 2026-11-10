@@ -1,6 +1,5 @@
 """Tests for SQLAlchemy base and ULID column type."""
 
-from datetime import date
 from unittest.mock import MagicMock
 
 import pytest
@@ -11,15 +10,7 @@ from src.core.models.audit_log import AuditLog, EventType, audit
 from src.core.models.base import ULIDType
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.domain import Domain
-from src.core.models.notification_template import (
-    VISIBILITIES,
-    VISIBILITY_DOMAIN,
-    VISIBILITY_GLOBAL,
-    VISIBILITY_WATCHED_ITEM,
-    NotificationTemplate,
-)
 from src.core.models.pending_archiver_sync import PendingArchiverSync
-from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 
 
@@ -55,30 +46,28 @@ class TestWatchedItemContentType:
     def test_content_media_type_accepts_raw_mime(self):
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            name="Test",
             content_media_type="text/html; charset=utf-8",
         )
         assert wi.content_media_type == "text/html; charset=utf-8"
 
     def test_content_media_type_defaults_none(self):
-        wi = WatchedItem(archiver_info_source_id=str(ULID()), name="Test")
+        wi = WatchedItem(archiver_info_source_id=str(ULID()))
         assert wi.content_media_type is None
 
     def test_content_media_type_accepts_arbitrary_string(self):
         # No enum membership check — any origin-reported value is stored verbatim.
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            name="Odd",
             content_media_type="application/vnd.custom+json",
         )
         assert wi.content_media_type == "application/vnd.custom+json"
 
     def test_health_status_default(self):
-        wi = WatchedItem(archiver_info_source_id=str(ULID()), name="T")
+        wi = WatchedItem(archiver_info_source_id=str(ULID()))
         assert wi.health_status == WatchHealthStatus.UNKNOWN
 
     def test_health_status_coercion_from_string(self):
-        wi = WatchedItem(archiver_info_source_id=str(ULID()), name="T", health_status="ok")
+        wi = WatchedItem(archiver_info_source_id=str(ULID()), health_status="ok")
         assert wi.health_status == WatchHealthStatus.OK
 
 
@@ -110,7 +99,7 @@ class TestAuditHelper:
 
     def test_audit_adds_to_session(self):
         mock_session = MagicMock()
-        entry = audit(mock_session, EventType.WATCHED_ITEM_ARCHIVED)
+        entry = audit(mock_session, EventType.WATCHED_ITEM_CREATED)
         mock_session.add.assert_called_once_with(entry)
 
 
@@ -119,26 +108,15 @@ class TestEventType:
 
     def test_constants_have_expected_values(self):
         assert EventType.WATCHED_ITEM_CREATED == "watched_item.created"
-        assert EventType.WATCHED_ITEM_UPDATED == "watched_item.updated"
         assert EventType.CHECK_SNAPSHOT_CREATED == "check.snapshot_created"
         assert EventType.CHECK_NO_CHANGE == "check.no_change"
         assert EventType.CHECK_FETCH_FAILED == "check.fetch_failed"
-        assert EventType.NOTIFICATION_DISPATCHED == "notification.dispatched"
-        assert EventType.PROFILE_CREATED == "profile.created"
-        assert EventType.PROFILE_UPDATED == "profile.updated"
-        assert EventType.PROFILE_DELETED == "profile.deleted"
+        assert EventType.DOMAIN_ACTIVATED == "domain.activated"
+        assert EventType.DOMAIN_DEACTIVATED == "domain.deactivated"
 
     def test_all_constants_are_unique(self):
         values = [v for k, v in vars(EventType).items() if not k.startswith("_")]
         assert len(values) == len(set(values)), "EventType constants must be unique"
-
-    def test_notification_template_constants_have_expected_values(self):
-        # #200: legacy watch_nc.* / domain_nc_default.* events folded into the
-        # unified notification_template.* set (every target is a NotificationTemplate).
-        assert EventType.NOTIFICATION_TEMPLATE_CREATED == "notification_template.created"
-        assert EventType.NOTIFICATION_TEMPLATE_UPDATED == "notification_template.updated"
-        assert EventType.NOTIFICATION_TEMPLATE_DELETED == "notification_template.deleted"
-        assert EventType.NOTIFICATION_TEMPLATE_TESTED == "notification_template.tested"
 
 
 class TestAuditLogModel:
@@ -181,145 +159,21 @@ class TestDatabase:
         assert engine2 is not engine
 
 
-class TestTemporalProfileModel:
-    def test_create_event_profile(self):
-        profile = TemporalProfile(
-            watched_item_id=ULID(),
-            profile_type=ProfileType.EVENT,
-            reference_date=date(2026, 4, 15),
-            rules=[{"days_before": 30, "interval": "6h"}, {"days_before": 7, "interval": "1h"}],
-            post_action=PostAction.REDUCE_FREQUENCY,
-        )
-        assert profile.profile_type == ProfileType.EVENT
-        assert len(profile.rules) == 2
-        assert profile.reference_date == date(2026, 4, 15)
-
-    def test_create_seasonal_profile(self):
-        profile = TemporalProfile(
-            watched_item_id=ULID(),
-            profile_type=ProfileType.SEASONAL,
-            date_range_start=date(2026, 1, 15),
-            date_range_end=date(2026, 6, 30),
-            rules=[{"days_before": 0, "interval": "1h"}],
-            post_action=PostAction.REDUCE_FREQUENCY,
-        )
-        assert profile.date_range_start == date(2026, 1, 15)
-
-    def test_create_deadline_profile(self):
-        profile = TemporalProfile(
-            watched_item_id=ULID(),
-            profile_type=ProfileType.DEADLINE,
-            reference_date=date(2026, 5, 1),
-            rules=[{"days_before": 14, "interval": "12h"}],
-            post_action=PostAction.DEACTIVATE,
-        )
-        assert profile.post_action == PostAction.DEACTIVATE
-
-    def test_defaults(self):
-        profile = TemporalProfile(
-            watched_item_id=ULID(),
-            profile_type=ProfileType.EVENT,
-            reference_date=date(2026, 4, 15),
-            rules=[],
-            post_action=PostAction.REDUCE_FREQUENCY,
-        )
-        assert profile.is_active is True
-        assert profile.date_range_start is None
-
-
 class TestDomainModel:
     def test_create_domain_with_defaults(self):
         d = Domain(name="example.com")
         assert d.name == "example.com"
-        assert d.min_interval == 1.0
+        assert d.is_active is True
+        assert d.is_suspended is False
 
-    def test_create_domain_custom(self):
-        d = Domain(name="slow.gov", min_interval=5.0)
-        assert d.min_interval == 5.0
+    def test_a_deactivated_domain_is_suspended(self):
+        assert Domain(name="slow.gov", is_active=False).is_suspended is True
 
     def test_rate_limiter_columns_are_gone(self):
         # #272: the four columns the retired in-process limiter (#241 step 5)
         # left behind are dropped, not merely inert.
         for column in ("max_concurrency", "current_interval", "decay_window", "last_request_at"):
             assert not hasattr(Domain, column)
-
-
-class TestNotificationTemplateModel:
-    """Unified NotificationTemplate replaces the five legacy dispatch sources (#200).
-
-    One scoped table; the row's ``visibility`` decides where it fires. The
-    visibility/ref CHECK constraint is exercised against a real session in
-    ``test_watched_item.py``; these are ORM-construction unit checks.
-    """
-
-    def test_create_global_template(self):
-        tmpl = NotificationTemplate(
-            title="Global Alert",
-            channel_hint="slack",
-            events=["change_detected"],
-            remote_channel_id=str(ULID()),
-            visibility=VISIBILITY_GLOBAL,
-        )
-        assert tmpl.visibility == VISIBILITY_GLOBAL
-        assert tmpl.title == "Global Alert"
-        assert tmpl.channel_hint == "slack"
-        assert tmpl.domain_name is None
-        assert tmpl.watched_item_id is None
-
-    def test_create_domain_template(self):
-        tmpl = NotificationTemplate(
-            title="Domain Alert",
-            channel_hint="mailto",
-            events=["change_detected"],
-            remote_channel_id=str(ULID()),
-            visibility=VISIBILITY_DOMAIN,
-            domain_name="example.com",
-        )
-        assert tmpl.visibility == VISIBILITY_DOMAIN
-        assert tmpl.domain_name == "example.com"
-        assert tmpl.watched_item_id is None
-
-    def test_create_watched_item_template(self):
-        wi_id = ULID()
-        tmpl = NotificationTemplate(
-            title="Item Alert",
-            channel_hint="slack",
-            events=["change_detected"],
-            remote_channel_id=str(ULID()),
-            visibility=VISIBILITY_WATCHED_ITEM,
-            watched_item_id=wi_id,
-        )
-        assert tmpl.visibility == VISIBILITY_WATCHED_ITEM
-        assert tmpl.watched_item_id == wi_id
-        assert tmpl.domain_name is None
-
-    def test_custom_events(self):
-        tmpl = NotificationTemplate(
-            title="Multi-event",
-            channel_hint="slack",
-            events=["change_detected", "watch_error"],
-            visibility=VISIBILITY_GLOBAL,
-        )
-        assert tmpl.events == ["change_detected", "watch_error"]
-
-    def test_content_config_defaults_none(self):
-        tmpl = NotificationTemplate(
-            title="No config",
-            channel_hint="mailto",
-            events=["change_detected"],
-            visibility=VISIBILITY_GLOBAL,
-        )
-        assert tmpl.content_config is None
-
-    def test_visibility_constants(self):
-        assert VISIBILITY_GLOBAL == "global"
-        assert VISIBILITY_DOMAIN == "domain"
-        assert VISIBILITY_WATCHED_ITEM == "watched_item"
-        assert VISIBILITIES == (
-            VISIBILITY_GLOBAL,
-            VISIBILITY_DOMAIN,
-            VISIBILITY_WATCHED_ITEM,
-        )
 
 
 class TestRetiredTransportColumns:

@@ -12,12 +12,10 @@ from unittest.mock import patch
 import pytest
 from co_core.pure.models.changes import ChangeDetectedEmit
 from sqlalchemy import select
-from ulid import ULID
 
 from src.core.fetch_commands import create_fetch_command
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.change_revision import ChangeRevision
-from src.core.models.notification_template import VISIBILITY_GLOBAL, NotificationTemplate
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.pending_watch_event import PendingWatchEvent
 from src.core.models.process_command import ProcessCommandStatus
@@ -68,7 +66,7 @@ def _spy_fact():
 class TestApplyExtractionOutcome:
     async def test_first_run_establishes_baseline_no_notification(self, db_session):
         """First run: ChangeRevision inserted, no CHANGE_DETECTED notification."""
-        wi = await make_watched_item(db_session, name="Baseline")
+        wi = await make_watched_item(db_session)
         wi.effective_url = "https://example.com"
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
         await db_session.flush()
@@ -96,7 +94,7 @@ class TestApplyExtractionOutcome:
 
     async def test_same_fingerprint_is_cache_hit_no_new_revision(self, db_session):
         """Second run with same content: cache hit, no new ChangeRevision."""
-        wi = await make_watched_item(db_session, name="CacheHit")
+        wi = await make_watched_item(db_session)
         wi.effective_url = "https://example.com"
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
         await db_session.flush()
@@ -126,7 +124,7 @@ class TestApplyExtractionOutcome:
 
     async def test_changed_fingerprint_inserts_revision_and_stages_its_fact(self, db_session):
         """Content change: new ChangeRevision + one change_detected fact for the item."""
-        wi = await make_watched_item(db_session, name="Changed")
+        wi = await make_watched_item(db_session)
         wi.effective_url = "https://example.com"
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
         await db_session.flush()
@@ -154,7 +152,7 @@ class TestApplyExtractionOutcome:
 
     async def test_change_updates_last_changed_at(self, db_session):
         """last_changed_at is set on WatchedItem when fingerprint changes."""
-        wi = await make_watched_item(db_session, name="Timestamps")
+        wi = await make_watched_item(db_session)
         wi.effective_url = "https://example.com"
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
         await db_session.flush()
@@ -175,7 +173,7 @@ class TestApplyExtractionOutcome:
         archiver_info_source_id is NOT NULL, so the old conditional could only
         ever drop a captured revision on the floor.
         """
-        wi = await make_watched_item(db_session, name="WithSync")
+        wi = await make_watched_item(db_session)
         wi.effective_url = "https://example.com"
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
         await db_session.flush()
@@ -225,9 +223,7 @@ class TestRevisionExtractionIdentity:
         )
 
     async def test_baseline_carries_spec_and_processor_identity(self, db_session):
-        wi = await make_watched_item(
-            db_session, name="Identity baseline", source_specs=[_SPEC_FULL_PAGE]
-        )
+        wi = await make_watched_item(db_session, source_specs=[_SPEC_FULL_PAGE])
         await db_session.flush()
 
         await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_BLOB)
@@ -241,9 +237,7 @@ class TestRevisionExtractionIdentity:
         # The processor reports no spec identity when it cannot derive one; the
         # identity is a diagnostic, so the revision is still written — with
         # NULL, which Option A reads as unknown.
-        wi = await make_watched_item(
-            db_session, name="Identity unknown", source_specs=[_SPEC_FULL_PAGE]
-        )
+        wi = await make_watched_item(db_session, source_specs=[_SPEC_FULL_PAGE])
         await db_session.flush()
 
         await apply_extraction_outcome(
@@ -261,7 +255,7 @@ class TestOutboxProvenance:
     """#253: the outbox row is the observation, so it carries where it came from."""
 
     async def test_every_revision_records_blob_provenance_and_spec_identity(self, db_session):
-        wi = await make_watched_item(db_session, name="Provenance")
+        wi = await make_watched_item(db_session)
         wi.effective_url = "https://example.com"
         wi.source_specs = [_SPEC_FULL_PAGE]
         await db_session.flush()
@@ -335,7 +329,7 @@ class TestBlobReferenceRenewal:
     """
 
     async def _item(self, db_session):
-        wi = await make_watched_item(db_session, name="Renewal")
+        wi = await make_watched_item(db_session)
         wi.effective_url = "https://example.com"
         wi.source_specs = [_SPEC_FULL_PAGE]
         await db_session.flush()
@@ -615,8 +609,8 @@ class TestOptionA:
 
     OTHER_SPEC_FP = "spec1:sha256:" + "22" * 32
 
-    async def _baselined(self, db_session, name, **outcome_kwargs):
-        wi = await make_watched_item(db_session, name=name, source_specs=[_SPEC_FULL_PAGE])
+    async def _baselined(self, db_session, **outcome_kwargs):
+        wi = await make_watched_item(db_session, source_specs=[_SPEC_FULL_PAGE])
         await db_session.flush()
         await apply_extraction_outcome(
             db_session, wi, _outcome(BASE_FP, **outcome_kwargs), blob=_BLOB
@@ -640,12 +634,12 @@ class TestOptionA:
         return list((await db_session.execute(stmt)).scalars().all())
 
     async def test_baseline_records_the_items_processor_version(self, db_session):
-        wi = await self._baselined(db_session, "OptionA baseline")
+        wi = await self._baselined(db_session)
         assert wi.processor_version == "0.19.7+1"
 
     @patch("src.workers.pipeline.enqueue_change_detected", wraps=enqueue_change_detected)
     async def test_a_processor_change_alone_re_baselines_silently(self, dispatch, db_session):
-        wi = await self._baselined(db_session, "OptionA processor")
+        wi = await self._baselined(db_session)
         before = wi.last_changed_at
 
         result = await apply_extraction_outcome(
@@ -671,7 +665,7 @@ class TestOptionA:
     async def test_a_re_baseline_is_still_announced_to_archiver(self, _dispatch, db_session):
         # The derived text moved, so the registry's record of it must move too;
         # only the notification is withheld.
-        wi = await self._baselined(db_session, "OptionA outbox")
+        wi = await self._baselined(db_session)
         await apply_extraction_outcome(
             db_session, wi, _outcome(NEXT_FP, version="0.20.0+1"), blob=_BLOB
         )
@@ -684,7 +678,7 @@ class TestOptionA:
 
     @patch("src.workers.pipeline.enqueue_change_detected", wraps=enqueue_change_detected)
     async def test_a_spec_change_notifies_with_a_label(self, dispatch, db_session):
-        wi = await self._baselined(db_session, "OptionA spec")
+        wi = await self._baselined(db_session)
 
         result = await apply_extraction_outcome(
             db_session, wi, _outcome(NEXT_FP, spec=self.OTHER_SPEC_FP), blob=_BLOB
@@ -698,7 +692,7 @@ class TestOptionA:
         self, dispatch, db_session
     ):
         # Re-baselining here would let a spec edit mask a coincident page change.
-        wi = await self._baselined(db_session, "OptionA both")
+        wi = await self._baselined(db_session)
 
         result = await apply_extraction_outcome(
             db_session,
@@ -713,7 +707,7 @@ class TestOptionA:
 
     @patch("src.workers.pipeline.enqueue_change_detected", wraps=enqueue_change_detected)
     async def test_a_content_change_carries_no_label(self, dispatch, db_session):
-        wi = await self._baselined(db_session, "OptionA content")
+        wi = await self._baselined(db_session)
 
         result = await apply_extraction_outcome(db_session, wi, _outcome(NEXT_FP), blob=_BLOB)
 
@@ -723,7 +717,7 @@ class TestOptionA:
     @patch("src.workers.pipeline.enqueue_change_detected", wraps=enqueue_change_detected)
     async def test_unknown_identity_triggers_neither(self, dispatch, db_session):
         # NULL on either side means unknown: notify as before Option A.
-        wi = await self._baselined(db_session, "OptionA unknown", spec=None)
+        wi = await self._baselined(db_session, spec=None)
         wi.processor_version = None
 
         result = await apply_extraction_outcome(
@@ -738,7 +732,7 @@ class TestOptionA:
 
     @patch("src.workers.pipeline.enqueue_change_detected", wraps=enqueue_change_detected)
     async def test_an_equal_digest_refreshes_the_items_version_only(self, dispatch, db_session):
-        wi = await self._baselined(db_session, "OptionA refresh")
+        wi = await self._baselined(db_session)
 
         result = await apply_extraction_outcome(
             db_session, wi, _outcome(BASE_FP, version="0.20.0+1"), blob=_BLOB
@@ -755,7 +749,7 @@ class TestOptionA:
     async def test_the_comparison_base_is_the_item_not_the_revision(self, dispatch, db_session):
         # After a refresh the revision still says 0.19.7+1. A change under the
         # version the item already knows is content, not the upgrade.
-        wi = await self._baselined(db_session, "OptionA base")
+        wi = await self._baselined(db_session)
         await apply_extraction_outcome(
             db_session, wi, _outcome(BASE_FP, version="0.20.0+1"), blob=_BLOB
         )
@@ -781,7 +775,7 @@ class TestChangeFact:
     OTHER_SPEC_FP = "spec1:sha256:" + "22" * 32
 
     async def _baselined(self, db_session, **outcome_kwargs):
-        wi = await make_watched_item(db_session, name="Fact", source_specs=[_SPEC_FULL_PAGE])
+        wi = await make_watched_item(db_session, source_specs=[_SPEC_FULL_PAGE])
         await apply_extraction_outcome(
             db_session, wi, _outcome(BASE_FP, **outcome_kwargs), blob=_BLOB
         )
@@ -837,7 +831,7 @@ class TestChangeFact:
 
     async def test_the_previous_text_is_located_through_process_commands(self, db_session):
         previous = b"Hello world"
-        wi = await make_watched_item(db_session, name="Fact uri", source_specs=[_SPEC_FULL_PAGE])
+        wi = await make_watched_item(db_session, source_specs=[_SPEC_FULL_PAGE])
         await apply_extraction_outcome(db_session, wi, _outcome(_address(previous)), blob=_BLOB)
         stored_uri = await _stored(db_session, wi, previous)
 
@@ -882,21 +876,12 @@ class TestChangeFact:
 @pytest.mark.integration
 class TestNoDispatch:
     """#376 part 2: a detected change sends nothing. Archiver notifies from the
-    ``change_detected`` fact staged beside the revision (#369), so with a
-    subscribed active template the change still writes its revision and its
-    fact, and no ``notification.dispatched``."""
+    ``change_detected`` fact staged beside the revision (#369), so the change
+    writes its revision and its fact, and no ``notification.dispatched`` (the
+    string spelled here: its constant went with #380)."""
 
     async def test_a_change_stages_its_fact_and_sends_nothing(self, db_session):
-        db_session.add(
-            NotificationTemplate(
-                title="Every change",
-                visibility=VISIBILITY_GLOBAL,
-                remote_channel_id=str(ULID()),
-                channel_hint="json",
-                events=["change_detected"],
-            )
-        )
-        wi = await make_watched_item(db_session, name="Quiet", source_specs=[_SPEC_FULL_PAGE])
+        wi = await make_watched_item(db_session, source_specs=[_SPEC_FULL_PAGE])
         await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_BLOB)
         await db_session.flush()
 
@@ -906,9 +891,7 @@ class TestNoDispatch:
         assert result.changed is True
         facts = (await db_session.execute(select(PendingWatchEvent))).scalars().all()
         assert [f.event_type for f in facts] == ["change_detected"]
-        dispatched = select(AuditLog).where(
-            AuditLog.event_type == EventType.NOTIFICATION_DISPATCHED
-        )
+        dispatched = select(AuditLog).where(AuditLog.event_type == "notification.dispatched")
         assert (await db_session.execute(dispatched)).scalars().all() == []
 
     def test_the_result_counts_no_notifications(self):

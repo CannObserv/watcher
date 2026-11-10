@@ -5,7 +5,7 @@ What Watcher owes Archiver's ``watch_check`` command (cannobserv
 
 * pre-flight every command through check-now's core verdict; a command that
   cannot run becomes a ``check_rejected`` fact through #369's outbox, its
-  reason from the closed vocabulary (archived maps to ``paused``);
+  reason from the closed vocabulary;
 * an accepted command is a **forced** full fetch that names the command, so
   its completion republishes ``info.watch-status`` (the outcome is a level);
 * a redelivered accepted command is recognised, never refused ``fetch_open``;
@@ -142,8 +142,6 @@ class TestRejected:
     @pytest.mark.parametrize(
         ("fields", "reason"),
         [
-            # Operator decision on #371: archived has no token; it is inactive.
-            ({"archived_at": NOW, "is_active": False}, "paused"),
             ({"is_active": False}, "paused"),
             ({"domain_suspended": True}, "domain_suspended"),
         ],

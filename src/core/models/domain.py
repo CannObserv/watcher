@@ -1,91 +1,45 @@
-"""Domain model — per-domain politeness floor and default check cadence."""
+"""Domain model — one row per host, carrying the break-glass suspension flag."""
 
-from datetime import datetime
-
-from sqlalchemy import Boolean, DateTime, Float, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Boolean, String
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
 
 from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
 
-DEFAULT_MIN_INTERVAL = 1.0
-
 
 class Domain(Base, TimestampMixin):
-    """Per-domain politeness floor and check cadence.
+    """A host Watcher has an item on, and whether Watcher may check it.
 
-    Two distinct interval concerns live here: ``min_interval`` is the
-    request-level politeness floor in float seconds — published to Replicator on
-    ``content.fetch-policy`` from the Phase-4 cutover (#245) until F1 (#374)
-    handed host policy to Archiver, so the column is inert until #377/#378 —
-    while ``default_schedule_config`` is the operator's desired check *cadence*
-    for items on this domain (a schedule_config interval string), which was the
-    Domain tier of schedule resolution (#205) and is inert since F2 (#375):
-    Archiver resolves the domain default and announces each item's interval.
+    ``is_active`` is the break-glass suspension (#372): deactivating a domain
+    suspends every WatchedItem on it through the denormalized
+    ``WatchedItem.domain_suspended``. It is Watcher's, not the registry's.
 
-    The in-process ``DomainRateLimiter``'s columns — ``current_interval``,
-    ``max_concurrency``, ``decay_window``, ``last_request_at`` — were retired
-    with it (#241 step 5) and dropped in #272; adaptive backoff is Replicator's
-    (replicator#25).
+    The rest went to Archiver with the headless jump (#368) and was dropped in
+    #380: ``min_interval`` (the politeness floor, Archiver's since F1 #374),
+    ``default_schedule_config`` (the domain cadence tier, since F2 #375),
+    ``notes`` and ``archived_at`` (the operator surface, #377/#378). The
+    in-process limiter's columns went earlier (#241 step 5, #272).
     """
 
     __tablename__ = "domains"
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
     name: Mapped[str] = mapped_column(String(253), unique=True, nullable=False)
-    min_interval: Mapped[float] = mapped_column(
-        Float, nullable=False, default=DEFAULT_MIN_INTERVAL, server_default="1.0"
-    )
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
-    # Operator's desired check *cadence* for items on this domain — a
-    # schedule_config interval string ({"interval": "6h"}), was the Domain tier of
-    # the resolution chain (#205); inert since F2 (#375), dropped in #380.
-    # Distinct from min_interval, the request-level politeness floor published to
-    # Replicator (#245). none_as_null=True so an unset cadence persists as SQL
-    # NULL, not the JSONB 'null' literal (#198).
-    default_schedule_config: Mapped[dict | None] = mapped_column(
-        JSONB(none_as_null=True), nullable=True, default=None
-    )
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
-    )
-    archived_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, default=None
     )
 
     def __init__(self, **kwargs: object) -> None:
         """Set Python-side defaults."""
-        kwargs.setdefault("min_interval", DEFAULT_MIN_INTERVAL)
         kwargs.setdefault("is_active", True)
         super().__init__(**kwargs)
 
     @property
     def is_suspended(self) -> bool:
-        """Archived or deactivated — the two states that stop Watcher watching.
+        """Deactivated: the one state that stops Watcher watching the host.
 
-        One spelling of a predicate that had grown three (#250, CR-1 finding 7):
-        it decides ``WatchedItem.domain_suspended`` when an item is created or a
-        domain is toggled; from #250 until F1 (#374) stopped Watcher's
-        fetch-policy producer, it also decided whether the host published live
-        or ``revoked=True``.
-
-        Equivalent to ``status != "active"``, but kept as its own predicate:
-        ``status`` is a display string whose members may grow, and a suspension
-        check should not depend on which of them happen to be non-active.
+        One spelling of the predicate (#250, CR-1 finding 7): it decides
+        ``WatchedItem.domain_suspended`` when an item is created or moves host.
+        Until #380 an archived domain counted too; nothing archives one now.
         """
-        return self.archived_at is not None or not self.is_active
-
-    @property
-    def status(self) -> str:
-        """Derived status: archived > inactive > active.
-
-        The ``backoff`` state is gone with the limiter (#241 step 5) — nothing
-        tracked a raised interval any more, so the state was unreachable and
-        the badge always lied by omission.
-        """
-        if self.archived_at is not None:
-            return "archived"
-        if not self.is_active:
-            return "inactive"
-        return "active"
+        return not self.is_active

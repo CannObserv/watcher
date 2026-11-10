@@ -73,44 +73,6 @@ duplicate :: `WATCHER_DEV_NOTIFIER_BASE_URL` / `WATCHER_DEV_NOTIFIER_API_KEY` in
 retarget :: **Naming rule for new variables.** Anything naming a shared external resource takes a **service-prefixed** name with a separate dev key (`WATCHER_BUS_REDIS_URL`
 retarget :: - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, environment variables, wheelhouse auth
 
-# --- #274 curation: the announcement-audit paragraph returns to docs/ ---
-# Three lines are the audit prose itself. Every claim in them is carried, more
-# fully, by docs/WATCHED-ITEMS.md → "What an announcement records (#274)":
-# the audit row per applied announcement, `watched_item.created` with
-# `source: "registry"`, `announcement_applied` with its `changes` diff, the
-# non-empty condition, and the silent `0-0` boot replay. Read against the
-# destination before warranting, not inferred from the topic.
-# The remaining three are reflow, not loss: removing the sentence above re-wraps
-# the paragraph around it. Every surviving word — the `POST` caller note, the
-# archiver#158 reference, the whole pointer list — is still inline in AGENTS.md,
-# on differently-bounded lines. The pointer's dropped topic ("the
-# spec-acknowledgement meaning of `last_reviewed_at`") is covered by the same
-# destination section.
-
-# --- #280 curation: the #191 collapse residue -> docs/WATCHED-ITEMS.md -------
-# The enumeration of what the collapse removed was demoted verbatim into
-# "WatchEvent identity fields" (L326-329), which already carried the #191
-# rename residue — grepped there, not assumed. The rule itself stays inline:
-# "**The `WatchedItem` is the single monitored entity (#191).**" is untouched at
-# AGENTS.md L114, and "one URL = one fingerprint = one change signal" survives
-# on the re-wrapped line beneath it. The two boundary lines are re-wrap, not
-# loss — every surviving word is still inline, on differently-bounded lines,
-# which the closed warrant set spells `duplicate` (same reading the #274
-# entries above take).
-
-# --- #280 curation: two pointers to docs/WATCHED-ITEMS.md merged into one ----
-# The section named the same doc twice and listed "schedule resolution" in both.
-# The merged pointer at AGENTS.md L141 carries every topic word from both, none
-# dropped: fields, what each 409 is, the authoritative column list, schedule
-# resolution, domain keying, media-type dispatch, template CRUD. Only the
-# duplicate link and the repeated topic are gone.
-
-# --- #280 curation: the Detail Docs parenthetical -> docs/ARCHITECTURE.md ----
-# Added earlier on this same branch, then removed here: docs/ARCHITECTURE.md
-# "Sibling services" now opens with the notifier relocation in full, so the
-# index entry was restating its own destination. The index line is otherwise
-# verbatim what it was before this branch.
-
 # --- 2026-09-04 curation (#287 CR follow-up): AGENTS.md 6170 -> under budget ---
 # Every line below was read against its replacement or its destination before
 # being warranted. `duplicate` follows this file's established meaning: the
@@ -195,7 +157,6 @@ tighten :: A second, daily health hook **reports only**
 tighten :: For broad semantic questions
 
 # --- Infrastructure / Server Lifecycle: same rules, less connective tissue ---
-tighten :: **Connection policy (#287, #288, #290).**
 tighten :: Do not directly edit sibling repos
 
 # --- Common Commands: one word ---
@@ -223,7 +184,6 @@ tighten :: improve a queued row:
 # --- #296 step 25, second pass: after the fresh-eyes review restored five rules
 # that the first pass had weakened, these paid for them. All wayfinding or
 # connective tissue; no rule changed scope.
-tighten :: **Single process is load-bearing.**
 tighten :: **The bus.** Archiver operates the broker
 tighten :: **A URL is configuration, not permission.** Three unit-only opt-ins gate the production
 tighten :: the Archiver checkout constraint, bus topology and fetch contracts
@@ -247,11 +207,9 @@ tighten :: locally on a reconciled item. What each 409 is, where pause does live
 tighten :: `POST /api/v1/watched-items` — still the only creation path, with no caller
 tighten :: since archiver#158:
 tighten :: Fields, what each 409 is, the authoritative column list, schedule resolution, domain keying
-AGENTS.md :: tighten :: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).
 tighten :: **Empty extraction is a failure, not a change (#258).** Every `source_spec`
 tighten :: yielding empty chunks raises `ExtractionError` and writes nothing —
 tighten :: unconditionally, on both sides of a baseline:
-AGENTS.md :: tighten :: **[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md)**.
 tighten :: **An unchanged fingerprint still announces (#293)** — after a **full fetch**,
 tighten :: which renews the blob, so its cache-hit branch upserts a `PendingArchiverSync`
 tighten :: for the latest revision. A 304 renews nothing and announces nothing. **Never
@@ -263,38 +221,21 @@ default :: - Explicit imports only
 # Class D: restates a trained default; no rule of this repo's rides on it.
 default :: - Small, focused functions
 
-# --- 2026-09-23: RECOVERY-REHEARSALS.md indexed by extending RECOVERY.md's line.
-AGENTS.md :: index :: - [docs/RECOVERY.md](docs/RECOVERY.md) — nightly DB backup to GCS, restore, go/no-go gates
-
 # --- 2026-09-23 curation (#309 follow-up): host memory split to docs/HOST-MEMORY.md.
 # Class C, --claims-checked: host-memory line retargeted to the new doc and its
 # verify/re-pin tail and GiB figure dropped (in HOST-MEMORY.md); the bus line drops
 # the content.blobs group derivation (ARCHITECTURE.md carries `group_name`, #285);
 # retention folds its repeated ARCHITECTURE.md pointer into "same section".
-AGENTS.md :: tighten :: **Host memory is the shared resource (#307).** 7.75 GiB, no swap, and agent sessions are *unkillable* (`oom_score_adj` -1000), so the kernel's killer takes the service. SocratiCode is **pinned pre-installed** (`~/.socraticode/pin`): never let a launch install a server. The unit takes a **reservation, never a cap** (`MemoryLow=`/`OOMScoreAdjust=`; `MemoryHigh=` stalls it while it still reports `active`), holding only while **every slice above grants as much** (#309). Verify with `preflight.sh --check` and `mcp-driver.mjs resolve`; re-pin as a decision, not on a schedule: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Host memory posture*.
-AGENTS.md :: tighten :: **The bus.** The broker is its own VM (`broker`, CannObserv/broker); watcher publishes four streams and consumes two — `content.blobs` (single-member group `watcher.blobs`, derived by co-core's `group_name` — #285) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Inventory, ownership, fetch contracts, `info_source_id` on the wire: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
-AGENTS.md :: tighten :: **Retention is sized against the set (#292), and mirrored on the broker (#319).** `tests/test_bus_stream_kinds.py` fails a config/state publish missing `maxlen` *or* `floor=`, and fails a retune of any mirrored number — the broker's probe thresholds are computed from copies, so the fix is cross-repo. The env overrides move the same numbers unseen: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
 # The split itself: the moved heading loses its #307 slug (a class 3b seam),
 # and the two pointers into it follow the section to HOST-MEMORY.md.
 docs/DEPLOYMENT.md :: rename :: ### Host memory posture (#307)
 docs/DEPLOYMENT.md :: retarget :: > [§ Host memory posture](#host-memory-posture-307).
 docs/DEPLOYMENT.md :: retarget :: # docs/DEPLOYMENT.md -> Host memory posture.
 
-# --- #325 prep: CONTENT-PIPELINE.md split -> docs/CONTENT-REVISIONS.md ---
-# The index line's "the outbox, the revisions producer" now describes the new
-# doc, which carries its own index line; CONTENT-PIPELINE keeps the fetch half.
-AGENTS.md :: retarget :: - [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the outbox, the revisions producer
-# CR 9: the demoted retention paragraph's "(same section)" pointed at this very
-# section once it lived here; it now names the paragraph that follows it.
-AGENTS.md :: retarget :: **Retention is sized against the set (#292), and mirrored on the broker (#319).** `tests/test_bus_stream_kinds.py` fails a config/state publish missing `maxlen` *or* `floor=`, and fails a retune of any mirrored number — the broker's probe thresholds are computed from copies, so the fix is cross-repo. The env overrides move the same numbers unseen (same section).
-
 # --- #283 curation: bus sections split ARCHITECTURE.md -> docs/BUS.md; host-memory tightened ---
 # Host memory: the class-A rule (SocratiCode pin, reservation not cap) stays inline; the
 # oom_score_adj/-1000/MemoryHigh= detail is HOST-MEMORY.md's, every atom present there (--claims: 0 dropped).
-AGENTS.md :: tighten :: **Host memory is the shared resource (#307).** No swap; agent sessions sit at `oom_score_adj` 0 (#337), ahead of the service's -500 — `tests/deploy/test_earlyoom_decline.py` fails if exe.dev's old -1000 returns. SocratiCode is **pinned pre-installed** (`~/.socraticode/pin`): never let a launch install a server. The unit takes a **reservation, never a cap** (`MemoryHigh=` stalls it while it still reports `active`), holding only while **every slice above grants as much** (#309). Verify, re-pin, the drop-ins: [docs/HOST-MEMORY.md](docs/HOST-MEMORY.md).
 # The bus section moved to docs/BUS.md in this same run; the pointer follows it.
-AGENTS.md :: retarget :: **The bus.** The broker is its own VM (`broker`, CannObserv/broker); watcher publishes five streams and consumes three — `content.blobs` and `content.derived` (groups `watcher.blobs`, `watcher.derived`) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Inventory, ownership, contracts: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
-AGENTS.md :: retarget :: - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, bus topology, fetch contracts, the probe destination guard
 docs/ENVIRONMENT.md :: retarget :: pattern — see **Redis and the bus**.
 docs/ENVIRONMENT.md :: retarget :: stays on Procrastinate over Postgres. See [ARCHITECTURE.md](ARCHITECTURE.md) §
 docs/ENVIRONMENT.md :: retarget :: *Redis and the bus* for the ownership split.
@@ -307,21 +248,8 @@ docs/ARCHITECTURE.md :: retarget :: Module layout, the sibling-service topology,
 # --- 2026-10-09 headroom curation: DEPLOYMENT/WATCHED-ITEMS/SOCRATICODE splits ---
 # The wheelhouse, registry and co-index sections moved to DEPENDENCIES.md, REGISTRY.md
 # and CO-INDEX.md in this run; their pointers and index lines follow them.
-AGENTS.md :: retarget :: Auth, upgrade procedure and the pinned version: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Cannobserv wheelhouse*.
-AGENTS.md :: retarget :: - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, the install runbook, timers, wheelhouse auth
-AGENTS.md :: retarget :: - [docs/SOCRATICODE.md](docs/SOCRATICODE.md) — tool table, index scope, the co-index client contract, green-failing traps, link stubs
-AGENTS.md :: retarget :: - [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the entity: fields, schedule resolution, reconciliation, domain keying, media-type dispatch, template CRUD, notifications
 # Tightened to the rule; every dropped atom is in the linked doc (--claims: 0 dropped).
 # The mirror line folded into the Archiver line above it, keeping #159 and #236.
-AGENTS.md :: tighten :: **The bus.** The broker is its own VM (`broker`, CannObserv/broker); watcher publishes five streams and consumes three — `content.blobs` and `content.derived` (groups `watcher.blobs`, `watcher.derived`) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Inventory, ownership, contracts: [docs/BUS.md](docs/BUS.md).
-AGENTS.md :: tighten :: **Archiver owns the canonical registry**; watcher consumes it over the bus, makes **no HTTP calls to Archiver at all** and reads no Archiver checkout (#311) — re-adding an SDK is a design regression, and Archiver code does not belong in this repo: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Sibling services*.
-AGENTS.md :: tighten :: **Nothing in `src/` mirrors to Archiver** (#159, #236) — don't reintroduce a sync obligation: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *No cross-repo mirror discipline*.
-AGENTS.md :: tighten :: **Empty extraction is a failure, not a change (#258)** — a `source_spec`
-AGENTS.md :: tighten :: yielding empty chunks raises `ExtractionError` and writes nothing, either side
-AGENTS.md :: tighten :: of a baseline. **An unchanged fingerprint still announces (#293)** after a full
-AGENTS.md :: tighten :: fetch — never a 304, never the baseline — and a renewal may only improve a
-AGENTS.md :: tighten :: queued row:
-AGENTS.md :: tighten :: **ULID format errors:** path parameter → 404 (`parse_ulid`), filter query parameter → 400 (`parse_filter_ulid`). **DB triggers:** currently none; one added in a migration must also be recreated in `tests/conftest.py`'s `test_engine` fixture (integration tests build the schema with `create_all`). Both: [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
 # The co-index client contract moved to CO-INDEX.md in this run; the two leads that named its old home follow it.
 docs/SOCRATICODE.md :: retarget :: Watcher does not host its semantic index: what follows is the client contract
 docs/SOCRATICODE.md :: retarget :: against the cohort's shared Qdrant, the traps that fail *green*, the
@@ -344,7 +272,6 @@ docs/SKILLS.md :: disproven :: run at all: `obra/superpowers` ships no `version:
 docs/SKILLS.md :: disproven :: vendor side and `version:` there is watcher's own number. Leaving `synced-from:` at the old
 docs/SKILLS.md :: disproven :: | `brainstorming` | `SKILL.md` only: `docs/plans/` path
 # #413/#409: the last override (shipping-work-python-fastapi) is retired; every skills/ entry is a vendor symlink, `test -L` and tests/test_no_skill_overrides.py refute each override claim. The marker/synced-from rule survives, reworded, in SKILLS.md → No overrides; the deltas' new homes are SKILLS.md → Shipping.
-AGENTS.md :: disproven :: A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `skills/` shadow
 docs/SKILLS.md :: disproven :: | `skills/` | agentskills.io | Committed overrides + symlinks
 docs/SKILLS.md :: disproven :: Local overrides in `skills/` automatically shadow vendor skills in both systems.
 docs/SKILLS.md :: retarget :: | `shipping-work-python-fastapi` | ship it, push GH, close GH, wrap up |
@@ -382,20 +309,12 @@ docs/COMMANDS.md :: retarget :: vendored gate in `shipping-work-python-fastapi`,
 docs/SKILLS.md :: disproven :: `deploy/` reaching `tests/deploy/`, and `scripts/` reaching `tests/scripts/` and the vendored
 docs/SKILLS.md :: disproven :: skill symlinks, are kept over-matches — for a spot-check that exits 1
 
-# #378: /api/v1 deleted. Each line below stated an API behaviour that no longer
-# exists; tests/test_operator_api_retired.py refutes it (every /api/v1 path 404s,
-# helpers.py and probe.py are gone). The surviving rules were rewritten in place:
-# the reconcile is the only create/edit path, ULIDs are canonical-only.
-AGENTS.md :: disproven :: **The `info.registry` reconcile is the creation path**; the registry owns
-AGENTS.md :: disproven :: cadence and active state, Watcher owns mechanism (#254). An announcement is
-AGENTS.md :: disproven :: authoritative for a named set of columns, everything else survives
-AGENTS.md :: disproven :: reconciliation, and **a local pause is not sticky** — every announcement-owned
-AGENTS.md :: disproven :: field 409s locally on a reconciled item.
-AGENTS.md :: disproven :: What each 409 is, where pause does live, the authoritative column list:
-AGENTS.md :: disproven :: **ULID format errors:** path → 404, filter → 400. **DB triggers:**
-AGENTS.md :: disproven :: - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, fetch contracts, the probe destination guard
-AGENTS.md :: disproven :: - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID errors, DB triggers
-AGENTS.md :: disproven :: - [docs/REGISTRY.md](docs/REGISTRY.md) — `info.registry` reconciliation: what an announcement owns, every 409, linkage
-# #378 CR 2: the single-process line named "API" among what the process runs;
-# only /health and /ready are served now (tests/test_operator_api_retired.py).
-AGENTS.md :: disproven :: **Single process is load-bearing.** One uvicorn process runs everything — API, embedded Procrastinate worker
+# --- #381: the headless rewrite ----------------------------------------------
+# The port table named the process "API"; it serves only /health and /ready
+# (tests/test_operator_api_retired.py), and the dev row's "manual uvicorn"
+# contradicted the file's own rule: the dev server is scripts/dev_server.sh.
+AGENTS.md :: disproven :: | API (live) | 8000 | `systemctl` (`watcher.service`) |
+AGENTS.md :: disproven :: | API (dev) | 8001 | manual uvicorn |
+# MIGRATIONS.md's applied one-time sections moved to docs/MIGRATIONS-HISTORY.md;
+# the index line was extended in place to link it, nothing removed.
+AGENTS.md :: index :: - [docs/MIGRATIONS.md](docs/MIGRATIONS.md) — the manual upgrade step, the two-role grants, one-time orderings

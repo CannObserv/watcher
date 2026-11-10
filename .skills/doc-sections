@@ -25,5 +25,6 @@ docs/ENVIRONMENT.md: env files, variables, the unit-only credentials (new config
 docs/CO-INDEX.md: the shared-index client contract, the green-failing traps (.socraticode.json, .claude/settings.json env block)
 docs/SOCRATICODE.md: index scope, .socraticodeignore entries, link stubs (.socraticodeignore, sibling checkouts)
 docs/MIGRATIONS.md: manual upgrade steps, grants, one-time orderings (alembic/versions/)
+docs/MIGRATIONS-HISTORY.md: the applied one-time orderings — a new one is recorded in MIGRATIONS.md first, moved here once applied (alembic/versions/)
 docs/REGISTRY.md: what an announcement owns, linkage (src/workers/registry_reconcile.py, announcement-owned columns)
-docs/WATCHED-ITEMS.md: fields, schedule resolution, notifications (src/core/watched_items.py, notifications)
+docs/WATCHED-ITEMS.md: fields, schedule resolution, domain keying, media type (src/core/models/watched_item.py, src/core/scheduling/, src/core/media_type.py)

@@ -53,7 +53,7 @@ backup watcher-backup.service postgresql@16-main
 # NodeSource: nodejs, for SocratiCode's pinned MCP server (docs/HOST-MEMORY.md).
 # The Tailwind CLI it was first added for went in #377.
 origin deb.nodesource.com follow
-# Tailscale carries the bus and notifier paths (docs/reference/tailscale.md).
+# Tailscale carries the bus and co-status paths (docs/reference/tailscale.md).
 # Its postinst restarts tailscaled; watcher.service orders After= it with no
 # Wants=, so the restart is a bus outage, not a service stop: its own step.
 # Its own auto-update is off for the tailnet (the owner, 2026-10-24) and goes
@@ -69,8 +69,8 @@ hold tailscale tailscale-archive-keyring tailscale
 owner /home/exedev/watcher self
 
 # --- callers --------------------------------------------------------------
-# None: nothing calls this host's API (the operator's dashboard aside), and
-# every sibling reaches watcher over the bus (docs/ARCHITECTURE.md).
+# None: the service serves only /health and /ready (#378), and every sibling
+# reaches watcher over the bus (docs/ARCHITECTURE.md).
 
 # --- exceptions -----------------------------------------------------------
 exception database:watcher_test 2027-04-30 the suite's database (tests/conftest.py), rebuilt every session; nothing in it to recover

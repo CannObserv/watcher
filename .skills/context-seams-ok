@@ -34,15 +34,17 @@ No safe order — one-time, `e7c4b2a91f60` (#252)
 # 2026-08-14 curation. The Single process section carries the reasoning; the
 # rule itself genuinely does stay in AGENTS.md, so the back-reference is true.
 process, port ownership — stay in `AGENTS.md`; the reasoning behind them is here.
-# Pre-existing provenance heading, same class as the eight above.
-Registry reconciliation (#254)
+# Pre-existing provenance heading, same class as the eight above. Split per
+# file at #381: the WATCHED-ITEMS.md copy is the moved-section stub.
+docs/REGISTRY.md :: Registry reconciliation (#254)
+docs/WATCHED-ITEMS.md :: Registry reconciliation (#254)
 
 # CR round 3, re-judged at #377 (the dashboard doc and its row went):
 # WATCHED-ITEMS.md's preamble names AGENTS.md as carrying the one-entity rule,
 # which it still does.
-went in #377). `AGENTS.md` carries
-docs/MIGRATIONS.md :: Restart-before-migrate — one-time, `d5a71c93e0f2` (#251)
-docs/MIGRATIONS.md :: No safe order — one-time, `e7c4b2a91f60` (#252)
+it (#377, #378). `AGENTS.md` carries
+docs/MIGRATIONS-HISTORY.md :: Restart-before-migrate — one-time, `d5a71c93e0f2` (#251)
+docs/MIGRATIONS-HISTORY.md :: No safe order — one-time, `e7c4b2a91f60` (#252)
 
 # --- #276 curation: provenance headings, pre-existing and untouched by this run.
 # The docs tree's own convention of naming the issue/commit a section came from.
@@ -54,9 +56,9 @@ docs/CONTENT-PIPELINE.md :: `not_modified` is a success, not a failure (#249)
 docs/CONTENT-PIPELINE.md :: Conditional GET: storing and replaying validators (#269)
 docs/CONTENT-PIPELINE.md :: Extraction outcomes: empty is a failure (#258, #260)
 docs/MIGRATIONS.md :: Migration role and application role — one-time (#259)
-docs/MIGRATIONS.md :: Restart-before-migrate — one-time, `f4a8b26c9d31` (#261)
-docs/MIGRATIONS.md :: Restart-before-migrate — one-time, `10783d8a2405` (#272)
-docs/MIGRATIONS.md :: Drop the dead `information` schema — applied 2026-08-18 (#271)
+docs/MIGRATIONS-HISTORY.md :: Restart-before-migrate — one-time, `f4a8b26c9d31` (#261)
+docs/MIGRATIONS-HISTORY.md :: Restart-before-migrate — one-time, `10783d8a2405` (#272)
+docs/MIGRATIONS-HISTORY.md :: Drop the dead `information` schema — applied 2026-08-18 (#271)
 docs/SKILLS.md :: `AGENTS.md` states the rule too, in one clause under *Code Exploration
 
 # --- Judged 2026-08-25 during the #278 CR round-2 curation, which split
@@ -219,3 +221,28 @@ docs/SKILLS.md :: preferences, not skill logic, so they now live in `AGENTS.md` 
 docs/CONVENTIONS.md :: `AGENTS.md` → *Conventions* holds the commit format, which `shipping-work` reads as
 docs/SKILLS.md :: - this file or `AGENTS.md`, which the skills read as project preferences.
 docs/SKILLS.md :: | Step 2: the watcher commit convention | `AGENTS.md` → *Conventions*, which the skill treats
+
+# --- #381: the headless rewrite ------------------------------------------------
+# The applied one-time sections moved verbatim to docs/MIGRATIONS-HISTORY.md, so
+# the entries above were re-pathed with them. The four below were never judged
+# before: each heading is quoted verbatim by its alembic/versions/ docstring, so a
+# rename would break that pointer. Same class as the moved ones.
+docs/MIGRATIONS-HISTORY.md :: Restart-before-migrate — one-time, `89e0c7725367` (#350)
+docs/MIGRATIONS-HISTORY.md :: Restart-before-migrate — one-time, `7f3d3491e921` (#374)
+docs/MIGRATIONS-HISTORY.md :: Restart-before-migrate — one-time, `e2eab993d615` (#376)
+docs/MIGRATIONS-HISTORY.md :: Stop-migrate-start — one-time, `c8e1d4f7a2b6` (#380)
+# These provenance headings were already there. They surface now only because
+# this run edited their files, and nothing left AGENTS.md into them.
+docs/COMMANDS.md :: F3: the notification cutover (#376) — done
+docs/CONTENT-PIPELINE.md :: `content.process` (#325)
+docs/DEPLOYMENT.md :: OS patching (#382)
+docs/WATCHED-ITEMS.md :: Notifications: Archiver's (#376, #379)
+# MIGRATIONS.md split (#381): each of these points at content that stayed in
+# MIGRATIONS.md (the #259 role section, the procrastinate rule, the manual
+# step), or is the annex's own lead naming its source.
+docs/COMMANDS.md :: # docs/MIGRATIONS.md -> "Migration role and application role". Grants are not
+docs/DEPLOYMENT.md :: Split out to [MIGRATIONS.md](MIGRATIONS.md) — the manual `alembic upgrade head`
+docs/MIGRATIONS-HISTORY.md :: migrations. Moved verbatim out of [MIGRATIONS.md](MIGRATIONS.md) (#381), so
+alembic/env.py :: its versioned SQL migrations by hand (docs/MIGRATIONS.md). Neither
+scripts/setup-db-roles.sql :: -- docs/MIGRATIONS.md -> "Migration role and application role".
+tests/scripts/test_setup_db_roles_sql.py :: in docs/MIGRATIONS.md). They exist to stop the shapes that make the script

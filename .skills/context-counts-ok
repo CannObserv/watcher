@@ -8,7 +8,8 @@
 # message names this AGENTS.md sentence by its wording. Re-judged in the #283
 # curation: the wording moved to five/three with the streams, the gate with it.
 # Re-judged in the #383 curation: six/four now, still pinned by test_the_inventory_is_exactly_what_the_docs_describe.
-AGENTS.md :: gated :: watcher publishes six streams and consumes four
+# Re-judged in #381: five/four since F1 (#374), the test's message names this wording.
+AGENTS.md :: gated :: watcher publishes five streams and consumes four
 
 # Gated by tests/core/test_logging.py::test_log_record_includes_structured_fields
 # (L79-89), which asserts message, level, logger and timestamp by name.
@@ -18,8 +19,9 @@ AGENTS.md :: gated :: JSON records with a four-key floor pinned by
 # 2026-09-15: #296 D5 reworded the line, which expired the entry.
 AGENTS.md :: enumerated :: Shells load two env files in order
 
-# All three flags are named in the same sentence, each with its issue.
-AGENTS.md :: enumerated :: Three unit-only opt-ins gate production resources
+# Both flags are named in the same sentence, each with its issue. Re-judged in
+# #381: two since #379 retired the notifier gate.
+AGENTS.md :: enumerated :: Two unit-only opt-ins gate production resources
 
 # --- 2026-09-17 (#299) -------------------------------------------------------
 # Every entry above is pinned to AGENTS.md, where its text lives. Unpinned, a

@@ -158,8 +158,10 @@ means no DDL. 3.7.2 → 3.10.0 (#426) shipped none: the newest file is still
 
 ## One-time orderings — applied
 
-Some releases cannot use the standard order, and each such release records
-its order in a dated section. The shapes so far:
+Some releases cannot use the standard order. Each such release adds a section
+here, named by its revision, with the commands to run. Once that release is
+applied on co-watcher, the section moves verbatim to the history file. The
+shapes so far:
 
 - **Restart before migrate:** the migration drops something the previous
   release still maps (SQLAlchemy names every mapped column in its SELECTs).

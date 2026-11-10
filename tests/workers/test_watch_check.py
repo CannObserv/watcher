@@ -468,7 +468,8 @@ class TestDeliveryThreshold:
 
         Returns ``(attempts, outcomes)`` by ``command_id``. The tests wait on
         these and on Redis, never on ``db_session``: the loop is using it, and
-        a concurrent read from the test is an asyncpg ``InterfaceError``.
+        a read that lands while it begins a transaction raises
+        ``InvalidRequestError`` (#434; ``_SharedSession`` is the safe poll).
         """
         attempts: dict[str, int] = {}
         outcomes: dict[str, str] = {}

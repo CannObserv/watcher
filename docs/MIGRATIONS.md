@@ -289,27 +289,16 @@ deploys use the standard order above.
 
 ## Stop-migrate-start — one-time, `c8e1d4f7a2b6` (#380)
 
-`c8e1d4f7a2b6` **drops** the headless jump's retired schema: the tables
-`notification_templates`, `temporal_profiles`, `api_keys` and `app_users`;
-eight `watched_items` columns (`name`, `description`, `default_tags`,
-`default_schedule_config`, `domain_default_schedule_config`,
-`throttle_floor_interval`, `last_reviewed_at`, `archived_at`); and four
-`domains` columns (`min_interval`, `default_schedule_config`, `notes`,
-`archived_at`).
-
-Neither order of the two earlier sections is safe here:
-
-- **Migrate first:** the previous release still maps every column, and
-  SQLAlchemy names them in its SELECTs, so every load of a WatchedItem or a
-  Domain fails until the restart.
-- **Restart first:** `watched_items.name` is NOT NULL with **no server
-  default**, and the new code's reconcile INSERTs no longer name it, so every
-  create fails until the drop lands. (`domains.min_interval` is NOT NULL too,
-  but its `server_default` covers it.)
-
-So stop the service across the migration. That leaves no window, only seconds
-of downtime: `info.registry` replays from `0-0` at boot, and the consumer
-groups resume where they stopped.
+`c8e1d4f7a2b6` **drops** the jump's retired schema: four tables
+(`notification_templates`, `temporal_profiles`, `api_keys`, `app_users`), eight
+`watched_items` columns and four `domains` columns (the list is in the
+revision). Neither order above is safe. Migrate-first fails every WatchedItem
+and Domain load the old release makes, because it still maps the columns.
+Restart-first fails every reconcile create, because `watched_items.name` is
+NOT NULL with **no server default**. (`domains.min_interval` is NOT NULL too,
+but its default covers it.) So stop across it: `info.registry` replays from
+`0-0` at boot and the groups resume, so there is no window, just seconds of
+downtime.
 
 ```bash
 source scripts/load-env.sh
@@ -319,12 +308,11 @@ sudo systemctl start watcher
 ```
 
 Before running it, confirm the latest nightly backup succeeded: it holds the
-values that leave the live database. Keep the stop window clear of the backup
-timer. On 2026-11-10 production held no archived item or domain and no
-`probing` item, so the drop lifts no pause or suspension. The downgrade
-recreates everything empty, with `watched_items.name` **nullable**: re-adding
-NOT NULL to a table with rows fails. No grants step: `watcher` owns every
-table here (#259 above). Subsequent deploys use the standard order above.
+dropped values. Keep the stop clear of the backup timer. Production held no
+archived or `probing` row on 2026-11-10, so the drop lifts no pause. The
+downgrade recreates everything empty, with `name` **nullable** (NOT NULL fails
+on a table with rows). No grants step: `watcher` owns every table (#259).
+Subsequent deploys use the standard order.
 
 ## No safe order — one-time, `e7c4b2a91f60` (#252)
 

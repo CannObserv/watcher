@@ -437,6 +437,10 @@ class TestLocalColumnsSurvive:
         wi.health_reason, wi.health_status_code = "http_status", 503  # #370
         wi.error_since = NOW - timedelta(hours=4)  # #369
         wi.content_media_type = "application/pdf"
+        wi.last_observed_at = NOW - timedelta(hours=3)
+        wi.last_full_fetch_at = NOW - timedelta(hours=5)  # #269
+        wi.etag, wi.last_modified = 'W/"v2"', "Tue, 10 Nov 2026 00:00:00 GMT"  # #269
+        wi.validator_source_key = "key-before"
         await db_session.commit()
 
         await reconcile_announcement(db_session, _announcement(info_item_id, generation=2))
@@ -448,6 +452,12 @@ class TestLocalColumnsSurvive:
         assert (wi.health_reason, wi.health_status_code) == ("http_status", 503)
         assert wi.error_since == NOW - timedelta(hours=4)
         assert wi.content_media_type == "application/pdf"
+        assert wi.last_observed_at == NOW - timedelta(hours=3)
+        assert wi.last_full_fetch_at == NOW - timedelta(hours=5)
+        # The reconcile never writes the validator state; a spec change
+        # invalidates it through the key mismatch instead (#269).
+        assert (wi.etag, wi.last_modified) == ('W/"v2"', "Tue, 10 Nov 2026 00:00:00 GMT")
+        assert wi.validator_source_key == "key-before"
 
     async def test_domain_suspended_survives(self, db_session):
         """Host-level mechanism, on Watcher's side of the epic's role table. An

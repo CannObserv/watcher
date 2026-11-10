@@ -57,11 +57,13 @@ matters with it.
 **What survives reconciliation**: `health_status`, `health_reason`,
 `health_status_code`, `error_since`, `last_checked_at`,
 `last_observed_at`, `last_changed_at`, `last_full_fetch_at`,
-`domain_suspended`, `content_media_type`, the validator state, audit rows,
-fetch-command history. #380 dropped the rest of the old list: `last_reviewed_at`,
-`archived_at`, `throttle_floor_interval`, `default_schedule_config`, `default_tags`,
-`description`, `name` and the notification templates. Pinned by `TestLocalColumnsSurvive` — "we did not write it" is a weaker
-guarantee than "a test fails if someone does".
+`domain_suspended`, `content_media_type`, the validator state (`etag`,
+`last_modified`, `validator_source_key`), audit rows, fetch-command history.
+Pinned by `TestLocalColumnsSurvive` — "we did not write it" is a weaker
+guarantee than "a test fails if someone does". #380 dropped the rest of the old
+list: `last_reviewed_at`, `archived_at`, `throttle_floor_interval`,
+`default_schedule_config`, `default_tags`, `description`, `name` and the
+notification templates.
 
 **Three signals, and a fourth that is not a signal.** `revoked: true` deletes the
 row (and records the generation in `revoked_info_items`, so a stale live

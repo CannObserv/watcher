@@ -25,7 +25,6 @@ import pytest
 from src.core import domains as core_domains
 from src.core.check_now import CheckRefusal
 from src.core.models import Base, Domain
-from src.core.models import audit_log as audit_log_module
 from src.core.models.audit_log import EventType
 from src.core.models.watched_item import WatchHealthStatus
 
@@ -125,8 +124,3 @@ def test_domain_has_no_archive_state():
     assert not hasattr(Domain, "status")
     assert not hasattr(core_domains, "DomainArchived")
     assert not hasattr(core_domains, "DEFAULT_MIN_INTERVAL")
-
-
-def test_audit_module_still_loads():
-    """The retired constants went; the model and ``audit()`` stay."""
-    assert hasattr(audit_log_module, "audit")

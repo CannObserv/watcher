@@ -22,8 +22,8 @@ The service loads env files in this order (later values override earlier):
 **The service does not load the repo-root `.env` (#296 D5).** That file is the
 agent workspace's: `GH_TOKEN_*`, `ANTHROPIC_API_KEY`, `TEST_DATABASE_URL`, the
 `WATCHER_DEV_*` opt-ins. Every one of them is marked *no* under **Prod** below,
-and until #296 the unit loaded the file anyway, so the process serving the
-dashboard held every token in it. `scripts/load-env.sh` still exports it into
+and until #296 the unit loaded the file anyway, so the service process held
+every token in it. `scripts/load-env.sh` still exports it into
 shells, which is what it is for. A production setting belongs in
 `/etc/watcher/.env`; a production credential belongs in a unit-only file.
 `tests/deploy/test_installed_unit_matches_repo.py` fails a unit that loads any
@@ -100,7 +100,7 @@ plan documents under `docs/plans/` still describe them and are left as written
 | `ARCHIVER_API_KEY` | Same. Removing it from this file does **not** revoke it — the key is presumably still valid on Archiver's side, where revocation is tracked as [CannObserv/archiver#186](https://github.com/CannObserv/archiver/issues/186). Until that closes, treat the credential as live |
 | `APPRISE_SECRET_KEY` | The Fernet key for encrypted Apprise URLs. Verified no ciphertext column survives in the schema before deletion |
 | `WATCHER_ERROR_RENOTIFY_INTERVAL` | #71's reminder gap. Watcher sends no reminder since F3 (#376): Archiver owns the cadence. Never set in production, so nothing to remove |
-| `WATCHER_NOTIFY_CUTOVER_AT` | F3's gate (#376), set to `2026-11-06T21:00:00Z` at the flip. Part 2 deleted the gate with the dispatch path, so nothing reads it; the operator removes the line **after** part 2 is live (before, a restart without it double-sent): [MIGRATIONS.md](MIGRATIONS.md) → *Restart-before-migrate — one-time, `e2eab993d615`* |
+| `WATCHER_NOTIFY_CUTOVER_AT` | F3's gate (#376), set to `2026-11-06T21:00:00Z` at the flip. Part 2 deleted the gate with the dispatch path, so nothing reads it; the operator removes the line **after** part 2 is live (before, a restart without it double-sent): [MIGRATIONS-HISTORY.md](MIGRATIONS-HISTORY.md) → *Restart-before-migrate — one-time, `e2eab993d615`* |
 | `WATCHER_NOTIFIER_BASE_URL`, `WATCHER_NOTIFIER_API_KEY` | The production notifier credential (renamed from bare `NOTIFIER_*` under #277). #278 moved it out of this file into `/etc/watcher/notifier.env`, `600 root:root`, loaded by the unit alone and last, because every agent shell exports this one and notifier's audit (notifier#22) found ~1289 watcher fixture notifications delivered on it. #379 deleted the client and dropped the file from the unit; the operator shreds it, with no copy, once the new unit is live, and CannObserv/notifier#118 revokes the key |
 | `WATCHER_NOTIFIER_ENABLED` | The unit-only opt-in for the notifier client (#277); with #278 a URL without it, or it without a URL, aborted startup. Went from `deploy/watcher.service` with the client (#379) |
 | `WATCHER_DEV_NOTIFIER_BASE_URL`, `WATCHER_DEV_NOTIFIER_API_KEY` | `scripts/dev_server.sh`'s scratch notifier (notifier's development tenant on `:9001`, #278). The operator removes them from the repo `.env` after #379 is live |

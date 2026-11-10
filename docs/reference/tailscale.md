@@ -23,8 +23,8 @@ a host named `watcher` would have written into the retired VM's timeline
 overrides the prefix — but it is never *just* a rename: set that variable in the
 same change, or the next nightly lands in the wrong timeline.
 
-The exe.dev proxy is a separate path: `https://co-watcher.exe.xyz` is the public
-dashboard, and from *inside* the VM that name
+The exe.dev proxy is a separate path: `https://co-watcher.exe.xyz` is the VM's
+public name, and from *inside* the VM that name
 resolves to the VM's own address and skips the proxy — so a proxy check has to
 come from outside.
 
@@ -52,7 +52,7 @@ Watcher held a notifier client until #379 (`notifier`, `100.98.9.17`, ports
 moment `tailscaled` does will resolve nothing. `deploy/watcher.service` orders
 `After=tailscaled.service` but deliberately takes **no** `Wants=`/`Requires=`:
 ordering alone does not close the race, and a Tailscale upgrade restarting the
-agent must not take the dashboard down with it. What actually closes it is the
+agent must not take watcher down with it. What actually closes it is the
 retry window on the startup probe in `src/core/bus.py`.
 
 The first packets after a boot go by **DERP relay**, and a direct path forms a

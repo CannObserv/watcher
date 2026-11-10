@@ -1,8 +1,8 @@
 # Watched Items
 
 Everything the `WatchedItem` entity owns: fields, schedule resolution, registry
-reconciliation. Archiver's control plane is the operator surface (the dashboard
-went in #377). `AGENTS.md` carries
+reconciliation. Watcher has no operator surface: Archiver's control plane is
+it (#377, #378). `AGENTS.md` carries
 the one-entity rule, the create path, and the handful of invariants an agent
 needs on nearly every task; the detail is here.
 
@@ -12,8 +12,8 @@ A `WatchedItem` owns everything: the canonical `effective_url` and `source_specs
 used by the pipeline; `announced_schedule_config` (the registry's cadence, #254);
 `content_media_type` (#168); `domain_name` (FK → `Domain.name`, set at create time);
 `domain_suspended` (set True/False by domain deactivation/reactivation, through
-`set_domain_active` — the `src.ops.suspend_domain` break-glass, #372; the
-dashboard toggle until #377 — it gates scheduling directly, no live Domain join);
+`set_domain_active` — the `src.ops.suspend_domain` break-glass, #372 — it
+gates scheduling directly, no live Domain join);
 `health_status`;
 `health_reason` / `health_status_code` (#370 — why it is in ERROR now: the latest
 failed check's `WatchHealthReason` token and, for `http_status`, the origin's
@@ -26,16 +26,15 @@ content was verified current: a successful check, changed or unchanged alike, **
 an origin 304 where no extraction ran at all (#249); `last_checked_at` advances
 on *every* outcome because it is the anti-thrash scheduling stamp (#168), so the
 pair distinguishes "content verified current as of T" from "we tried at T" —
-next-due derives from the latter, never the former. Both are on
-`WatchedItemResponse` and on the detail page's Details panel, the latter as
-**Content Verified** beside **Last Checked** (#266); the row does not split the
+next-due derives from the latter, never the former. Both go out on
+`info.watch-status` (`last_attempt_at` / `last_observed_at`, #266); the row does not split the
 two provenances, because the column stores the instant and not the evidence —
 that lives in the audit trail, where `CHECK_NO_CHANGE` carries
 `source: not_modified`); `last_full_fetch_at` (#269 — the third stamp of the
 freshness set: when *bytes* last arrived, advanced only by a blob apply, so a
 304 moves the other two and not this one; the gap between it and
 `last_observed_at` is how long the item's fingerprint has been inherited rather
-than recomputed, and the detail page shows it as **Last Full Fetch**);
+than recomputed);
 `blob_expires_at` (#339 — that fetch's blob horizon, stamped with it; replay
 stops at the half-life between the two); the
 conditional-GET validator state `etag` / `last_modified` / `validator_source_key`
@@ -53,38 +52,24 @@ profile → item → domain and announces a concrete interval
 (CannObserv/archiver#364), and runs the daily profile boundary with its
 post-actions (CannObserv/archiver#365).
 
-*Before F2*, resolution was four tiers under a floor (#205, #254):
-`announced_schedule_config` → WatchedItem `default_schedule_config` → the Domain
-default (the denormalized `domain_default_schedule_config`) → system default, then
-`max(resolved, throttle_floor_interval)`. `schedule_tick` also evaluated each
-item's active `TemporalProfile` — a ramp interval inside its window, and once the
-date had passed a post-action: `deactivate` and `archive` wrote `is_active` /
-`archived_at` (without the registry guard), `reduce_frequency` set the floor to
-`1d` and audited `WATCHED_ITEM_THROTTLED`. The `/api/v1/watched-items/{id}/profiles`
-routes managed profiles. F2 deleted the tiers' reads, the floor, the profile
-evaluation, the post-actions and the routes; #377 and #378 deleted the writers, and
-#380 dropped the columns and the `temporal_profiles` table.
+*Before F2*, resolution was four tiers (announced → item → domain → system
+default) under a throttle floor, and `schedule_tick` also evaluated each item's
+`TemporalProfile` and its post-actions (#205, #254). F2 deleted the reads and the
+evaluation, #377 and #378 the writers and the profile routes, and #380 the
+columns and the `temporal_profiles` table.
 
-**Display** of the resolved interval + next-check goes through one helper,
-`resolve_schedule_display` (`src/core/scheduling/schedule.py`, #206): it composes
-`resolved_schedule_config` and `compute_next_check`, returning a `ScheduleDisplay`
-(`interval_text`, `source` `registry`/`default`, `next_check`, plus a `marker`
-property that renders the source). Every surface — list (`build_schedule_map`),
-detail interval field, and the domain-detail table — renders from it, so the UI
-matches `schedule_tick`. Before F2 it also reported the `item`/`domain` sources, a
-`throttled` flag and an active profile's override (`· profile`).
+Nothing in Watcher renders the schedule: the display helper went with the
+dashboard (#377), and Archiver shows the resolved cadence from
+`info.watch-status`'s `applied_interval`.
 `domain_suspended` is denormalized onto the WatchedItem via
 `ensure_domain_and_resolve_suspension` when an item is created or its host moves;
 the domain cadence copy beside it went with its column (#380).
 
-Until #378, cadence was validated at the API write boundary by the same helper as
-the Domain boundary (`validate_optional_schedule_config`, #205): a non-`None` config had to carry
-a parseable `interval`, and `{}` is rejected — delegation has exactly one spelling,
-`None`/omit (the direction cannobserv#324 settled for the registry document). The
-rule was held there because `schedule_tick` resolves every item in one task, so an
-unparseable stored interval would raise out of `compute_next_check` and stop
-scheduling for the whole system. Since F2 those writes reached inert columns, and
-#378 deleted them; the reconcile's own parse is what keeps the announced column safe.
+**The reconcile's parse keeps the announced column safe.** `schedule_tick`
+resolves every item in one task, so an unparseable stored interval would raise
+out of `compute_next_check` and stop scheduling for the whole system. The API's
+write-boundary check (`validate_optional_schedule_config`, #205) went with
+`/api/v1` (#378).
 
 Per-domain cadence was `Domain.default_schedule_config`, inert since F2 (#375);
 #380 dropped it with `Domain.min_interval` (the politeness floor), `notes` and
@@ -102,21 +87,19 @@ break-glass suspension. Archiver holds the domain default it resolves from.
 enum — the old `default_content_type` enum (`html`/`pdf`/`file`) was retired.
 It is auto-detected by `check_watched_item`, seeded **once** from the first
 successful GET response header when NULL (never auto-clobbered — refresh-on-change
-is deferred to drift detection); the operator override went with the dashboard
-(#377) and the API (#378). Bounded to `CONTENT_MEDIA_TYPE_MAX_LEN` (2048) at the
+is deferred to drift detection); there is no operator override (#377, #378). Bounded to `CONTENT_MEDIA_TYPE_MAX_LEN` (2048) at the
 column and the detection truncation. The **media-type essence** (lowercased
 `type/subtype`, params stripped, with a URL-extension tiebreaker for
 octet-stream/text-plain/absent headers) is **not stored** — it's a pure function,
 `media_type.resolve_dispatch_essence(content_media_type, effective_url)`, the single
 source of truth used by **both** the issuer (the `content.process` command
-carries it; the processor picks the extractor, #350); the API's computed
-`media_type_essence` field went at #378. An extractor
+carries it; the processor picks the extractor, #350). An extractor
 that fails on mismatched bytes comes back as a terminal failure and is recorded
 like a fetch failure (ERROR health + `CHECK_EXTRACTION_FAILED` + `WATCH_ERROR`).
 
 ## Domain keying
 
-**Domain keying (#197).** `WatchedItem.domain_name` == `Domain.name` == `hostname(effective_url)` — the same string by construction (all derive from one `urlparse(...).hostname` over the same `effective_url`). That equality is what let the fetch-policy producer (removed in #374) publish per-`Domain.name` while items carry `domain_name`, and it is why `resolve_watch_target` derives the domain with the identical helper. **One entry per hostname** — host variants (`lcb.wa.gov` vs `www.lcb.wa.gov`) are independent by design. *History:* this used to describe the in-process `DomainRateLimiter`'s bucket key; the limiter retired with the local fetch path (#241 step 5) and per-host pacing is Replicator's, but the keying invariant still holds and is still load-bearing.
+**Domain keying (#197).** `WatchedItem.domain_name` == `Domain.name` == `hostname(effective_url)` — the same string by construction (all derive from one `urlparse(...).hostname` over the same `effective_url`). That equality is what let the fetch-policy producer (removed in #374) publish per-`Domain.name` while items carry `domain_name`, and it is why the reconcile derives both with one helper, `domain_name_for_url` (`src/core/domains.py`). **One entry per hostname** — host variants (`lcb.wa.gov` vs `www.lcb.wa.gov`) are independent by design. *History:* this used to describe the in-process `DomainRateLimiter`'s bucket key; the limiter retired with the local fetch path (#241 step 5) and per-host pacing is Replicator's, but the keying invariant still holds and is still load-bearing.
 
 ## Registry linkage and lifecycle
 

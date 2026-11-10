@@ -33,9 +33,9 @@ OK is not a recovery.
   `status_code` is `health_status_code`. So the extraction-failure path sends
   `processing_failed`, not `extraction_failed`.
 - `watch_recovered.error_since` is `watched_items.error_since`. That column is
-  stamped on the error edge and cleared on every exit from ERROR, including the
-  dashboard's URL edit into PROBING until #377. That exit ended the episode
-  with no recovery fact, which the contract allows. There is **no backfill**: an item already in
+  stamped on the error edge and cleared on every exit from ERROR. Until #377
+  the dashboard's URL edit into PROBING was one, and ended the episode with no
+  recovery fact, which the contract allows. There is **no backfill**: an item already in
   ERROR at deploy recovers with `null`, which is stated in the payload rather
   than omitted.
 - `change_detected.current_text_uri` is the processor's `output_uri` from the

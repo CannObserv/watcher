@@ -5,6 +5,7 @@ Be terse. Prefer fragments over full sentences. Skip filler and preamble. Sacrif
 ## Project Overview
 
 General-purpose web monitoring service: fingerprints the content at URLs Archiver registers on a schedule and reports each change.
+Headless: no operator surface; Archiver is the control plane. Cohort roles and placement rules: the [boundary charter](https://github.com/CannObserv/cannobserv/blob/main/docs/BOUNDARIES.md) (private repo).
 
 ## Development Methodology
 
@@ -47,8 +48,8 @@ Full tool table, index scope, client contract and traps: [docs/SOCRATICODE.md](d
 
 | Service | Port | Managed by |
 |---|---|---|
-| API (live) | 8000 | `systemctl` (`watcher.service`) |
-| API (dev) | 8001 | manual uvicorn |
+| Service (live; `/health`, `/ready` only) | 8000 | `systemctl` (`watcher.service`) |
+| Service (dev) | 8001 | `scripts/dev_server.sh` |
 
 The exe.dev proxy forwards 3000–9999; dev server at `https://co-watcher.exe.xyz:8001/`.
 
@@ -185,7 +186,7 @@ A skill is symlinked, unforked, into both `skills/` and `.claude/skills/` (#413)
 - [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — every env file and variable, load order, the unit-only opt-ins
 - [docs/HOST-MEMORY.md](docs/HOST-MEMORY.md) — #307/#309: reservations, slices, earlyoom, the SocratiCode pin
 - [docs/RECOVERY.md](docs/RECOVERY.md) — nightly DB backup to GCS, restore, go/no-go gates; dated [rehearsals](docs/RECOVERY-REHEARSALS.md), one-time [provisioning](docs/RECOVERY-PROVISIONING.md)
-- [docs/MIGRATIONS.md](docs/MIGRATIONS.md) — the manual upgrade step, the two-role grants, one-time orderings
+- [docs/MIGRATIONS.md](docs/MIGRATIONS.md) — the manual upgrade step, the two-role grants, one-time orderings; applied ones in [history](docs/MIGRATIONS-HISTORY.md)
 - [docs/reference/tailscale.md](docs/reference/tailscale.md) — this node: identity, peers, the cold-boot race, ACL rules
 - [docs/SKILLS.md](docs/SKILLS.md) — skill triggers, vendored skill repos, the SessionStart hooks
 - [docs/SOCRATICODE.md](docs/SOCRATICODE.md) — tool table, index scope, green-failing traps, link stubs

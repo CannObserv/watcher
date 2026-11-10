@@ -122,7 +122,7 @@ carries `MemoryLow=512M` and `OOMScoreAdjust=-500`
 (`tests/deploy/test_installed_unit_matches_repo.py` pins all three facts,
 including the *absence* of a cap). `MemoryHigh=` on a production unit throttles
 reclaim rather than failing an allocation, so the unit slows to a crawl while
-still reporting `active` — worse for a dashboard than an honest failure. The cap
+still reporting `active` — worse for a service than an honest failure. The cap
 belongs on the install that spikes, which is where step 1 put it.
 `OOMScoreAdjust` is deliberately not -1000: an unkillable service on a host with
 no swap wedges the box instead of shedding one process. **The reservation holds
@@ -264,7 +264,8 @@ side by side, the slice must cover both — and both reservations follow
 `shared_buffers` (128M) if it is raised.
 
 **`tailscaled` at -400** goes after everything at the default 0 but before
-watcher: the dashboard is reached through the exe.dev proxy, not the tailnet.
+watcher: a lost tunnel is a transient bus outage the service rides out
+([BUS-CONNECTION-POLICY.md](BUS-CONNECTION-POLICY.md)), so watcher outlives it.
 
 Install from the checkout — **a rebuilt VM loses these silently**:
 

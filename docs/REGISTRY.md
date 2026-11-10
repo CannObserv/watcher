@@ -67,8 +67,9 @@ the column.
 
 **A local pause is not offered.** `active` applies unconditionally, and
 item-level pause lives in Archiver's control plane alone. A control that
-silently reverts within the snapshot period is worse than none, which is why the
-API refused a toggle on a reconciled item until #378 deleted it.
+silently reverts within the snapshot period is worse than a refusal that says
+where the control lives, which is why the API refused a toggle on a reconciled
+item until #378 deleted it.
 
 **The snapshot cannot repair local drift.** The hourly republish carries the same
 generation, which the `>` ordering guard ignores as stale — so a local write to an

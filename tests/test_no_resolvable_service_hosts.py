@@ -143,8 +143,11 @@ class TestSweptTreesNameNoResolvableHost:
         assert "test_no_resolvable_service_hosts.py" in swept
 
     def test_docs_are_not_swept(self) -> None:
-        """They name the real host on purpose."""
-        assert not [p for p in _swept_files(REPO_ROOT) if "docs/" in str(p)]
+        """They name the real host on purpose. Matched on the repo-relative path:
+        a checkout whose own path contains ``docs/`` (a worktree named
+        ``…-docs``) must not fail it."""
+        swept = [p.relative_to(REPO_ROOT).parts for p in _swept_files(REPO_ROOT)]
+        assert not [parts for parts in swept if "docs" in parts]
 
     def test_no_swept_file_names_a_resolvable_notifier_host(self) -> None:
         offenders: list[str] = []

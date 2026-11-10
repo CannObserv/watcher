@@ -27,7 +27,7 @@ an origin 304 where no extraction ran at all (#249); `last_checked_at` advances
 on *every* outcome because it is the anti-thrash scheduling stamp (#168), so the
 pair distinguishes "content verified current as of T" from "we tried at T" —
 next-due derives from the latter, never the former. Both go out on
-`info.watch-status` (`last_attempt_at` / `last_observed_at`, #266); the row does not split the
+`info.watch-status` (`last_attempt_at` / `last_observed_at`, #264); the row does not split the
 two provenances, because the column stores the instant and not the evidence —
 that lives in the audit trail, where `CHECK_NO_CHANGE` carries
 `source: not_modified`); `last_full_fetch_at` (#269 — the third stamp of the

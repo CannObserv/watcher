@@ -65,7 +65,7 @@ class WatchedItem(Base, TimestampMixin):
     # sending any. Distinct from `last_checked_at`, which advances on every
     # outcome including failures because it is a scheduling anti-thrash device
     # (#168); this one is provenance ("content was verified current"), published
-    # on info.watch-status (#266) and written through to Archiver's durable
+    # on info.watch-status (#264) and written through to Archiver's durable
     # `info_sources.last_observed_at`. Next-due must never derive from it: a
     # failing item attempts on schedule while this stands still.
     last_observed_at: Mapped[datetime | None] = mapped_column(

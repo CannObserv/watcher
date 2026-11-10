@@ -1,7 +1,7 @@
 # Database migrations — history
 
 The one-time deploy orderings, each **applied on co-watcher** (head
-`c8e1d4f7a2b6`, 2026-11-10), and two operator actions that were never
+`c8e1d4f7a2b6` when they moved here, 2026-11-10), and two operator actions that were never
 migrations. Moved verbatim out of [MIGRATIONS.md](MIGRATIONS.md) (#381), so
 "the standard order above" and "#259 above" mean that file's opening block and
 its *Migration role and application role* section. Each ordering governs only

@@ -9,11 +9,11 @@ the three docs that described them. A surface that came back would be an
 operator path Archiver does not know about, served from the process that runs
 the worker.
 
-Scope of the name scan: ``src/``, ``scripts/``, ``.github/``, the pre-commit
-config, ``pyproject.toml`` and AGENTS.md — where a retired tool would be *run*
-or *instructed*. Not scanned, on purpose: ``docs/`` and ``docs/plans/``
-(history), ``tests/`` (this file names them), and ``deploy/``, whose comments
-#381 rewrites (an edit there forces a unit reinstall).
+Scope of the name scan: ``src/``, ``scripts/``, ``.github/``, ``deploy/``, the
+pre-commit config, ``pyproject.toml`` and AGENTS.md — where a retired tool would
+be *run*, *installed* or *instructed* (``deploy/`` since #381 rewrote its
+comments). Not scanned, on purpose: ``docs/`` and ``docs/plans/`` (history) and
+``tests/`` (this file names them).
 
 Kept apart from ``tests/test_notification_subsystem_retired.py``: a different
 subsystem, retired for a different reason.
@@ -59,7 +59,7 @@ _RETIRED_IMPORTS = (
 # A form body is python-multipart's reason to exist (#377 brief: no `Form(`,
 # `UploadFile` or `request.form(` outside the dashboard).
 _RETIRED_CALLS = ("Form", "File", "UploadFile")
-_SCANNED_TREES = ("src", "scripts", ".github")
+_SCANNED_TREES = ("src", "scripts", ".github", "deploy")
 _SCANNED_FILES = (".pre-commit-config.yaml", "pyproject.toml", "AGENTS.md")
 _RETIRED_NAMES = ("tailwind", "check-css", "build-css", "output.css", "htmx")
 # Each prefix the dashboard served (#377), and one live path as the control.

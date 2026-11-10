@@ -14,9 +14,9 @@ no copy that could drift from that pin — ``tests/core/test_media_type.py`` pin
 identity, not equal results.
 
 ``resolve_dispatch_essence`` is still the single source of truth for the dispatch
-essence: the issuer puts it on the command, and ``WatchedItemResponse`` surfaces
-its result as the computed ``media_type_essence`` field — there is no
-stored/generated column to keep in sync (#168). Stdlib-only on the co-core side,
+essence: the issuer puts it on the command, and there is no stored/generated
+column to keep in sync (#168; the API's computed ``media_type_essence`` field
+went with ``/api/v1``, #378). Stdlib-only on the co-core side,
 which is what lets watcher run without ``co-core[extract]`` (#350).
 """
 

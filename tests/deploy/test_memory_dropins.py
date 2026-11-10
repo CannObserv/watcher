@@ -141,8 +141,8 @@ def test_tailscaled_ranks_between_watcher_and_the_default() -> None:
 
     At 0 it ranks with the system daemons, postgres's backends and, since #337,
     a session's ``npm``/``node`` (-1000 before, #323). Behind watcher by
-    design: the dashboard is reached through the exe.dev proxy, not the
-    tailnet, so it should outlive the tunnel.
+    design: a lost tunnel is a transient bus outage the service rides out, so
+    the service should outlive the tunnel.
     """
     (watcher,) = directive_values(WATCHER_UNIT.read_text(), "OOMScoreAdjust")
     (tailscaled,) = directive_values(_text(TAILSCALED), "OOMScoreAdjust")

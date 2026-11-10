@@ -65,8 +65,7 @@ class WatchedItem(Base, TimestampMixin):
     # sending any. Distinct from `last_checked_at`, which advances on every
     # outcome including failures because it is a scheduling anti-thrash device
     # (#168); this one is provenance ("content was verified current"), published
-    # on info.watch-status, surfaced on `WatchedItemResponse` and the detail page
-    # (#266), and written through to Archiver's durable
+    # on info.watch-status (#266) and written through to Archiver's durable
     # `info_sources.last_observed_at`. Next-due must never derive from it: a
     # failing item attempts on schedule while this stands still.
     last_observed_at: Mapped[datetime | None] = mapped_column(
@@ -74,7 +73,7 @@ class WatchedItem(Base, TimestampMixin):
     )
     # Observed media type — the verbatim `Content-Type` response header (e.g.
     # `text/html; charset=utf-8`). Seeded once from the first successful GET fetch
-    # when NULL (#168); operator-overridable via the detail page; auto-refresh on
+    # when NULL (#168); no operator override (#377, #378); auto-refresh on
     # change is deferred to drift detection. Free-form raw MIME, not an enum.
     content_media_type: Mapped[str | None] = mapped_column(
         String(CONTENT_MEDIA_TYPE_MAX_LEN), nullable=True, default=None

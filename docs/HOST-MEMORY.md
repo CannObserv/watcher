@@ -50,8 +50,10 @@ SocratiCode here, each pinned on its own, both at **1.16.1** (#395):
 
 `--prefer-online` revalidates against the registry on *every* launch, so a
 floating spec installs on any day the package moved. An exact one resolves from
-the npx cache without installing, as long as the cache survives — which is why
-`scripts/cleanup.sh` stopped wiping it weekly (#314). Cold, the session's launch
+its `_npx` tree without installing, as long as the tree survives: the disk GC
+keeps the tree `SOCRATICODE_SPEC` names and wipes `~/.npm/_cacache`, which the
+launch doesn't need (#385; before it, `scripts/cleanup.sh` stopped wiping both
+weekly, #314). Cold, the session's launch
 does not fit Claude Code's 30s MCP connect timeout, and the session comes up with
 no tools while the health hook and `preflight.sh --check` both pass: they reach
 the pin, the session reaches npx. Measured on broker: 75 MB pinned, 129 MB
@@ -97,6 +99,10 @@ systemd-run --user --scope -p MemoryHigh=1200M -p MemoryMax=1536M \
 # 3. SOCRATICODE_SPEC in .claude/settings.json: socraticode@<version>
 # 4. The same value in ~/.vscode-server/data/Machine/settings.json, then
 #    restart the session (verified here by closing the window and reconnecting)
+#    Within an hour of step 2: the disk GC keeps only the trees a spec names,
+#    and spares a new one for its 60-minute grace. It reads this file directly,
+#    and step 3 only once it reaches the deploy checkout. The old tree goes at
+#    its next daily run (#385).
 # Then `git grep` the old literal: bump the lines that state the current pin,
 # keep the dated measurements.
 

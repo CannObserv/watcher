@@ -18,7 +18,7 @@
     {
       "name": "deployment-doc",
       "path": "./docs/DEPLOYMENT.md",
-      "description": "Production deployment guide. Systemd unit (watcher.service), port allocation (8000 live, 8001 dev), exe.dev proxy, restart procedure, install runbook, the disk-cleanup timer, and Archiver sync. The co-pypi index (formerly the cannobserv wheelhouse) and the notifier SDK's git-tag source live in docs/DEPENDENCIES.md. Env files and variables moved to docs/ENVIRONMENT.md (#278). Host memory posture split out to docs/HOST-MEMORY.md (#309)."
+      "description": "Production deployment guide. Systemd unit (watcher.service), port allocation (8000 live, 8001 dev), exe.dev proxy, restart procedure, install runbook, the cohort disk GC (#385), and Archiver sync. The co-pypi index (formerly the cannobserv wheelhouse) and the notifier SDK's git-tag source live in docs/DEPENDENCIES.md. Env files and variables moved to docs/ENVIRONMENT.md (#278). Host memory posture split out to docs/HOST-MEMORY.md (#309)."
     },
     {
       "name": "dependencies-doc",

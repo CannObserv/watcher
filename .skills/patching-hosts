@@ -19,8 +19,12 @@ window Mon 01:00-03:00
 # AccuracySec=1min; the dump and upload take seconds. Outside the window
 # today: kept so that widening the window can't put a step on the backup.
 quiet 03:15-03:45
-# watcher-cleanup.timer: Sun 03:00 (UTC on this host), RandomizedDelaySec=30min.
-quiet 03:00-03:45 Sun
+# cannobserv-disk-gc.timer, the cohort disk GC (#385): 05:15 UTC daily,
+# RandomizedDelaySec=30min, AccuracySec unset (1min). Its run takes minutes;
+# the range keeps 15 of them past the last start. Its sensor, every 10 min,
+# only reads, and starts nothing; neither unit is in /etc/systemd/system, so
+# the restarter scan doesn't read them.
+quiet 05:15-06:00
 
 # --- the service ----------------------------------------------------------
 # One process is the whole service: API, embedded Procrastinate worker and
@@ -77,6 +81,5 @@ exception database:watcher_test 2027-04-30 the suite's database (tests/conftest.
 exception database:watcher_dev 2027-04-30 a dev server's and the restore rehearsals' target (docs/RECOVERY-REHEARSALS.md); rebuilt from a production dump on demand
 exception setup-script:redelivered 2027-04-30 contained in place, 600 root and exe-setup.service disabled, key revoked (watcher#331, watcher#347); delivery still re-runs at every boot (CannObserv/provisioner#4)
 exception not-restarter:watcher-backup.service 2027-04-30 a DynamicUser running pg_dump, pg_restore and the GCS upload (src.ops.backup); starts nothing
-exception not-restarter:watcher-cleanup.service 2027-04-30 runs as exedev, deleting caches (scripts/cleanup.sh); starts nothing
 # No image-owner line: this repo is public and the image repo is not
 # (gregoryfoster/skills#350).

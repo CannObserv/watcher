@@ -71,8 +71,10 @@ node $D resolve               # which server a launch would get (the #307 pin)
    by the health hook and `preflight.sh --check`, not the session. A cold npm cache makes
    that launch a ~1,700-tarball install, which does not fit Claude Code's 30s connect
    timeout: the session reports `CONNECTION_CLOSED` and runs with no tools while every
-   check on the pin passes. Measured 2026-09-20 (#314), which is why `scripts/cleanup.sh`
-   no longer wipes `~/.npm/_cacache` weekly. A session that lost the server reconnects
+   check on the pin passes. Measured 2026-09-20 (#314). What the launch needs is the
+   `_npx` tree, not `~/.npm/_cacache`: an exact-version spec found there installs nothing.
+   The disk GC keeps that tree and wipes `_cacache` daily (#385,
+   [DEPLOYMENT.md](DEPLOYMENT.md#disk-gc)). A session that lost the server reconnects
    with `/mcp`.
 
 **The inverse trap: a red that succeeded** (*Per-tool notes*, `codebase_context_index`).

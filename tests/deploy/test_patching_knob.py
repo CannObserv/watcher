@@ -11,7 +11,8 @@ the host that is a skip, on it a failure. The rest are pure parses of the
 tracked files, run everywhere, plus the installed apt pins on the host:
 
 - **The window is Mon 01:00-03:00 UTC**, the owner's Sun 17:00-19:00 Pacific
-  once DST ends (decided 2026-10-23, epic #394), and clear of both timers.
+  once DST ends (decided 2026-10-23, epic #394), and clear of the backup's
+  timer and the disk GC's (#385), each under a quiet line.
 - **No knob command escalates**: ``inflight`` and ``health`` run as the
   invoking user by design, so a ``sudo`` in one hands root to the knob's
   committers.
@@ -24,10 +25,11 @@ tracked files, run everywhere, plus the installed apt pins on the host:
   500 and its packages above (the skill's ``policy.md``, Two lanes).
 - **A comment can't cut an exception short.** ``#`` after whitespace opens a
   comment, so ``(#331, #347)`` in a reason silently ends it at ``(#331,``.
-- **Neither timer's service is a restarter**: each runs unprivileged and
-  starts nothing, which the probe can't read through a Python module or a
-  script, so each is a ``not-restarter`` exception, pinned here to the unit
-  facts that make it true.
+- **The backup's service is not a restarter**: it runs unprivileged and
+  starts nothing, which the probe can't read through a Python module, so it
+  is a ``not-restarter`` exception, pinned here to the unit facts that make it
+  true. The disk GC's units live under ``/usr/local/lib``, which the probe's
+  restarter scan doesn't read, so they need none (#385).
 - **The tree's owner is named**: the remote is the deploy key's SSH alias
   (``github-watcher:``), which the probe can't read as a GitHub repo.
 - **No ``image-owner`` and no private ``caller``**: this repo is public
@@ -48,6 +50,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 KNOB = REPO_ROOT / ".skills" / "patching-hosts"
 READ_KNOB = REPO_ROOT / "skills" / "patching-hosts" / "scripts" / "read-knob.sh"
 INSTALLED_UNIT = Path("/etc/systemd/system/watcher.service")
+#: The cohort disk GC's timer, installed from its layer, never from deploy/ (#385).
+GC_TIMER = Path("/usr/local/lib/systemd/system/cannobserv-disk-gc.timer")
 PINS = REPO_ROOT / "deploy" / "apt-preferences.d"
 INSTALLED_PINS = Path("/etc/apt/preferences.d")
 HOST = "co-watcher"
@@ -103,18 +107,19 @@ def _span_minutes(value: str) -> float:
     return int(match.group(1)) * scale[match.group(2)]
 
 
-def _timer_span(timer: str) -> tuple[str | None, int, int]:
-    """A deploy timer's weekday (or None), its first and last start minute."""
-    text = (REPO_ROOT / "deploy" / timer).read_text()
+def _timer_span(path: Path) -> tuple[str | None, int, int]:
+    """A timer's weekday (or None), its first and last start minute.
+
+    An unset ``AccuracySec=`` is systemd's default, one minute: the GC's timer
+    sets none, so its starts run a minute past its randomized delay.
+    """
+    text = path.read_text()
     (calendar,) = directive_values(text, "OnCalendar")
     match = re.fullmatch(r"(?:(\w{3}) |\*-\*-\* )?(\d\d:\d\d):00(?: UTC)?", calendar)
-    assert match, f"{timer}: unexpected OnCalendar={calendar}"
+    assert match, f"{path.name}: unexpected OnCalendar={calendar}"
     start = _minutes(match.group(2))
-    slack = sum(
-        _span_minutes(v)
-        for d in ("RandomizedDelaySec", "AccuracySec")
-        for v in directive_values(text, d)
-    )
+    slack = sum(_span_minutes(v) for v in directive_values(text, "RandomizedDelaySec"))
+    slack += sum(_span_minutes(v) for v in directive_values(text, "AccuracySec") or ["1min"])
     return match.group(1), start, start + math.ceil(slack)
 
 
@@ -168,19 +173,30 @@ def test_the_window_is_the_owners_slot_in_utc() -> None:
     assert _named("window") == [["Mon", "01:00-03:00"]]
 
 
-@pytest.mark.parametrize("timer", ["watcher-backup.timer", "watcher-cleanup.timer"])
-def test_each_timer_is_quiet_and_outside_the_window(timer: str) -> None:
+def _assert_quiet_and_outside_the_window(timer: Path) -> None:
     weekday, first, last = _timer_span(timer)
     quiet = [
         (_minutes(q[0].split("-")[0]), _minutes(q[0].split("-")[1]), q[1:]) for q in _named("quiet")
     ]
     assert any(
         start <= first and last <= end and days in ([], [weekday]) for start, end, days in quiet
-    ), f"{timer} starts {first}-{last} min past midnight, and no quiet line covers it"
+    ), f"{timer.name} starts {first}-{last} min past midnight, and no quiet line covers it"
     (window,) = _named("window")
     w_start, w_end = (_minutes(t) for t in window[1].split("-"))
     if weekday in (None, window[0]):
-        assert last <= w_start or first >= w_end, f"{timer} runs inside the window"
+        assert last <= w_start or first >= w_end, f"{timer.name} runs inside the window"
+
+
+def test_the_backup_timer_is_quiet_and_outside_the_window() -> None:
+    _assert_quiet_and_outside_the_window(REPO_ROOT / "deploy" / "watcher-backup.timer")
+
+
+def test_the_disk_gc_timer_is_quiet_and_outside_the_window() -> None:
+    """Read from the installed layer: the repo carries no copy of it (#385)."""
+    if not _on_host():
+        pytest.skip(f"{INSTALLED_UNIT} not present: not a host running the service")
+    assert GC_TIMER.is_file(), f"{GC_TIMER} missing: the disk GC isn't installed (#385)"
+    _assert_quiet_and_outside_the_window(GC_TIMER)
 
 
 def test_no_knob_command_escalates() -> None:
@@ -211,10 +227,7 @@ def test_the_backup_stands_in_for_the_watcher_database_alone() -> None:
     assert {"database:watcher_dev", "database:watcher_test"} <= excepted
 
 
-@pytest.mark.parametrize(
-    ("unit", "user"),
-    [("watcher-backup.service", "watcher_backup"), ("watcher-cleanup.service", "exedev")],
-)
+@pytest.mark.parametrize(("unit", "user"), [("watcher-backup.service", "watcher_backup")])
 def test_each_timer_service_is_an_unprivileged_non_restarter(unit: str, user: str) -> None:
     """The exception is the owner's word; these are the facts it rests on.
     A unit that gains root, or a script that gains ``systemctl``, fails here
@@ -225,8 +238,8 @@ def test_each_timer_service_is_an_unprivileged_non_restarter(unit: str, user: st
     assert directive_values(text, "User") == [user]
     starts = directive_values(text, "ExecStart")
     assert all(not start.startswith("+") for start in starts), f"{unit}: a root ExecStart"
-    # The other Exec lines may run as root (cleanup's ExecStartPre= makes its
-    # log directory), so none of them may start anything either.
+    # The other Exec lines may run as root, so none of them may start
+    # anything either.
     for directive in _OTHER_EXEC:
         for line in directive_values(text, directive):
             assert "systemctl" not in line, f"{unit}: {directive}= calls systemctl"

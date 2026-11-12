@@ -264,67 +264,58 @@ echo 'BUILD_ID=abc1234' >> .env
 
 When `BUILD_ID` is not set (e.g., running locally without the systemd unit), the application defaults to `"dev"`.
 
-## Disk Cleanup Timer
+## Disk GC
 
-A weekly cleanup timer removes stale caches and rotates journal logs to keep the 25 GB VM disk healthy.
+The 25 GB root is kept by the **cohort disk GC** (#385), Provisioner's canonical
+GC and headroom sensor (CannObserv/provisioner#61), installed from the pinned
+`co-image-base` layer by the vendored `maintaining-host-disk` skill. It replaced
+`scripts/cleanup.sh` and `watcher-cleanup.timer` (#122), retired in the change
+that enabled it; `tests/deploy/test_cleanup_retired.py` keeps them gone.
 
-Files:
-- `deploy/watcher-cleanup.service` — oneshot service, runs as `exedev`
-- `deploy/watcher-cleanup.timer` — fires Sun 03:00 UTC ± 30 min
-- `deploy/watcher-cleanup.sudoers` — two targeted NOPASSWD rules (`apt-get clean`, `journalctl --vacuum-time=14d`)
-- `scripts/cleanup.sh` — the cleanup script; logs to `/var/log/watcher/cleanup-<timestamp>.log` (keeps 10)
-
-### Installing the timer
-
-```bash
-# Sudoers rules
-sudo cp deploy/watcher-cleanup.sudoers /etc/sudoers.d/watcher-cleanup
-sudo chmod 440 /etc/sudoers.d/watcher-cleanup
-sudo chown root:root /etc/sudoers.d/watcher-cleanup
-sudo visudo -c  # verify no syntax errors
-
-# Make the script executable
-chmod +x scripts/cleanup.sh
-
-# Install and enable the systemd units
-sudo cp deploy/watcher-cleanup.service /etc/systemd/system/watcher-cleanup.service
-sudo cp deploy/watcher-cleanup.timer   /etc/systemd/system/watcher-cleanup.timer
-sudo systemctl daemon-reload
-sudo systemctl enable --now watcher-cleanup.timer
-```
-
-### Managing the Timer
-
-```bash
-# Confirm it is scheduled
-systemctl list-timers watcher-cleanup.timer
-
-# Manual run (for testing)
-sudo systemctl start watcher-cleanup.service
-
-# Follow output
-sudo journalctl -u watcher-cleanup.service -f
-
-# View logs
-ls -lt /var/log/watcher/cleanup-*.log
-cat "$(ls -t /var/log/watcher/cleanup-*.log | head -1)"
-
-# Reload after editing the timer
-sudo systemctl daemon-reload && sudo systemctl restart watcher-cleanup.timer
-```
-
-### What it cleans
-
-| Target | Action |
+| What | Where |
 |---|---|
-| VS Code server installs >30 days old | `rm -rf` |
-| `~/.npm/_npx`, `~/.npm/_cacache` | `rm -rf` **only above 2 GB** — below that the cache is kept, because the plugin's MCP server cold-installs through it at session start (#314) |
-| uv build cache | `uv cache prune` |
-| APT package cache | `apt-get clean` |
-| Journal logs >14 days | `journalctl --vacuum-time=14d` |
-| Playwright cache | audit only — logs size, warns if >2 GB, never deletes |
+| The GC, `VERSION`, `MANIFEST`, units, journald drop-in | `/usr/local/lib/cannobserv/disk-gc/`, `/usr/local/lib/systemd/` — the layer's, **never edited here**: a change goes to Provisioner through the operator |
+| Config (tiers, lines, the SocratiCode pin) | `deploy/disk-gc.conf` → `/etc/cannobserv/disk-gc/disk-gc.conf` (root, 0644) |
+| Check-in key | `/etc/cannobserv/disk-gc/checkin.key` (root, 0600): the `co-watcher` tenant's key, the backup's |
+| Monitor | `co-watcher-disk-headroom` on co-status, tenant `co-watcher` |
+| Install record | #385 |
 
-### Job history — not this timer
+`cannobserv-disk-gc.timer` prunes daily at 05:15 UTC plus up to 30 min, with no
+catch-up at boot; `cannobserv-disk-headroom.timer` checks `/` every 10 minutes
+and checks in, alerting at 85% and clearing at 80%. The tiers are the
+template's, with docker and worktrees off. Two rules this host relies on:
+
+- **The pinned SocratiCode tree survives.** `npx_spec_files` names this repo's
+  `.claude/settings.json`, and the GC reads VS Code's machine setting too, so
+  the `npx` tier keeps the tree `SOCRATICODE_SPEC` resolves to. The `npm-cache`
+  tier wipes `~/.npm/_cacache` daily: an exact-version spec found in the `_npx`
+  tree installs nothing, so only that tree has to survive ([HOST-MEMORY.md](HOST-MEMORY.md)).
+- **The journal is capped at 512M** by the layer's `zz-cannobserv-journal.conf`.
+
+Install the config after editing it, then read a report-only run (removes nothing):
+
+```bash
+sudo install -D -m 0644 -o root -g root deploy/disk-gc.conf /etc/cannobserv/disk-gc/disk-gc.conf
+sudo /usr/bin/python3 -I /usr/local/lib/cannobserv/disk-gc/disk-gc gc
+```
+
+Reading its runs (with `sudo`: without it, `journalctl` prints `-- No entries --`):
+
+```bash
+systemctl list-timers 'cannobserv-disk-*'
+sudo journalctl -u cannobserv-disk-gc.service --since -1d
+sudo journalctl -u cannobserv-disk-headroom.service -p err --since -1d
+```
+
+A healthy sensor run logs `checked in ok (ok): HTTP 202`; an `ok:` line alone
+is logged whether it checked in or not. Updating to a new `VERSION`, and
+removing it: the skill.
+
+**What the old script did that the GC doesn't**, dropped on purpose (#385):
+`apt-get clean` (patching-hosts manages apt), the 14-day journal vacuum (the
+512M cap replaces it) and the Playwright audit (no cache on this host).
+
+### Job history — not the GC
 
 Procrastinate's finished jobs are pruned **in-process**, by the hourly
 `prune_job_history` periodic task (`src/workers/retention.py`, #296 D7):

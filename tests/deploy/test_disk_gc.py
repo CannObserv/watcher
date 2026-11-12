@@ -25,6 +25,7 @@ received the config can't pass for one that did.
 import configparser
 import json
 import os
+import re
 import subprocess
 import sys
 from importlib.machinery import SourceFileLoader
@@ -94,6 +95,16 @@ def test_the_lines_are_85_and_80() -> None:
     assert int(sensor["alert_at_percent"]) == 85
     assert int(sensor["clear_at_percent"]) == 80
     assert sensor["status_url"] == "http://status:9000"
+
+
+def test_the_sensor_checks_in_to_its_monitor() -> None:
+    """Set before the timers (the skill's turning-on.md): with no id, every
+    sensor run logs ``not checking in`` and exits 0, so no fault reaches
+    anyone, and an enabled monitor pages *has stopped reporting*."""
+    monitor_id = _config()["sensor"]["monitor_id"].strip()
+    assert re.fullmatch(r"[0-9A-HJKMNP-TV-Z]{26}", monitor_id), (
+        f"monitor_id {monitor_id!r} is not co-watcher-disk-headroom's ULID (CannObserv/status#112)"
+    )
 
 
 def test_the_skill_is_linked() -> None:

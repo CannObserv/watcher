@@ -52,6 +52,7 @@ READ_KNOB = REPO_ROOT / "skills" / "patching-hosts" / "scripts" / "read-knob.sh"
 INSTALLED_UNIT = Path("/etc/systemd/system/watcher.service")
 #: The cohort disk GC's timer, installed from its layer, never from deploy/ (#385).
 GC_TIMER = Path("/usr/local/lib/systemd/system/cannobserv-disk-gc.timer")
+GC_TIMER_DROPIN = Path("/etc/systemd/system/cannobserv-disk-gc.timer.d")
 PINS = REPO_ROOT / "deploy" / "apt-preferences.d"
 INSTALLED_PINS = Path("/etc/apt/preferences.d")
 HOST = "co-watcher"
@@ -196,6 +197,9 @@ def test_the_disk_gc_timer_is_quiet_and_outside_the_window() -> None:
     if not _on_host():
         pytest.skip(f"{INSTALLED_UNIT} not present: not a host running the service")
     assert GC_TIMER.is_file(), f"{GC_TIMER} missing: the disk GC isn't installed (#385)"
+    # The layer invites an OnCalendar= drop-in; one would move the timer off
+    # the file read here, so the quiet line would be checked against nothing.
+    assert not GC_TIMER_DROPIN.exists(), f"{GC_TIMER_DROPIN}: re-derive the quiet line from it"
     _assert_quiet_and_outside_the_window(GC_TIMER)
 
 

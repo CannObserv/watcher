@@ -21,9 +21,9 @@ window Mon 01:00-03:00
 quiet 03:15-03:45
 # cannobserv-disk-gc.timer, the cohort disk GC (#385): 05:15 UTC daily,
 # RandomizedDelaySec=30min, AccuracySec unset (1min). Its run takes minutes;
-# the range keeps 15 of them past the last start. Its sensor, every 10 min,
-# only reads, and starts nothing; neither unit is in /etc/systemd/system, so
-# the restarter scan doesn't read them.
+# the range keeps 14 of them past the last start (05:46). Its sensor, every
+# 10 min, only reads, and starts nothing; neither unit is in
+# /etc/systemd/system, so the restarter scan doesn't read them.
 quiet 05:15-06:00
 
 # --- the service ----------------------------------------------------------

@@ -312,8 +312,10 @@ is logged whether it checked in or not. Updating to a new `VERSION`, and
 removing it: the skill.
 
 **What the old script did that the GC doesn't**, dropped on purpose (#385):
-`apt-get clean` (patching-hosts manages apt), the 14-day journal vacuum (the
-512M cap replaces it) and the Playwright audit (no cache on this host).
+`apt-get clean` (the image's `/etc/apt/apt.conf.d/docker-clean` deletes
+`archives/*.deb` after every dpkg run and `apt update`; the guard pins it), the
+14-day journal vacuum (the 512M cap replaces it) and the Playwright audit (no
+cache on this host).
 
 ### Job history — not the GC
 

@@ -31,6 +31,7 @@ import sys
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -94,7 +95,10 @@ def test_the_lines_are_85_and_80() -> None:
     assert sensor["mount"] == "/"
     assert int(sensor["alert_at_percent"]) == 85
     assert int(sensor["clear_at_percent"]) == 80
-    assert sensor["status_url"] == "http://status:9000"
+    # co-status's check-in port (#330); the host is the config's to name, not a
+    # test's (test_no_resolvable_service_hosts).
+    url = urlsplit(sensor["status_url"])
+    assert url.scheme == "http" and url.hostname and url.port == 9000, url.geturl()
 
 
 def test_the_sensor_checks_in_to_its_monitor() -> None:

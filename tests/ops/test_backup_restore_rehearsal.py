@@ -12,7 +12,6 @@ first write fails, so this asserts what #296's go/no-go gate asserts: DML
 granted, DDL refused, ``alembic_version`` read-only, future tables covered.
 """
 
-import re
 import shutil
 import subprocess
 from datetime import UTC, datetime
@@ -38,17 +37,13 @@ def _libpq(url: str) -> str:
     return url.replace("postgresql+asyncpg://", "postgresql://", 1)
 
 
-def _major(version_text: str) -> int:
-    return int(re.search(r"(\d+)", version_text).group(1))
-
-
 def _client_skew(dump_version: str, server_major: int) -> str | None:
     """Why this ``pg_dump`` cannot rehearse against the server, or ``None``.
 
     Any other major is a skew, newer included: the rehearsal is production's
     pair, client and server of one major (#365).
     """
-    client_major = _major(dump_version)
+    client_major = restore.pg_major(dump_version)
     if client_major == server_major:
         return None
     return (
@@ -206,8 +201,12 @@ async def test_a_dump_survives_the_round_trip_with_its_grants(databases, tmp_pat
     assert summary["alembic_head"] == "rehearsal01"
 
     key = restore.latest_key(client, BUCKET, "rehearsal")
-    path = restore.fetch(client, BUCKET, key, tmp_path / "fetched", runner=subprocess.run)
-    restore.restore_into(path, _libpq(target), run_as=None, runner=subprocess.run)
+    # The real probe and the real header (#411): the pair is one major, so it passes.
+    target_major = restore.target_major(_libpq(target), run_as=None, runner=subprocess.run)
+    fetched = restore.fetch(client, BUCKET, key, tmp_path / "fetched", runner=subprocess.run)
+    assert restore.pg_major(fetched.toc.pg_dump_version) == target_major
+    restore.check_compatible(fetched.toc, target_major)
+    restore.restore_into(fetched.path, _libpq(target), run_as=None, runner=subprocess.run)
 
     before, after = await _read(source), await _read(target)
     assert after == before
@@ -278,15 +277,17 @@ async def test_a_restore_into_a_populated_database_changes_nothing(
         workdir=tmp_path / "backup",
         host="rehearsal",
     )
-    path = restore.fetch(
+    fetched = restore.fetch(
         client,
         BUCKET,
         restore.latest_key(client, BUCKET, "rehearsal"),
         tmp_path / "fetched",
         runner=subprocess.run,
     )
-    with pytest.raises(restore.RestoreError):
-        restore.restore_into(path, _libpq(target), run_as=None, runner=subprocess.run)
+    # pg_restore's own failure, not any RestoreError: on #365's skewed runner a
+    # version error satisfied this, and the test passed without testing (#411).
+    with pytest.raises(restore.RestoreError, match="pg_restore exited"):
+        restore.restore_into(fetched.path, _libpq(target), run_as=None, runner=subprocess.run)
 
     engine = create_async_engine(target)
     async with engine.connect() as conn:

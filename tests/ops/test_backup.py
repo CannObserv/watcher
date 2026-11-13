@@ -64,10 +64,13 @@ class FakePg:
         head: str = "2f8bb8f7100a",
         fail: str = "",
         truncated: bool = False,
+        server_version_num: str = "160013",
     ) -> None:
         self.toc = toc
         self.head = head
         self.fail = fail
+        # What ``SHOW server_version_num`` answers: the restore asks its target (#411).
+        self.server_version_num = server_version_num
         # A custom-format archive cut short still lists: its table of contents
         # precedes the data. Only reading the data through finds the cut.
         self.truncated = truncated
@@ -81,6 +84,10 @@ class FakePg:
         if program == "pg_dump":
             kwargs["stdout"].write(DUMP_BYTES)
             return subprocess.CompletedProcess(argv, 0, stdout=None, stderr=b"")
+        if program == "psql" and any("server_version_num" in arg for arg in argv):
+            return subprocess.CompletedProcess(
+                argv, 0, stdout=f"{self.server_version_num}\n", stderr=""
+            )
         if program == "psql":
             return subprocess.CompletedProcess(argv, 0, stdout=f"{self.head}\n", stderr="")
         if program == "pg_restore" and "--file=/dev/null" in argv:

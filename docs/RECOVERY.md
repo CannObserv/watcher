@@ -21,7 +21,7 @@ the case this closes.
 | **Create, never overwrite or delete** | `if_generation_match=0` in code; `objectCreator` + `objectViewer` at IAM, no `delete`. A 412 is `unchanged` only if the object's recorded sha256 matches — two dumps are never the same bytes, so anything else is a name collision and a failure. |
 | **Retention is the bucket's** | Lifecycle deletes at 30 days, soft-delete left on. A compromised host cannot erase its own history. |
 | **Failure is loud, silence too** | A failed run is a failed unit *and* an `alert` check-in to co-status (#330); a good one checks in `ok`. The dead-man monitor alarms when neither arrives (D9). |
-| **Metadata travels with the object** | `dumped_at`, `sha256`, `size_bytes`, `alembic_head`, `server_version`, `pg_dump_version`, `toc_entries`, `source_host` — what a restore checks without trusting the file. |
+| **Metadata travels with the object** | `dumped_at`, `sha256`, `size_bytes`, `alembic_head`, `server_version`, `pg_dump_version`, `toc_entries`, `source_host`. The restore checks `sha256` before trusting the file, and `--list` shows the rest; the version check reads the fetched archive's own header, never this metadata (#411). |
 
 **RPO is 24 hours** — one dump a night. The dump is small — 27.6 MB before the
 #296 D7 prune, 1.7 MB after it (both measured) — so going hourly is a one-line
@@ -175,7 +175,8 @@ SRC=co-watcher                                # the host that shipped the dump
 # What is there — every host's dumps, or one host's with --prefix
 sudo bash -c "$ENV; .venv/bin/python -m src.ops.restore --list"
 
-# Fetch and verify only — sha256 against the recorded digest, then pg_restore --list.
+# Fetch and verify only — sha256 against the recorded digest, then pg_restore --list;
+# prints the archive's pg_dump_version and server_version, to choose a target by.
 # The whole database, as root: a 0600 file in a 0700 directory, and a directory
 # that exists but is not root's own and private is refused. Never under /tmp.
 sudo bash -c "$ENV; .venv/bin/python -m src.ops.restore --latest --prefix $SRC --download-only /root/watcher-restore"
@@ -183,6 +184,13 @@ sudo bash -c "$ENV; .venv/bin/python -m src.ops.restore --latest --prefix $SRC -
 
 Into a database — **an existing, empty one**; the restore is one transaction, so
 a failure leaves it empty rather than half-loaded.
+
+**An archive newer than its target is refused before `pg_restore` runs** (#411):
+the tool asks the target's major first (`SHOW server_version_num`, as `--run-as`,
+before the fetch) and refuses an archive whose header's `pg_dump` major is
+newer, naming both. Restore into a server of the archive's major or newer. A local
+`pg_restore` older than the archive refuses it earlier, at fetch: `unsupported
+version … in file header` — install that major's `postgresql-client`.
 
 **The roles come first.** The dump names `watcher` (the owner, and the
 migration role) and grants to `watcher_app`, but carries neither role — so on a
@@ -281,7 +289,8 @@ exact. This is the form steps 16, 19 and 23 used; `-f -` is required.
   a skip fails the gate — #353): `tests/ops/test_backup_restore_rehearsal.py` seeds a
   scratch database with the two-role grants, ships it through the real
   `pg_dump` and the SDK-faithful bucket fake, restores it with the real
-  `pg_restore`, and asserts the gates above; a second test proves a failed
+  `pg_restore`, and asserts the gates above, with the real version probe and
+  check on the way (#411); a second test proves a failed
   restore leaves the target untouched. Its scratch databases
   (`watcher_rh<pidns>_<pid>_{src,dst}_test`) are dropped by `tests/ops/scratch_db.py`:
   FORCE, then a plain `DROP` when FORCE refuses an autovacuum worker it cannot

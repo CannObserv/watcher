@@ -17,10 +17,10 @@ import pytest
 from google.api_core.exceptions import Forbidden
 
 from src.ops import restore
-from src.ops.backup import BUCKET_ENV, KEY_TIME_FORMAT, PREFIX_ENV
+from src.ops.backup import BUCKET_ENV, KEY_TIME_FORMAT, PREFIX_ENV, Toc
 from src.ops.restore import RestoreError
 from tests.ops.gcs_fakes import FakeBucket, FakeClient
-from tests.ops.test_backup import DUMP_BYTES, FakePg
+from tests.ops.test_backup import DUMP_BYTES, TOC, FakePg
 
 BUCKET = "co-gcs-watcher-backup"
 
@@ -136,8 +136,16 @@ class TestFindingASnapshot:
 class TestFetch:
     def test_downloads_and_verifies(self, client, bucket, tmp_path) -> None:
         _ship(bucket, "co-watcher/x.dump")
-        path = restore.fetch(client, BUCKET, "co-watcher/x.dump", tmp_path, runner=FakePg())
-        assert path.read_bytes() == DUMP_BYTES
+        fetched = restore.fetch(client, BUCKET, "co-watcher/x.dump", tmp_path, runner=FakePg())
+        assert fetched.path.read_bytes() == DUMP_BYTES
+
+    def test_returns_the_archives_own_table_of_contents(self, client, bucket, tmp_path) -> None:
+        """#411: the version check reads the file that will be restored, not the
+        object's metadata — a re-uploaded or hand-copied object cannot mislead it."""
+        _ship(bucket, "co-watcher/x.dump", pg_dump_version="99.0")
+        fetched = restore.fetch(client, BUCKET, "co-watcher/x.dump", tmp_path, runner=FakePg())
+        assert fetched.toc.pg_dump_version == "16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)"
+        assert fetched.toc.server_version == "16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)"
 
     def test_a_download_that_does_not_match_its_recorded_digest_is_refused(
         self, client, bucket, tmp_path
@@ -183,9 +191,9 @@ class TestFetchIsPrivate:
     def test_the_directory_and_the_dump_are_private(self, client, bucket, tmp_path) -> None:
         _ship(bucket, "watcher/x.dump")
         dest = tmp_path / "fetched"
-        path = restore.fetch(client, BUCKET, "watcher/x.dump", dest, runner=FakePg())
+        fetched = restore.fetch(client, BUCKET, "watcher/x.dump", dest, runner=FakePg())
         assert stat.S_IMODE(dest.stat().st_mode) == 0o700
-        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(fetched.path.stat().st_mode) == 0o600
 
     def test_a_directory_others_can_enter_is_refused(self, client, bucket, tmp_path) -> None:
         _ship(bucket, "watcher/x.dump")
@@ -216,6 +224,81 @@ class TestFetchIsPrivate:
         with pytest.raises(RestoreError, match="exists"):
             restore.fetch(client, BUCKET, "watcher/x.dump", dest, runner=FakePg())
         assert victim.read_bytes() == b"precious"
+
+
+def _toc(pg_dump_version: str | None) -> Toc:
+    return Toc(
+        server_version="16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)", pg_dump_version=pg_dump_version
+    )
+
+
+class TestPgMajor:
+    """One parser for every shape a version arrives in (#411)."""
+
+    @pytest.mark.parametrize(
+        ("text", "major"),
+        [
+            ("16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)", 16),  # the TOC's header
+            ("pg_dump (PostgreSQL) 18.6 (Ubuntu 18.6-1)\n", 18),  # pg_dump --version
+            ("17.0", 17),
+        ],
+    )
+    def test_reads_the_major(self, text: str, major: int) -> None:
+        assert restore.pg_major(text) == major
+
+    @pytest.mark.parametrize("text", [None, "", "   ", "unknown"])
+    def test_no_number_is_no_major(self, text) -> None:
+        assert restore.pg_major(text) is None
+
+
+class TestTargetMajor:
+    """The target's major, asked over the same ``--run-as`` path the restore
+    loads through — before anything is fetched (#411)."""
+
+    def test_asks_the_target_as_the_restoring_user(self) -> None:
+        pg = FakePg(server_version_num="160015")
+        assert restore.target_major("watcher", run_as="postgres", runner=pg) == 16
+        (argv,) = pg.calls
+        assert argv[: argv.index("--")] == restore.as_user([], "postgres")[:-1]
+        program = argv[argv.index("--") + 1 :]
+        assert program[0] == "psql"
+        assert {"--no-password", "--no-psqlrc", "--dbname=watcher"} <= set(program)
+        assert "--command=SHOW server_version_num" in program
+
+    def test_a_target_it_cannot_reach_is_an_error(self) -> None:
+        with pytest.raises(RestoreError, match="server version.*psql: boom"):
+            restore.target_major("watcher", run_as=None, runner=FakePg(fail="psql"))
+
+    def test_an_answer_that_is_not_a_version_is_an_error(self) -> None:
+        pg = FakePg(server_version_num="banana")
+        with pytest.raises(RestoreError, match="banana"):
+            restore.target_major("watcher", run_as=None, runner=pg)
+
+
+class TestCheckCompatible:
+    """#365's failure, refused up front: an archive written by a newer
+    ``pg_dump`` than the target server opens with ``SET``s that server rejects
+    partway through the restore."""
+
+    @pytest.mark.parametrize("dumped_by", ["15.8 (Ubuntu 15.8-1)", "16.13 (Ubuntu 16.13-1)"])
+    def test_an_older_or_equal_archive_proceeds(self, dumped_by: str) -> None:
+        restore.check_compatible(_toc(dumped_by), 16)
+
+    def test_a_newer_archive_is_refused_naming_both_majors_and_the_fix(self) -> None:
+        with pytest.raises(RestoreError) as caught:
+            restore.check_compatible(_toc("18.6 (Ubuntu 18.6-1)"), 16)
+        message = str(caught.value)
+        assert "pg_dump 18" in message
+        assert "PostgreSQL 16" in message
+        assert "18.6 (Ubuntu 18.6-1)" in message
+        assert "PostgreSQL 18 or newer" in message
+
+    @pytest.mark.parametrize("dumped_by", [None, "", "unknown"])
+    def test_an_archive_naming_no_pg_dump_version_is_refused(self, dumped_by) -> None:
+        """Every custom-format archive carries the header, so its absence means
+        something is wrong with the file — not a legacy object."""
+        with pytest.raises(RestoreError, match="no pg_dump version"):
+            restore.check_compatible(_toc(dumped_by), 16)
 
 
 class TestAsUser:
@@ -317,6 +400,66 @@ class TestMain:
         out = capsys.readouterr().out
         assert "watcher/20260911T031702Z.dump" in out
         assert "co-watcher/20260912T031702Z.dump" in out
+
+    def test_a_newer_major_archive_is_refused_before_pg_restore_runs(
+        self, wired, bucket, monkeypatch, capsys
+    ) -> None:
+        """#411: one line, exit 1, both majors named — and no load attempted."""
+        _ship(bucket, "watcher/20260911T031702Z.dump")
+        newer = TOC.replace("pg_dump version: 16.13", "pg_dump version: 18.6")
+        pg = FakePg(toc=newer, server_version_num="160015")
+        monkeypatch.setattr(restore.subprocess, "run", pg)
+        code = restore.main(["--latest", "--prefix", "watcher", "--into", "watcher_dev"])
+        assert code == 1
+        err = capsys.readouterr().err
+        assert err.startswith("restore failed:")
+        assert "pg_dump 18" in err and "PostgreSQL 16" in err
+        assert len(err.strip().splitlines()) == 1
+        assert not any("--single-transaction" in argv for argv in pg.calls)
+
+    def test_the_target_is_asked_before_anything_is_fetched(
+        self, wired, bucket, monkeypatch, capsys
+    ) -> None:
+        """A wrong ``--into`` or ``--run-as`` fails in seconds, not after the
+        download: the fetch is the slow step."""
+        _ship(bucket, "watcher/20260911T031702Z.dump")
+        pg = FakePg(fail="psql")
+        monkeypatch.setattr(restore.subprocess, "run", pg)
+        monkeypatch.setattr(FakeClient, "bucket", _raiser(AssertionError("fetched")))
+        code = restore.main(["--latest", "--prefix", "watcher", "--into", "watcher_dev"])
+        assert code == 1
+        assert "server version" in capsys.readouterr().err
+        assert all("pg_restore" not in argv for argv in pg.calls)
+
+    def test_download_only_names_the_archives_versions(
+        self, wired, bucket, tmp_path, capsys
+    ) -> None:
+        """The operator's look before choosing a target."""
+        _ship(bucket, "watcher/20260911T031702Z.dump")
+        dest = tmp_path / "d"
+        code = restore.main(["--latest", "--prefix", "watcher", "--download-only", str(dest)])
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "verified:" in out
+        assert "pg_dump_version='16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)'" in out
+        assert "server_version='16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)'" in out
+
+    def test_list_shows_each_dumps_versions_quoted(self, wired, bucket, capsys) -> None:
+        """#411: the versions the archive was written with, beside each name.
+        They hold spaces, so each value is shell-quoted to keep one
+        ``field=value`` per word."""
+        _ship(
+            bucket,
+            "watcher/20260911T031702Z.dump",
+            alembic_head="c8e1d4f7a2b6",
+            server_version="16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",
+            pg_dump_version="16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",
+        )
+        assert restore.main(["--list", "--prefix", "watcher"]) == 0
+        (line,) = capsys.readouterr().out.splitlines()
+        assert "server_version='16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)'" in line
+        assert "pg_dump_version='16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)'" in line
+        assert "alembic_head=c8e1d4f7a2b6" in line
 
     def test_list_flags_a_name_later_than_its_upload(self, wired, bucket, capsys) -> None:
         _ship(bucket, "watcher/20260911T031702Z.dump")

@@ -25,6 +25,7 @@ Snapshot table dropped. ``InfoSpec`` table and ``make_info_spec`` factory
 also dead-code-removed under #160.
 """
 
+import asyncio
 import os
 from collections.abc import AsyncGenerator
 
@@ -37,6 +38,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from ulid import ULID
 
+from scripts import db_containment
 from src.api.deps import get_db_session
 from src.core import db_safety
 from src.core.database import MIGRATION_DATABASE_URL_ENV
@@ -138,7 +140,28 @@ def network_guard(request, monkeypatch):
 
 
 @pytest.fixture(scope="session")
-async def test_engine():
+def contained_test_role() -> None:
+    """Refuse the database to a role that can reach production (#388).
+
+    The suffix check above holds the *database*; this holds the *credential*.
+    The suite runs create_all/drop_all, DROP SCHEMA … CASCADE and CREATE/DROP
+    DATABASE, so the role it logs in as must reach nothing but ``_test``/``_dev``
+    databases. Checked once, where a test first needs the database, not at
+    import: CI's no-DB unit job points ``TEST_DATABASE_URL`` at a dead port.
+    Synchronous, on its own loop, so a sync test can depend on it too.
+    """
+    asyncio.run(db_containment.assert_url_contained(TEST_DATABASE_URL))
+
+
+@pytest.fixture(autouse=True)
+def integration_role_contained(request) -> None:
+    """Every ``integration`` test, whichever engine it opens, runs behind the guard."""
+    if request.node.get_closest_marker("integration"):
+        request.getfixturevalue("contained_test_role")
+
+
+@pytest.fixture(scope="session")
+async def test_engine(contained_test_role):
     engine = create_async_engine(TEST_DATABASE_URL)
     async with engine.begin() as conn:
         # Production carries no `information` schema (#271). Until #311 this

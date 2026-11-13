@@ -27,6 +27,9 @@
 --                             DELETE on existing tables plus sequence usage.
 --                             No DDL. This is what the service connects with
 --                             via DATABASE_URL.
+--   PUBLIC       (#388)       loses CONNECT on this database, after both roles
+--                             above hold it explicitly; the only thing this
+--                             script takes away from anyone.
 --
 -- WHY THE INCUMBENT ROLE IS THE MIGRATION ROLE, and not a new `watcher_migrate`
 -- as #259 proposed: `watcher` already owns the database, all 17 public tables,
@@ -35,7 +38,8 @@
 -- guarantee, because the role being constrained is the application's. Keeping
 -- the incumbent makes this script purely additive: it creates one role, grants
 -- it strictly less than exists today, and touches nothing the running service
--- depends on. Rollback is an env-file edit, not a repair.
+-- depends on. Rollback is an env-file edit, not a repair. (3a's revoke from
+-- PUBLIC, #388, is the one subtraction; nothing that runs relies on PUBLIC.)
 --
 -- IDEMPOTENT. Re-running is a no-op that also re-asserts the role's attributes
 -- and rotates its password to whatever WATCHER_APP_PASSWORD currently holds.
@@ -96,12 +100,26 @@ ALTER ROLE :"app_role" WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
 --    superuser. Nothing else about the role changes.
 ALTER ROLE :"migrate_role" WITH CREATEDB;
 
--- 3. Reach the database and the schema. Both are already granted to PUBLIC by
---    default on this cluster; stated explicitly so a later REVOKE ... FROM
---    PUBLIC hardening pass does not silently take the service down.
+-- 3. Reach the database and the schema. Both are granted to PUBLIC by
+--    default; stated explicitly because 3a revokes the database's from PUBLIC
+--    (#388), and so a later hardening pass on the schema cannot silently take
+--    the service down either.
 --    CREATE on the schema is deliberately absent — that is the DDL right the
 --    application must not hold.
 SELECT format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), :'app_role');
+\gexec
+
+-- 3a. Then take CONNECT away from PUBLIC (#388). By default every login role
+--     may connect to every database, so the test role, which owns nothing
+--     here, could still open a session on production. The owner always may;
+--     the migration role is granted it anyway, in case it is not the owner.
+--     watcher_backup's own grant is scripts/setup-backup-role.sql's, and a
+--     REVOKE from PUBLIC does not touch it. TEMP stays with PUBLIC: without
+--     CONNECT it reaches nothing.
+SELECT format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), :'migrate_role');
+\gexec
+
+SELECT format('REVOKE CONNECT ON DATABASE %I FROM PUBLIC', current_database());
 \gexec
 
 GRANT USAGE ON SCHEMA public TO :"app_role";
@@ -161,6 +179,9 @@ SELECT
 FROM pg_roles r
 WHERE r.rolname IN (:'app_role', :'migrate_role')
 ORDER BY r.rolname;
+
+-- PUBLIC's CONNECT on this database: must read f (#388).
+SELECT has_database_privilege('public', current_database(), 'CONNECT') AS public_can_connect;
 
 SELECT
   c.relname AS table_name,

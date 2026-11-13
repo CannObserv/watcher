@@ -487,8 +487,12 @@ def test_schema_apply_runs_after_the_migration() -> None:
 CHECK_ARGV = "sync --locked --offline"
 
 
+#: The #388 role check: the dev URL's role must reach no production database.
+ROLE_CHECK_ARGV = "run python -m scripts.db_containment"
+
+
 def run_live(
-    tmp_path: Path, check_exit: int, env: dict[str, str]
+    tmp_path: Path, check_exit: int, env: dict[str, str], role_exit: int = 0
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     """Run the script past the dry-run exit, against stub ``uv`` and ``psql``.
 
@@ -509,6 +513,7 @@ def run_live(
         "  echo 'error: Failed to download `co-core-aio==0.37.0`' >&2\n"
         f"  exit {check_exit}\n"
         "fi\n"
+        f'if [[ "$*" == "{ROLE_CHECK_ARGV}" ]]; then exit {role_exit}; fi\n'
     )
     (stubs / "psql").write_text(f'#!/bin/bash\necho "psql $*" >> {log}\n')
     for stub in stubs.iterdir():
@@ -554,7 +559,8 @@ def test_lock_check_runs_before_any_other_command(tmp_path: Path) -> None:
     result, calls = run_live(tmp_path, 0, {"TEST_DATABASE_URL": TEST_URL})
     assert result.returncode == 0, result.stderr
     assert calls[0] == f"uv {CHECK_ARGV}"
-    assert [c.split()[0] for c in calls[1:]] == ["psql", "uv", "uv", "uv"]
+    assert calls[1] == f"uv {ROLE_CHECK_ARGV}"
+    assert [c.split()[0] for c in calls[2:]] == ["psql", "uv", "uv", "uv"]
     assert calls[-1].startswith("uv run uvicorn ")
     assert "Checked 83 packages" in result.stderr
 
@@ -731,3 +737,27 @@ def test_no_command_receives_a_url_in_argv() -> None:
         if "psql " in line and _mentions_raw_url(line) and "without_password" not in line
     ]
     assert not offenders, f"psql is handed an unredacted URL: {offenders}"
+
+
+def test_dry_run_reports_the_role_check() -> None:
+    """#388: the check runs on every launch, the persistent dev database included."""
+    for extra in ({}, {"WATCHER_DEV_SKIP_MIGRATE": "1"}, {"WATCHER_DEV_DATABASE_URL": DEV_URL}):
+        result = run({"TEST_DATABASE_URL": TEST_URL, **extra})
+        assert result.returncode == 0, result.stderr
+        assert "ROLE_CHECK=run" in result.stdout.splitlines()
+
+
+def test_a_role_that_reaches_production_stops_the_launch(tmp_path: Path) -> None:
+    """#388: a dev URL whose role can reach production is refused before the
+    public-schema reset, the migration and the server — the destructive half."""
+    result, calls = run_live(tmp_path, 0, {"TEST_DATABASE_URL": TEST_URL}, role_exit=1)
+    assert result.returncode != 0
+    assert calls == [f"uv {CHECK_ARGV}", f"uv {ROLE_CHECK_ARGV}"]
+    assert "watcher_tester" in result.stderr
+    assert result.stdout == ""
+
+
+def test_the_role_check_is_given_the_dev_url() -> None:
+    """It reads DATABASE_URL, which the script has already pinned to the dev URL."""
+    text = SCRIPT.read_text()
+    assert text.index('export DATABASE_URL="$DEV_URL"') < text.index(f"uv {ROLE_CHECK_ARGV}")

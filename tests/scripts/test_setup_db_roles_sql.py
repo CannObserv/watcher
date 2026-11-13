@@ -120,3 +120,23 @@ def test_destroys_nothing(statements: str) -> None:
     assert "REASSIGN OWNED" not in statements
     assert "OWNER TO" not in statements
     assert not re.search(r"REVOKE\s+[^;]*\bFROM\s+:\"MIGRATE_ROLE\"", statements)
+
+
+def test_public_loses_connect_on_the_database(statements: str) -> None:
+    """#388: by default any login role may connect, the test role included.
+
+    Revoked from PUBLIC on the database the script runs in — production — so a
+    replacement host restored by RECOVERY.md's runbook comes back without it.
+    The explicit grants go first: the revoke must never be the moment the
+    service or the migration role loses its way in.
+    """
+    revoke = statements.index("REVOKE CONNECT ON DATABASE %I FROM PUBLIC")
+    grant = "GRANT CONNECT ON DATABASE %I TO %I', CURRENT_DATABASE(), :'{}'"
+    assert statements.index(grant.format("APP_ROLE")) < revoke
+    assert statements.index(grant.format("MIGRATE_ROLE")) < revoke
+    assert statements.index("BEGIN;") < revoke < statements.index("COMMIT;")
+
+
+def test_the_report_shows_public_connect(statements: str) -> None:
+    """The read-back the runbook eyeballs: PUBLIC's CONNECT must read f."""
+    assert "HAS_DATABASE_PRIVILEGE('PUBLIC', CURRENT_DATABASE(), 'CONNECT')" in statements

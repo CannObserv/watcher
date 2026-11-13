@@ -239,6 +239,7 @@ if [[ "${WATCHER_DEV_SERVER_DRY_RUN:-}" == "1" ]]; then
   echo "RESET=$RESET_REPORT"
   echo "PROCRASTINATE_SCHEMA=$SCHEMA_REPORT"
   echo "LOCK_CHECK=run"
+  echo "ROLE_CHECK=run"
   exit 0
 fi
 
@@ -254,6 +255,18 @@ cd "$REPO_ROOT"
 if ! uv sync --locked --offline; then
   echo "dev_server: refusing to start — the venv cannot be synced to uv.lock offline (above)." >&2
   echo "  Sync it: source scripts/load-env.sh; bash scripts/co-pypi.sh uv sync --locked" >&2
+  exit 1
+fi
+
+# The name check above holds the database; this holds the credential (#388).
+# The reset below runs DROP SCHEMA public CASCADE as whatever role the dev URL
+# logs in as, so that role must reach nothing but *_test/*_dev databases —
+# the test role, watcher_tester, never the production owner. Every launch, the
+# persistent WATCHER_DEV_DATABASE_URL included; DATABASE_URL is the dev URL by
+# now. After the lock check, whose sync this `uv run` relies on.
+if ! uv run python -m scripts.db_containment; then
+  echo "dev_server: refusing to start — the dev URL's role can reach production (above)." >&2
+  echo "  Log in as watcher_tester: docs/COMMANDS.md -> 'The test database' (#388)." >&2
   exit 1
 fi
 

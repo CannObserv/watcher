@@ -210,7 +210,7 @@ import os, pathlib, urllib.parse as u
 env = pathlib.Path(".env"); lines = env.read_text().splitlines(keepends=True)
 for i, line in enumerate(lines):
     if line.startswith("TEST_DATABASE_URL="):
-        p = u.urlsplit(line.split("=", 1)[1].strip())
+        p = u.urlsplit(line.split("=", 1)[1].strip().strip("\"'"))  # load-env.sh strips quotes too
         host = p.netloc.rsplit("@", 1)[1]
         new = p._replace(netloc=f"watcher_tester:{os.environ['TESTER_PW']}@{host}")
         lines[i] = f"TEST_DATABASE_URL={u.urlunsplit(new)}\n"

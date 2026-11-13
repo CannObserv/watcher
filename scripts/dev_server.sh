@@ -263,10 +263,16 @@ fi
 # logs in as, so that role must reach nothing but *_test/*_dev databases —
 # the test role, watcher_tester, never the production owner. Every launch, the
 # persistent WATCHER_DEV_DATABASE_URL included; DATABASE_URL is the dev URL by
-# now. After the lock check, whose sync this `uv run` relies on.
-if ! uv run python -m scripts.db_containment; then
+# now. After the lock check, whose sync this `uv run` relies on. Exit 1 is a
+# role that reaches production; anything else is a check that never ran.
+role_check=0
+uv run python -m scripts.db_containment || role_check=$?
+if (( role_check == 1 )); then
   echo "dev_server: refusing to start — the dev URL's role can reach production (above)." >&2
   echo "  Log in as watcher_tester: docs/COMMANDS.md -> 'The test database' (#388)." >&2
+  exit 1
+elif (( role_check != 0 )); then
+  echo "dev_server: refusing to start — the role check could not run (above)." >&2
   exit 1
 fi
 

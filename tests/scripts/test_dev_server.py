@@ -761,3 +761,13 @@ def test_the_role_check_is_given_the_dev_url() -> None:
     """It reads DATABASE_URL, which the script has already pinned to the dev URL."""
     text = SCRIPT.read_text()
     assert text.index('export DATABASE_URL="$DEV_URL"') < text.index(f"uv {ROLE_CHECK_ARGV}")
+
+
+def test_a_role_check_that_cannot_run_is_not_called_a_reach(tmp_path: Path) -> None:
+    """#388: exit 2 is "could not ask the cluster" (down, bad password), not a
+    role that reaches production — still refused, but said so."""
+    result, calls = run_live(tmp_path, 0, {"TEST_DATABASE_URL": TEST_URL}, role_exit=2)
+    assert result.returncode != 0
+    assert calls == [f"uv {CHECK_ARGV}", f"uv {ROLE_CHECK_ARGV}"]
+    assert "could not run" in result.stderr
+    assert "can reach production" not in result.stderr

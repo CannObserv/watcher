@@ -115,3 +115,19 @@ def test_the_report_shows_what_the_operator_checks(sql: str) -> None:
         assert column in report, column
     assert "has_database_privilege" in report
     assert "pg_has_role" in report
+
+
+def test_the_report_counts_ownership_through_set_role(sql: str) -> None:
+    """The role is NOINHERIT, so ``USAGE`` would read f for a membership it can
+    still ``SET ROLE`` through; ``MEMBER`` is what the guard checks too."""
+    report = sql.split("COMMIT;", 1)[1]
+    assert "'MEMBER')" in report
+    assert "'USAGE')" not in report
+
+
+def test_an_empty_password_aborts_too(sql: str) -> None:
+    """``\\if :{?var}`` is true for a variable set to the empty string, so
+    ``WATCHER_TESTER_PASSWORD=`` would otherwise make a role with password ''."""
+    guard = sql.split("\\getenv tester_password", 1)[1].split("BEGIN;", 1)[0]
+    assert "= '' AS tester_password_empty" in guard
+    assert "\\if :tester_password_empty" in guard

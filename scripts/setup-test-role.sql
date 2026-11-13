@@ -57,13 +57,19 @@
   \set dev_db watcher_dev
 \endif
 
--- A missing password aborts through a real error, not \quit, which exits 0.
+-- A missing or empty password aborts through a real error, not \quit, which
+-- exits 0. Empty is checked apart: \if :{?var} is true for a variable set to ''.
+-- \gset prints nothing, so the value never reaches the terminal.
 \getenv tester_password WATCHER_TESTER_PASSWORD
 \if :{?tester_password}
+  SELECT :'tester_password' = '' AS tester_password_empty \gset
 \else
-  \warn 'WATCHER_TESTER_PASSWORD is not set — refusing to create a role without a password.'
+  \set tester_password_empty true
+\endif
+\if :tester_password_empty
+  \warn 'WATCHER_TESTER_PASSWORD is not set or empty — refusing to create a role without a password.'
   DO $abort$ BEGIN
-    RAISE EXCEPTION 'WATCHER_TESTER_PASSWORD is not set';
+    RAISE EXCEPTION 'WATCHER_TESTER_PASSWORD is not set or empty';
   END $abort$;
 \endif
 
@@ -103,9 +109,11 @@ WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = name);
 
 -- Report. Read-only. The role row must read t for login and createdb, f for
 -- every other column. The second query lists every database the role can
--- connect to or acts as the owner of: only the *_test and *_dev ones and the
--- maintenance set (postgres, template0/1) may appear. `watcher` appears
--- until PUBLIC's CONNECT on it is revoked (the runbook's next step).
+-- connect to or can act as the owner of (MEMBER, not USAGE: the role is
+-- NOINHERIT, yet can SET ROLE through any membership): only the *_test and
+-- *_dev ones and the maintenance set (postgres, template0/1) may appear.
+-- `watcher` appears until PUBLIC's CONNECT on it is revoked (the runbook's
+-- next step).
 SELECT
   r.rolname,
   r.rolcanlogin AS login,
@@ -123,8 +131,8 @@ SELECT
   d.datname,
   pg_get_userbyid(d.datdba) AS owner,
   has_database_privilege(:'tester_role', d.oid, 'CONNECT') AS can_connect,
-  pg_has_role(:'tester_role', d.datdba, 'USAGE') AS acts_as_owner
+  pg_has_role(:'tester_role', d.datdba, 'MEMBER') AS acts_as_owner
 FROM pg_database d
 WHERE has_database_privilege(:'tester_role', d.oid, 'CONNECT')
-   OR pg_has_role(:'tester_role', d.datdba, 'USAGE')
+   OR pg_has_role(:'tester_role', d.datdba, 'MEMBER')
 ORDER BY d.datname;

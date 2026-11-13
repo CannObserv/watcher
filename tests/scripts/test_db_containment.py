@@ -12,6 +12,7 @@ that can connect to ``watcher``.
 """
 
 import pytest
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from scripts import db_containment
@@ -32,7 +33,7 @@ async def conn():
 @pytest.mark.integration
 async def test_the_test_role_reaches_no_production_database(conn) -> None:
     """The done-when check: no database outside ``_test``/``_dev`` and the
-    maintenance set is one this role can connect to or owns."""
+    maintenance set is one this role can connect to or act as the owner of."""
     assert await db_containment.reachable_production_databases(conn) == []
 
 
@@ -61,6 +62,15 @@ async def test_assert_contained_names_the_role_and_the_databases(conn) -> None:
     assert "#388" in str(caught.value)
 
 
+def test_ownership_counts_through_set_role_not_just_inheritance() -> None:
+    """``USAGE`` is false for a ``NOINHERIT`` member — which the test role is —
+    yet that member can still ``SET ROLE`` to the owner and grant itself
+    ``CONNECT``. ``MEMBER`` is the right that matters."""
+    sql = str(db_containment._REACHABLE)
+    assert "pg_has_role(datdba, 'MEMBER')" in sql
+    assert "'USAGE'" not in sql
+
+
 def test_the_suffixes_are_db_safetys() -> None:
     """One rule for the name and the capability: a suffix added to one is in both."""
     assert db_containment.NON_PRODUCTION_SUFFIXES is db_safety.NON_PRODUCTION_SUFFIXES
@@ -85,6 +95,24 @@ class TestMain:
         err = capsys.readouterr().err
         assert "['watcher']" in err
         assert "secret" not in err
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            ConnectionRefusedError(111, "Connect call failed"),
+            OperationalError("SELECT 1", {}, Exception("password for u: secret rejected")),
+        ],
+    )
+    def test_a_check_that_cannot_run_exits_2_without_the_password(
+        self, error, capsys, monkeypatch
+    ) -> None:
+        """Not 1: dev_server.sh must tell "reaches production" from "never ran"."""
+        monkeypatch.setattr(db_containment, "assert_url_contained", _refusing(error))
+        assert db_containment.main(["postgresql://u:secret@h/x_dev"]) == 2
+        err = capsys.readouterr().err
+        assert type(error).__name__ in err
+        assert "secret" not in err
+        assert "Traceback" not in err
 
     def test_the_url_defaults_to_database_url(self, monkeypatch) -> None:
         seen = []

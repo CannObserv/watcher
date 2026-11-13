@@ -219,10 +219,11 @@ sudo apt-get install -y postgresql postgresql-client
 sudo systemctl start postgresql
 sudo -u postgres psql -c "CREATE USER watcher WITH PASSWORD 'watcher';"
 sudo -u postgres psql -c "CREATE DATABASE watcher OWNER watcher;"
-sudo -u postgres psql -c "CREATE DATABASE watcher_test OWNER watcher;"
 # Then split the roles: scripts/setup-db-roles.sql (#259) — see
 # docs/MIGRATIONS.md -> "Migration role and application role". Grants are not
 # schema state, so no migration recreates them on a fresh host.
+# The test role and its databases, never owned by watcher (#388):
+# scripts/setup-test-role.sql — see "The test database" below.
 
 # Watcher migrations. Alembic connects with WATCHER_MIGRATION_DATABASE_URL when
 # set, else DATABASE_URL (#259). alembic.ini carries no URL, so a shell that
@@ -233,6 +234,33 @@ uv run alembic current
 
 # Archiver service migrations live in the sibling Archiver repo.
 # See its docs/COMMANDS.md.
+```
+
+### The test database
+
+`TEST_DATABASE_URL` logs in as **`watcher_tester`** (#388), never as `watcher`,
+the production owner. The test role has `LOGIN CREATEDB` and nothing else: no
+`CREATEROLE`, no superuser, no membership. It owns `watcher_test`,
+`watcher_dev`, and the scratch `watcher_rh*_test` databases the backup
+rehearsal creates. PUBLIC has no `CONNECT` on `watcher`, so the test role
+can't open a session there at all. `scripts/setup-test-role.sql` creates the
+role and its databases, and the one-time switch is in
+[MIGRATIONS.md](MIGRATIONS.md) → *The test role*.
+
+**The guard checks the credential as well as the name.** `db_safety` refuses a
+database whose name lacks `_test`/`_dev`. `scripts/db_containment.py` refuses a
+**role** that can connect to, or acts as the owner of, any database without
+that suffix. `postgres`, `template0` and `template1` are exempt by name.
+
+- **Where it runs.** Every `integration` test (`contained_test_role` in
+  `tests/conftest.py`), and `scripts/dev_server.sh` before its reset, so
+  `WATCHER_DEV_DATABASE_URL` is held to the same rule.
+- **CI passes it** as the superuser: its container holds only `watcher_test`
+  and the exempt three.
+- **A refusal** names the role and the databases it reaches.
+
+```bash
+DATABASE_URL="$TEST_DATABASE_URL" uv run python -m scripts.db_containment && echo contained
 ```
 
 **Autogenerate wants a scratch database, not production.** `--autogenerate`

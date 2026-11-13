@@ -36,8 +36,10 @@ A third role on the cluster, `watcher_backup`, is neither of these: the nightly
 backup's read-only login (`pg_read_all_data`, peer auth only), created by
 `scripts/setup-backup-role.sql` — see [RECOVERY.md](RECOVERY.md) (#297).
 
-`scripts/setup-db-roles.sql` is purely additive: it creates one role, grants it
-strictly less than exists today, and reassigns no ownership. `watcher` remains
+`scripts/setup-db-roles.sql` is additive for the roles: it creates one role,
+grants it strictly less than exists today, and reassigns no ownership. Its one
+subtraction is PUBLIC's `CONNECT` on the database (#388), after both roles hold
+their own. `watcher` remains
 the owner, which is why rollback is an env-file edit rather than a repair. It
 also gives `watcher` `CREATEDB` — the missing attribute that forced
 `9c1d4b7ea822` and `f4a8b26c9d31` to be hand-written and made per-agent test
@@ -155,6 +157,92 @@ named `<xx.yy.zz>_<nn>_<pre|post>_*.sql`: `pre` before the new code starts,
 Before landing a bump, list the files newer than the installed version; none
 means no DDL. 3.7.2 → 3.10.0 (#426) shipped none: the newest file is still
 `03.04.00_50_post_add_retry_failed_job_procedure.sql`.
+
+## The test role — one-time (#388)
+
+`TEST_DATABASE_URL` logs in as `watcher_tester`, not `watcher`, so the
+credential every agent shell loads cannot reach production. `watcher_tester`
+has `LOGIN CREATEDB` and nothing else. `CREATEDB` is for the backup
+rehearsal's scratch `*_test` databases (#383). It owns `watcher_test` and
+`watcher_dev`. `watcher` owns only production, and its password lives only in
+`/etc/watcher/.env`. What the test role owns, and the guard that checks it:
+[COMMANDS.md](COMMANDS.md) → *The test database*.
+
+> **Never `REASSIGN OWNED BY watcher`.** Besides the objects in the database
+> it runs in, it moves every *database* `watcher` owns, production's included
+> (measured on 16.15 in a rolled-back transaction, #388). The test databases
+> are dropped and recreated instead. Both are disposable: pytest and
+> `dev_server.sh` rebuild them.
+
+Run it clear of the nightly backup (03:17 UTC plus its randomised delay) and
+of the Monday patch window. Steps 2–4 are superuser steps over peer.
+
+```bash
+# 0. Nothing on the test databases: no pytest, no dev server, no leaked
+#    rehearsal database. Both queries must print nothing.
+sudo -u postgres psql -Atc "SELECT datname, usename FROM pg_stat_activity
+  WHERE datname IN ('watcher_test','watcher_dev') OR datname LIKE 'watcher\_rh%'"
+sudo -u postgres psql -Atc "SELECT datname FROM pg_database WHERE datname LIKE 'watcher\_rh%'"
+
+# 1. The password, generated into this shell only. Hex, so the URL needs no
+#    escaping. Never echo it.
+TESTER_PW="$(openssl rand -hex 24)"
+
+# 2. The old databases, owned by watcher.
+sudo -u postgres psql -v ON_ERROR_STOP=1 -c "DROP DATABASE watcher_test" -c "DROP DATABASE watcher_dev"
+
+# 3. The role and its databases. Redirected, not -f (postgres cannot read
+#    /home/exedev). The password rides the environment, never argv.
+WATCHER_TESTER_PASSWORD="$TESTER_PW" sudo --preserve-env=WATCHER_TESTER_PASSWORD \
+  -u postgres psql -d postgres < scripts/setup-test-role.sql
+
+# 4. PUBLIC's CONNECT on production. watcher_app and watcher_backup hold
+#    their own; the owner always may. Not a re-run of setup-db-roles.sql,
+#    which would also reset watcher_app's password.
+sudo -u postgres psql -v ON_ERROR_STOP=1 -d watcher \
+  -c "REVOKE CONNECT ON DATABASE watcher FROM PUBLIC"
+
+# 5. The repo .env: TEST_DATABASE_URL now names the new role. Rewritten in
+#    place, never opened in an editor (an editor's snapshots kept the last
+#    leaked password, #388). Prints the user, host and database only.
+TESTER_PW="$TESTER_PW" python3 - <<'PY'
+import os, pathlib, urllib.parse as u
+env = pathlib.Path(".env"); lines = env.read_text().splitlines(keepends=True)
+for i, line in enumerate(lines):
+    if line.startswith("TEST_DATABASE_URL="):
+        p = u.urlsplit(line.split("=", 1)[1].strip())
+        host = p.netloc.rsplit("@", 1)[1]
+        new = p._replace(netloc=f"watcher_tester:{os.environ['TESTER_PW']}@{host}")
+        lines[i] = f"TEST_DATABASE_URL={u.urlunsplit(new)}\n"
+        print("TEST_DATABASE_URL -> watcher_tester@" + host + p.path)
+env.write_text("".join(lines))
+PY
+unset TESTER_PW
+```
+
+**Read-back.**
+
+```bash
+source scripts/load-env.sh
+DATABASE_URL="$TEST_DATABASE_URL" uv run python -m scripts.db_containment && echo contained
+grep -c '://watcher:' .env                       # 0: the owner's URL is gone
+sudo -u postgres psql -Atc "SELECT r, has_database_privilege(r, 'watcher', 'CONNECT')
+  FROM unnest(ARRAY['watcher','watcher_app','watcher_backup','watcher_tester']) r"
+#   t, t, t, f
+sudo -u postgres psql -c '\du'
+uv run pytest -m integration -q --no-cov         # green, no skips
+systemctl show watcher -p NRestarts              # unchanged; no WARNING+ since
+```
+
+Then the next nightly backup: `systemctl show watcher-backup.service -p Result`
+reads `success`.
+
+**Rollback.** Run `GRANT CONNECT ON DATABASE watcher TO PUBLIC` as `postgres`.
+The test role can stay while that's diagnosed: without the revoke it can
+connect to production, but it owns nothing there. Undoing the role itself
+means dropping its two databases and the role, then recreating both databases
+`OWNER watcher`, and `TEST_DATABASE_URL` holds the owner's password again.
+That leak is the one #388 closed.
 
 ## One-time orderings — applied
 

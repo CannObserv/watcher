@@ -44,6 +44,8 @@ def _client_skew(dump_version: str, server_major: int) -> str | None:
     pair, client and server of one major (#365).
     """
     client_major = restore.pg_major(dump_version)
+    if client_major is None:
+        return f"pg_dump --version named no version ({dump_version.strip()!r})"
     if client_major == server_major:
         return None
     return (
@@ -63,6 +65,10 @@ def test_a_client_of_another_major_names_the_skew(client: str) -> None:
     assert f"pg_dump {client.split('.')[0]}" in reason
     assert "PostgreSQL 16 server" in reason
     assert "postgresql-client-16" in reason
+
+
+def test_a_client_that_names_no_version_says_so() -> None:
+    assert _client_skew("pg_dump\n", 16) == "pg_dump --version named no version ('pg_dump')"
 
 
 def test_a_client_of_the_servers_major_rehearses() -> None:
@@ -201,8 +207,9 @@ async def test_a_dump_survives_the_round_trip_with_its_grants(databases, tmp_pat
     assert summary["alembic_head"] == "rehearsal01"
 
     key = restore.latest_key(client, BUCKET, "rehearsal")
-    # The real probe and the real header (#411): the pair is one major, so it passes.
+    # The real probes and the real header (#411): the pair is one major, so it passes.
     target_major = restore.target_major(_libpq(target), run_as=None, runner=subprocess.run)
+    restore.check_client(restore.client_major(run_as=None, runner=subprocess.run), target_major)
     fetched = restore.fetch(client, BUCKET, key, tmp_path / "fetched", runner=subprocess.run)
     assert restore.pg_major(fetched.toc.pg_dump_version) == target_major
     restore.check_compatible(fetched.toc, target_major)

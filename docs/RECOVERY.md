@@ -185,12 +185,16 @@ sudo bash -c "$ENV; .venv/bin/python -m src.ops.restore --latest --prefix $SRC -
 Into a database — **an existing, empty one**; the restore is one transaction, so
 a failure leaves it empty rather than half-loaded.
 
-**An archive newer than its target is refused before `pg_restore` runs** (#411):
-the tool asks the target's major first (`SHOW server_version_num`, as `--run-as`,
-before the fetch) and refuses an archive whose header's `pg_dump` major is
-newer, naming both. Restore into a server of the archive's major or newer. A local
-`pg_restore` older than the archive refuses it earlier, at fetch: `unsupported
-version … in file header` — install that major's `postgresql-client`.
+**Nothing newer than the target loads into it** (#411). Before the fetch, the
+tool asks the target's major (`SHOW server_version_num`) and the local
+`pg_restore`'s, both as `--run-as`. It refuses a `pg_restore` newer than the
+target, because that client writes its own session `SET`s and 17+'s
+`transaction_timeout` breaks a 16 server (#365); then, after the fetch, it
+refuses an archive whose header names a newer `pg_dump`. Each refusal names both
+majors. Restore with the target's `postgresql-client-N` (pg_wrapper runs the
+newest installed), or into a server of that major or newer. A `pg_restore`
+*older* than the archive refuses it at fetch: `unsupported version … in file
+header`.
 
 **The roles come first.** The dump names `watcher` (the owner, and the
 migration role) and grants to `watcher_app`, but carries neither role — so on a
@@ -289,8 +293,8 @@ exact. This is the form steps 16, 19 and 23 used; `-f -` is required.
   a skip fails the gate — #353): `tests/ops/test_backup_restore_rehearsal.py` seeds a
   scratch database with the two-role grants, ships it through the real
   `pg_dump` and the SDK-faithful bucket fake, restores it with the real
-  `pg_restore`, and asserts the gates above, with the real version probe and
-  check on the way (#411); a second test proves a failed
+  `pg_restore`, and asserts the gates above, with the real version probes and
+  checks on the way (#411); a second test proves a failed
   restore leaves the target untouched. Its scratch databases
   (`watcher_rh<pidns>_<pid>_{src,dst}_test`) are dropped by `tests/ops/scratch_db.py`:
   FORCE, then a plain `DROP` when FORCE refuses an autovacuum worker it cannot

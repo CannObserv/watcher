@@ -178,9 +178,9 @@ def _tail(text: str | bytes | None) -> str:
 # --- effects on the database and the file ---
 
 
-def read_alembic_head(database: str, *, runner: Runner) -> str | None:
-    """The schema version, recorded so a restore can be checked against it."""
-    argv = [
+def psql_scalar_argv(database: str, command: str) -> list[str]:
+    """``psql`` asking ``database`` one query, answering bare values only."""
+    return [
         "psql",
         "--no-password",
         "--no-psqlrc",
@@ -188,8 +188,13 @@ def read_alembic_head(database: str, *, runner: Runner) -> str | None:
         "--tuples-only",
         "--no-align",
         f"--dbname={database}",
-        "--command=SELECT version_num FROM alembic_version",
+        f"--command={command}",
     ]
+
+
+def read_alembic_head(database: str, *, runner: Runner) -> str | None:
+    """The schema version, recorded so a restore can be checked against it."""
+    argv = psql_scalar_argv(database, "SELECT version_num FROM alembic_version")
     result = runner(
         argv, capture_output=True, text=True, check=False, timeout=QUERY_TIMEOUT_SECONDS
     )

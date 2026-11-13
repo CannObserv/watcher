@@ -301,6 +301,45 @@ class TestCheckCompatible:
             restore.check_compatible(_toc(dumped_by), 16)
 
 
+class TestClientMajor:
+    """The local ``pg_restore`` writes its own ``SET``s at load time — none are
+    in the archive (measured, #411) — so its major matters as much as the
+    archive's. Asked as the user the load runs as: ``--reset-env`` gives that
+    user its own ``PATH``, and so possibly its own ``pg_restore``."""
+
+    def test_asks_the_loading_pg_restore_its_version(self) -> None:
+        pg = FakePg(pg_restore_version="pg_restore (PostgreSQL) 18.6 (Ubuntu 18.6-1)")
+        assert restore.client_major(run_as="postgres", runner=pg) == 18
+        (argv,) = pg.calls
+        assert argv == restore.as_user(["pg_restore", "--version"], "postgres")
+
+    def test_a_pg_restore_that_will_not_run_is_an_error(self) -> None:
+        with pytest.raises(RestoreError, match="pg_restore --version.*boom"):
+            restore.client_major(run_as=None, runner=FakePg(fail="pg_restore"))
+
+    def test_an_answer_that_names_no_version_is_an_error(self) -> None:
+        with pytest.raises(RestoreError, match="no version"):
+            restore.client_major(run_as=None, runner=FakePg(pg_restore_version="pg_restore"))
+
+
+class TestCheckClient:
+    """#365's failure itself: a ``pg_restore`` 17 or later writes
+    ``SET transaction_timeout = 0``, which a 16 server rejects partway through
+    — whatever ``pg_dump`` wrote the archive."""
+
+    @pytest.mark.parametrize("client", [15, 16])
+    def test_an_older_or_equal_client_proceeds(self, client: int) -> None:
+        restore.check_client(client, 16)
+
+    def test_a_newer_client_is_refused_naming_both_majors_and_the_fix(self) -> None:
+        with pytest.raises(RestoreError) as caught:
+            restore.check_client(18, 16)
+        message = str(caught.value)
+        assert "pg_restore 18" in message
+        assert "PostgreSQL 16" in message
+        assert "postgresql-client-16" in message
+
+
 class TestAsUser:
     """The restore is run by hand as root, and loads as ``postgres`` (#297 left
     this the one privilege drop in ``src/ops``)."""
@@ -415,6 +454,21 @@ class TestMain:
         assert err.startswith("restore failed:")
         assert "pg_dump 18" in err and "PostgreSQL 16" in err
         assert len(err.strip().splitlines()) == 1
+        assert not any("--single-transaction" in argv for argv in pg.calls)
+
+    def test_a_newer_local_pg_restore_is_refused_before_the_fetch(
+        self, wired, bucket, monkeypatch, capsys
+    ) -> None:
+        """An archive of the target's own major still fails partway when a
+        newer client loads it (#411, the #365 mechanism): refused in seconds."""
+        _ship(bucket, "watcher/20260911T031702Z.dump")
+        pg = FakePg(pg_restore_version="pg_restore (PostgreSQL) 18.6 (Ubuntu 18.6-1)")
+        monkeypatch.setattr(restore.subprocess, "run", pg)
+        monkeypatch.setattr(FakeClient, "bucket", _raiser(AssertionError("fetched")))
+        code = restore.main(["--latest", "--prefix", "watcher", "--into", "watcher_dev"])
+        assert code == 1
+        err = capsys.readouterr().err
+        assert "pg_restore 18" in err and "PostgreSQL 16" in err
         assert not any("--single-transaction" in argv for argv in pg.calls)
 
     def test_the_target_is_asked_before_anything_is_fetched(

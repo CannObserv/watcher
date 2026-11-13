@@ -65,12 +65,15 @@ class FakePg:
         fail: str = "",
         truncated: bool = False,
         server_version_num: str = "160013",
+        pg_restore_version: str = "pg_restore (PostgreSQL) 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)",
     ) -> None:
         self.toc = toc
         self.head = head
         self.fail = fail
         # What ``SHOW server_version_num`` answers: the restore asks its target (#411).
         self.server_version_num = server_version_num
+        # What ``pg_restore --version`` answers: the client the restore loads with.
+        self.pg_restore_version = pg_restore_version
         # A custom-format archive cut short still lists: its table of contents
         # precedes the data. Only reading the data through finds the cut.
         self.truncated = truncated
@@ -90,6 +93,10 @@ class FakePg:
             )
         if program == "psql":
             return subprocess.CompletedProcess(argv, 0, stdout=f"{self.head}\n", stderr="")
+        if program == "pg_restore" and "--version" in argv:
+            return subprocess.CompletedProcess(
+                argv, 0, stdout=f"{self.pg_restore_version}\n", stderr=""
+            )
         if program == "pg_restore" and "--file=/dev/null" in argv:
             if self.truncated:
                 error = "pg_restore: error: could not read from input file: end of file\n"

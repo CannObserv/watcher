@@ -6,14 +6,15 @@ is what the backup recorded (sha256 against the object's metadata, then the same
 ``pg_restore --list`` check the backup ran); **restore** it into an existing,
 empty database, in one transaction, so a failure leaves nothing half-loaded.
 
-**An archive newer than its target is refused before the load** (#411). A newer
-``pg_dump`` writes settings an older server does not know (18's
-``SET transaction_timeout`` against 16, #365), and ``pg_restore`` would fail on
-the first of them, after the download, naming only the ``SET``. So the target's
-major is asked first — before the fetch, the slow step — and compared with the
-``pg_dump`` major in the fetched archive's own header, never the object's
-metadata. Same or older proceeds: an archive restored into a newer server is the
-supported direction.
+**Nothing newer than its target loads into it** (#411). Two majors can be
+newer than the target server, and either fails partway, after the download:
+the local ``pg_restore``, which writes its own session ``SET``s at load time —
+none are in the archive (measured) — so 18's ``SET transaction_timeout`` reaches
+a 16 server (#365); and the archive's ``pg_dump``, whose DDL an older server need
+not accept. So the target's major and the loading client's are asked first —
+before the fetch, the slow step — and the ``pg_dump`` major is read from the
+fetched archive's own header, never the object's metadata. Same or older
+proceeds: an archive restored into a newer server is the supported direction.
 
 The restore reads the archive on stdin, so ``postgres`` never needs to read a
 file root wrote, and it preserves owners and grants: the dump carries the
@@ -72,6 +73,7 @@ from src.ops.backup import (
     BackupError,
     Runner,
     Toc,
+    psql_scalar_argv,
     sha256_file,
     verify_dump,
 )
@@ -285,19 +287,7 @@ def target_major(database: str, *, run_as: str | None, runner: Runner) -> int:
     Over the same ``--run-as`` path as ``restore_into``, so it also proves the
     database exists and that user can reach it — in seconds, before the fetch.
     """
-    argv = as_user(
-        [
-            "psql",
-            "--no-password",
-            "--no-psqlrc",
-            "--quiet",
-            "--tuples-only",
-            "--no-align",
-            f"--dbname={database}",
-            "--command=SHOW server_version_num",
-        ],
-        run_as,
-    )
+    argv = as_user(psql_scalar_argv(database, "SHOW server_version_num"), run_as)
     result = runner(
         argv, capture_output=True, text=True, check=False, timeout=QUERY_TIMEOUT_SECONDS
     )
@@ -311,6 +301,41 @@ def target_major(database: str, *, run_as: str | None, runner: Runner) -> int:
         return int(answer) // 10000
     except ValueError as exc:
         raise RestoreError(f"the target answered {answer!r} for its server version") from exc
+
+
+def client_major(*, run_as: str | None, runner: Runner) -> int:
+    """The major of the ``pg_restore`` the load will run, as the user it runs as.
+
+    ``--reset-env`` hands that user a default ``PATH``, so ask through the same
+    ``as_user`` path rather than trusting the caller's own ``pg_restore``.
+    """
+    argv = as_user(["pg_restore", "--version"], run_as)
+    result = runner(
+        argv, capture_output=True, text=True, check=False, timeout=QUERY_TIMEOUT_SECONDS
+    )
+    if result.returncode != 0:
+        tail = " | ".join((result.stderr or "").strip().splitlines()[-3:])
+        raise RestoreError(f"pg_restore --version exited {result.returncode}: {tail}")
+    major = pg_major(result.stdout)
+    if major is None:
+        answer = (result.stdout or "").strip()
+        raise RestoreError(f"pg_restore --version named no version ({answer!r})")
+    return major
+
+
+def check_client(client: int, target: int) -> None:
+    """Refuse a ``pg_restore`` newer than the target server's major.
+
+    It writes its own session ``SET``s, and a newer one writes settings an older
+    server rejects — 17's and later's ``transaction_timeout`` against 16 (#365).
+    """
+    if client > target:
+        raise RestoreError(
+            f"the local pg_restore {client} is newer than the target's PostgreSQL {target}, "
+            "which would reject the settings it writes partway through; restore with "
+            f"postgresql-client-{target} (Ubuntu's pg_wrapper runs the newest installed "
+            f"client) or into a PostgreSQL {client} or newer server"
+        )
 
 
 def check_compatible(toc: Toc, target: int) -> None:
@@ -327,9 +352,8 @@ def check_compatible(toc: Toc, target: int) -> None:
     if dumped_by > target:
         raise RestoreError(
             f"the archive was written by pg_dump {dumped_by} ({toc.pg_dump_version}), "
-            f"newer than the target's PostgreSQL {target}, whose pg_restore would fail "
-            f"partway on settings it does not know; restore into a PostgreSQL {dumped_by} "
-            "or newer server"
+            f"newer than the target's PostgreSQL {target}, which need not accept what it "
+            f"wrote; restore into a PostgreSQL {dumped_by} or newer server"
         )
 
 
@@ -414,14 +438,12 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
         if args.download_only:
             fetched = fetch(client, bucket, key, args.download_only, runner=subprocess.run)
             print(f"verified: {fetched.path}")
-            versions = {
-                "pg_dump_version": fetched.toc.pg_dump_version,
-                "server_version": fetched.toc.server_version,
-            }
-            print("archive:", *_fields(versions, tuple(versions)))
+            print("archive:", *_fields(vars(fetched.toc), ("pg_dump_version", "server_version")))
             return 0
-        # Before the fetch: a wrong --into or --run-as fails in seconds (#411).
+        # Before the fetch: a wrong --into or --run-as, or a client newer than
+        # the target, fails in seconds (#411).
         target = target_major(args.into, run_as=args.run_as, runner=subprocess.run)
+        check_client(client_major(run_as=args.run_as, runner=subprocess.run), target)
         with tempfile.TemporaryDirectory(prefix="watcher-restore-") as work:
             fetched = fetch(client, bucket, key, Path(work), runner=subprocess.run)
             check_compatible(fetched.toc, target)

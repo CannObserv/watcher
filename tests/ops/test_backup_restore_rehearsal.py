@@ -209,7 +209,9 @@ async def test_a_dump_survives_the_round_trip_with_its_grants(databases, tmp_pat
     key = restore.latest_key(client, BUCKET, "rehearsal")
     # The real probes and the real header (#411): the pair is one major, so it passes.
     target_major = restore.target_major(_libpq(target), run_as=None, runner=subprocess.run)
-    restore.check_client(restore.client_major(run_as=None, runner=subprocess.run), target_major)
+    restore.check_client(
+        restore.client_major(_libpq(target), run_as=None, runner=subprocess.run), target_major
+    )
     fetched = restore.fetch(client, BUCKET, key, tmp_path / "fetched", runner=subprocess.run)
     assert restore.pg_major(fetched.toc.pg_dump_version) == target_major
     restore.check_compatible(fetched.toc, target_major)

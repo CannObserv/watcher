@@ -75,6 +75,7 @@ from src.ops.backup import (
     Toc,
     psql_scalar_argv,
     sha256_file,
+    stderr_tail,
     verify_dump,
 )
 from src.ops.backup import iso as backup_iso
@@ -292,9 +293,9 @@ def target_major(database: str, *, run_as: str | None, runner: Runner) -> int:
         argv, capture_output=True, text=True, check=False, timeout=QUERY_TIMEOUT_SECONDS
     )
     if result.returncode != 0:
-        tail = " | ".join((result.stderr or "").strip().splitlines()[-3:])
         raise RestoreError(
-            f"could not ask the target its server version: psql exited {result.returncode}: {tail}"
+            "could not ask the target its server version: "
+            f"psql exited {result.returncode}: {stderr_tail(result.stderr)}"
         )
     answer = (result.stdout or "").strip()
     try:
@@ -303,19 +304,23 @@ def target_major(database: str, *, run_as: str | None, runner: Runner) -> int:
         raise RestoreError(f"the target answered {answer!r} for its server version") from exc
 
 
-def client_major(*, run_as: str | None, runner: Runner) -> int:
+def client_major(database: str, *, run_as: str | None, runner: Runner) -> int:
     """The major of the ``pg_restore`` the load will run, as the user it runs as.
 
     ``--reset-env`` hands that user a default ``PATH``, so ask through the same
-    ``as_user`` path rather than trusting the caller's own ``pg_restore``.
+    ``as_user`` path rather than trusting the caller's own ``pg_restore``. And
+    Ubuntu's pg_wrapper picks the binary from the arguments (``--host``,
+    ``--port``, ``service=``), so the probe carries the load's ``--dbname``,
+    after ``--version``, which ``pg_restore`` answers before reading the rest.
     """
-    argv = as_user(["pg_restore", "--version"], run_as)
+    argv = as_user(["pg_restore", "--version", f"--dbname={database}"], run_as)
     result = runner(
         argv, capture_output=True, text=True, check=False, timeout=QUERY_TIMEOUT_SECONDS
     )
     if result.returncode != 0:
-        tail = " | ".join((result.stderr or "").strip().splitlines()[-3:])
-        raise RestoreError(f"pg_restore --version exited {result.returncode}: {tail}")
+        raise RestoreError(
+            f"pg_restore --version exited {result.returncode}: {stderr_tail(result.stderr)}"
+        )
     major = pg_major(result.stdout)
     if major is None:
         answer = (result.stdout or "").strip()
@@ -332,9 +337,10 @@ def check_client(client: int, target: int) -> None:
     if client > target:
         raise RestoreError(
             f"the local pg_restore {client} is newer than the target's PostgreSQL {target}, "
-            "which would reject the settings it writes partway through; restore with "
-            f"postgresql-client-{target} (Ubuntu's pg_wrapper runs the newest installed "
-            f"client) or into a PostgreSQL {client} or newer server"
+            "which would reject the settings it writes partway through; load with "
+            f"postgresql-client-{target}'s pg_restore (Ubuntu's pg_wrapper runs the local "
+            "cluster's major, else the newest installed) or into a PostgreSQL "
+            f"{client} or newer server"
         )
 
 
@@ -379,8 +385,7 @@ def restore_into(path: Path, database: str, *, run_as: str | None, runner: Runne
             timeout=PG_DUMP_TIMEOUT_SECONDS,
         )
     if result.returncode != 0:
-        tail = " | ".join((result.stderr or "").strip().splitlines()[-3:])
-        raise RestoreError(f"pg_restore exited {result.returncode}: {tail}")
+        raise RestoreError(f"pg_restore exited {result.returncode}: {stderr_tail(result.stderr)}")
 
 
 def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.environ) -> int:
@@ -443,7 +448,7 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
         # Before the fetch: a wrong --into or --run-as, or a client newer than
         # the target, fails in seconds (#411).
         target = target_major(args.into, run_as=args.run_as, runner=subprocess.run)
-        check_client(client_major(run_as=args.run_as, runner=subprocess.run), target)
+        check_client(client_major(args.into, run_as=args.run_as, runner=subprocess.run), target)
         with tempfile.TemporaryDirectory(prefix="watcher-restore-") as work:
             fetched = fetch(client, bucket, key, Path(work), runner=subprocess.run)
             check_compatible(fetched.toc, target)

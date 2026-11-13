@@ -187,12 +187,14 @@ a failure leaves it empty rather than half-loaded.
 
 **Nothing newer than the target loads into it** (#411). Before the fetch, the
 tool asks the target's major (`SHOW server_version_num`) and the local
-`pg_restore`'s, both as `--run-as`. It refuses a `pg_restore` newer than the
+`pg_restore`'s, both as `--run-as` and the latter with the load's `--dbname`
+(pg_wrapper picks the binary from the arguments). It refuses a `pg_restore` newer than the
 target, because that client writes its own session `SET`s and 17+'s
 `transaction_timeout` breaks a 16 server (#365); then, after the fetch, it
 refuses an archive whose header names a newer `pg_dump`. Each refusal names both
-majors. Restore with the target's `postgresql-client-N` (pg_wrapper runs the
-newest installed), or into a server of that major or newer. A `pg_restore`
+majors. Load with the target's `postgresql-client-N` (for `pg_restore`,
+pg_wrapper runs the local cluster's major, else the newest installed), or into a
+server of that major or newer. A `pg_restore`
 *older* than the archive refuses it at fetch: `unsupported version … in file
 header`.
 

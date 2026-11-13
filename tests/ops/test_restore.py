@@ -309,17 +309,29 @@ class TestClientMajor:
 
     def test_asks_the_loading_pg_restore_its_version(self) -> None:
         pg = FakePg(pg_restore_version="pg_restore (PostgreSQL) 18.6 (Ubuntu 18.6-1)")
-        assert restore.client_major(run_as="postgres", runner=pg) == 18
+        assert restore.client_major("watcher", run_as="postgres", runner=pg) == 18
         (argv,) = pg.calls
-        assert argv == restore.as_user(["pg_restore", "--version"], "postgres")
+        assert argv == restore.as_user(["pg_restore", "--version", "--dbname=watcher"], "postgres")
+
+    def test_the_probe_names_the_loads_database(self) -> None:
+        """pg_wrapper picks the binary from the arguments, so the probe carries
+        the load's ``--dbname``; ``--version`` first, which ``pg_restore``
+        answers before reading the rest (measured, 16.15)."""
+        pg = FakePg()
+        restore.client_major("service=watcher", run_as=None, runner=pg)
+        (argv,) = pg.calls
+        assert argv[:2] == ["pg_restore", "--version"]
+        assert "--dbname=service=watcher" in argv
 
     def test_a_pg_restore_that_will_not_run_is_an_error(self) -> None:
         with pytest.raises(RestoreError, match="pg_restore --version.*boom"):
-            restore.client_major(run_as=None, runner=FakePg(fail="pg_restore"))
+            restore.client_major("watcher", run_as=None, runner=FakePg(fail="pg_restore"))
 
     def test_an_answer_that_names_no_version_is_an_error(self) -> None:
         with pytest.raises(RestoreError, match="no version"):
-            restore.client_major(run_as=None, runner=FakePg(pg_restore_version="pg_restore"))
+            restore.client_major(
+                "watcher", run_as=None, runner=FakePg(pg_restore_version="pg_restore")
+            )
 
 
 class TestCheckClient:

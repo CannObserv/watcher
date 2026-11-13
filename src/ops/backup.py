@@ -169,7 +169,8 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _tail(text: str | bytes | None) -> str:
+def stderr_tail(text: str | bytes | None) -> str:
+    """A tool's last three lines of output, one line: what an error message quotes."""
     if isinstance(text, bytes):
         text = text.decode(errors="replace")
     return " | ".join((text or "").strip().splitlines()[-3:])
@@ -199,7 +200,7 @@ def read_alembic_head(database: str, *, runner: Runner) -> str | None:
         argv, capture_output=True, text=True, check=False, timeout=QUERY_TIMEOUT_SECONDS
     )
     if result.returncode != 0:
-        raise BackupError(f"psql could not read alembic_version: {_tail(result.stderr)}")
+        raise BackupError(f"psql could not read alembic_version: {stderr_tail(result.stderr)}")
     return result.stdout.strip() or None
 
 
@@ -215,7 +216,7 @@ def run_pg_dump(database: str, out: Path, *, runner: Runner) -> None:
             timeout=PG_DUMP_TIMEOUT_SECONDS,
         )
     if result.returncode != 0:
-        raise BackupError(f"pg_dump exited {result.returncode}: {_tail(result.stderr)}")
+        raise BackupError(f"pg_dump exited {result.returncode}: {stderr_tail(result.stderr)}")
 
 
 def verify_dump(path: Path, *, runner: Runner) -> Toc:
@@ -235,7 +236,7 @@ def verify_dump(path: Path, *, runner: Runner) -> Toc:
         timeout=QUERY_TIMEOUT_SECONDS,
     )
     if result.returncode != 0:
-        raise BackupError(f"pg_restore --list rejected {path.name}: {_tail(result.stderr)}")
+        raise BackupError(f"pg_restore --list rejected {path.name}: {stderr_tail(result.stderr)}")
     toc = parse_toc(result.stdout)
     missing = [table for table in REQUIRED_TABLES if table not in toc.tables_with_data]
     if missing:
@@ -248,7 +249,9 @@ def verify_dump(path: Path, *, runner: Runner) -> Toc:
         timeout=PG_DUMP_TIMEOUT_SECONDS,
     )
     if full.returncode != 0:
-        raise BackupError(f"pg_restore could not read {path.name} through: {_tail(full.stderr)}")
+        raise BackupError(
+            f"pg_restore could not read {path.name} through: {stderr_tail(full.stderr)}"
+        )
     return toc
 
 

@@ -75,7 +75,8 @@ def test_both_passwords_run_every_step(tmp_path: Path) -> None:
     assert "STOP" not in result.stderr
     assert len(calls) == 6, calls
     assert calls[0].startswith("m-s3cret||"), "step 1 is not handed the migration password"
-    assert "CREATE ROLE" not in calls[0], "the password reached sudo's argv"
+    argvs = [call.split("|", 2)[2] for call in calls]
+    assert not [a for a in argvs if "m-s3cret" in a or "a-s3cret" in a], "a password in argv"
     assert calls[1].endswith("createdb -O watcher watcher")
     assert calls[2].startswith("|a-s3cret|"), "step 3 is not handed the app password"
 

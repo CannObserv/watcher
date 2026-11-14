@@ -63,15 +63,23 @@
   \set migrate_role watcher
 \endif
 
--- The password is never in this file. A missing one aborts through a real
--- error, not \quit: \quit exits 0, so "no password supplied" would be
+-- The password is never in this file. A missing or empty one aborts through a
+-- real error, not \quit: \quit exits 0, so "no password supplied" would be
 -- indistinguishable from "roles configured" to anyone checking $?.
+-- Empty is checked apart (#437): \if :{?var} is true for a variable set to '',
+-- and an empty-string password sets none at all (PostgreSQL 10+), which
+-- scram-sha-256 can never admit. \gset prints nothing, so the value never
+-- reaches the terminal.
 \getenv app_password WATCHER_APP_PASSWORD
 \if :{?app_password}
+  SELECT :'app_password' = '' AS app_password_empty \gset
 \else
-  \warn 'WATCHER_APP_PASSWORD is not set — refusing to create a role without a password.'
+  \set app_password_empty true
+\endif
+\if :app_password_empty
+  \warn 'WATCHER_APP_PASSWORD is not set or empty — refusing to leave a role without a password.'
   DO $abort$ BEGIN
-    RAISE EXCEPTION 'WATCHER_APP_PASSWORD is not set';
+    RAISE EXCEPTION 'WATCHER_APP_PASSWORD is not set or empty';
   END $abort$;
 \endif
 

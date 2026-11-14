@@ -70,8 +70,23 @@ def test_missing_password_aborts_nonzero(sql: str) -> None:
     read "no password supplied" as "roles configured". Only a real error gives
     psql a non-zero exit.
     """
-    guard = sql.split("\\getenv app_password")[1].split("\\endif")[0]
+    guard = sql.split("\\getenv app_password", 1)[1].split("BEGIN;", 1)[0]
     assert "RAISE EXCEPTION" in guard, "the missing-password branch exits 0"
+    assert guard.index("RAISE EXCEPTION") < guard.index("\\echo granting")
+
+
+def test_an_empty_password_aborts_too(sql: str) -> None:
+    """``\\if :{?var}`` is true for a variable set to the empty string (#437).
+
+    ``WATCHER_APP_PASSWORD=`` would otherwise reach ``ALTER ROLE … PASSWORD ''``,
+    which PostgreSQL 10+ stores as no password at all: ``scram-sha-256`` can no
+    longer admit ``watcher_app``, the service fails every new connection, and
+    the run exits 0. The template is ``scripts/setup-test-role.sql`` (#388).
+    """
+    guard = sql.split("\\getenv app_password", 1)[1].split("BEGIN;", 1)[0]
+    assert "SELECT :'app_password' = '' AS app_password_empty \\gset" in guard
+    assert "\\if :app_password_empty" in guard
+    assert guard.index("\\if :app_password_empty") < guard.index("RAISE EXCEPTION")
 
 
 def test_creates_the_role_idempotently(statements: str) -> None:

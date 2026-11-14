@@ -206,19 +206,39 @@ the ones `/etc/watcher/.env` **already holds**: `setup-db-roles.sql` sets
 `watcher_app`'s to whatever it is handed, so a new one breaks `DATABASE_URL`.
 
 ```bash
+# One subshell, pasted whole (#439): the STOP check's `exit` ends the block, not
+# your shell, and nothing after it runs. The passwords end with it too, so to
+# re-run one step later, paste the lines down to the check in front of it.
+(
 # The passwords /etc/watcher/.env already carries — never new ones, and read
 # from it rather than typed, so neither lands in shell history. Parsed by the
 # loader, never sourced (#407); /dev/null keeps the repo .env out.
 WATCHER_SYSTEM_ENV_FILE=/etc/watcher/.env WATCHER_PROJECT_ENV_FILE=/dev/null . scripts/load-env.sh
-u="${WATCHER_MIGRATION_DATABASE_URL#*://watcher:}"; MIGRATE_PW="${u%%@*}"
-u="${DATABASE_URL#*://watcher_app:}"; APP_PW="${u%%@*}"
-[ -n "$MIGRATE_PW" ] && [ -n "$APP_PW" ] || echo "STOP: no passwords read — is /etc/watcher/.env readable?" >&2
+# The password from a URL of the shape …://<role>:<password>@…, else empty: a
+# URL of any other shape would hand back its own scheme and user instead.
+pw_of() { local u; case "$2" in *"://$1:"?*@*) u="${2#*"://$1:"}"; printf %s "${u%%@*}" ;; esac; }
+MIGRATE_PW="$(pw_of watcher "$WATCHER_MIGRATION_DATABASE_URL")"
+APP_PW="$(pw_of watcher_app "$DATABASE_URL")"
+[ -n "$MIGRATE_PW" ] && [ -n "$APP_PW" ] || {
+  echo "STOP: no password read — /etc/watcher/.env unreadable, or a URL not …://watcher:<pw>@… / …://watcher_app:<pw>@…" >&2
+  exit 1
+}
 
 # 1. Fresh cluster only: the owner role (an existing cluster has it). Environment
 #    and \getenv, never argv: `sudo -u postgres VAR=…` shows the value in `ps`.
+#    An empty password would leave the role with none at all (PostgreSQL 10+),
+#    which no scram-sha-256 rule admits; the guard refuses it even pasted alone.
 WATCHER_MIGRATE_PASSWORD="$MIGRATE_PW" sudo --preserve-env=WATCHER_MIGRATE_PASSWORD -u postgres \
   psql -v ON_ERROR_STOP=1 <<'SQL'
 \getenv pw WATCHER_MIGRATE_PASSWORD
+\if :{?pw}
+  SELECT :'pw' = '' AS pw_empty \gset
+\else
+  \set pw_empty true
+\endif
+\if :pw_empty
+  DO $abort$ BEGIN RAISE EXCEPTION 'WATCHER_MIGRATE_PASSWORD is not set or empty'; END $abort$;
+\endif
 CREATE ROLE watcher LOGIN PASSWORD :'pw';
 SQL
 
@@ -242,6 +262,7 @@ WATCHER_APP_PASSWORD="$APP_PW" sudo --preserve-env=WATCHER_APP_PASSWORD -u postg
 
 # 6. The backup's role, so this host's own backups can run (Install and first run).
 sudo -u postgres psql -d watcher < scripts/setup-backup-role.sql
+)
 ```
 
 The dump carries the table grants and default privileges; what it cannot carry

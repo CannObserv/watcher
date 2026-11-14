@@ -78,6 +78,12 @@ trap: the skill's `SKILL.md` → *The run*.
 - **`inflight`** is `python -m src.ops.inflight --env-file /etc/watcher/.env`:
   the Procrastinate jobs in `doing`, read-only, as `exedev`, and stdout is the
   count alone. It must print `0` before each step and in the reboot chain.
+- **A Dependabot runtime bump may ride a run** (#438, #435's precedent):
+  merge it, then `bash scripts/co-pypi.sh uv sync --locked`, all before the
+  reboot chain, whose restart is then the deploy. Before the reboot, run the
+  unit's own start check by hand, `uv sync --locked --offline`: it must exit 0,
+  or the boot's `ExecStartPre` refuses to start the service
+  ([DEPENDENCIES.md](DEPENDENCIES.md) → *The start check*).
 - **Never drive an apply or a reboot from a Shelley session** — use SSH or VS
   Code. `shelley.service` is `KillMode=process`: `reboot-chain.sh` would end
   the session running it (#399).

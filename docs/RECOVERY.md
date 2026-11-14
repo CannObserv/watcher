@@ -225,7 +225,8 @@ APP_PW="$(pw_of watcher_app "$DATABASE_URL")"
   exit 1
 }
 
-# 1. Fresh cluster only: the owner role (an existing cluster has it). Environment
+# 1. Fresh cluster only: the owner role (an existing cluster has it, and there
+#    this step fails "already exists", changing nothing). Environment
 #    and \getenv, never argv: `sudo -u postgres VAR=…` shows the value in `ps`.
 #    An empty password would leave the role with none at all (PostgreSQL 10+),
 #    which no scram-sha-256 rule admits; the guard refuses it even pasted alone.

@@ -208,7 +208,8 @@ the ones `/etc/watcher/.env` **already holds**: `setup-db-roles.sql` sets
 ```bash
 # One subshell, pasted whole (#439): the STOP check's `exit` ends the block, not
 # your shell, and nothing after it runs. The passwords end with it too, so to
-# re-run one step later, paste the lines down to the check in front of it.
+# re-run one step later, paste the `(`, the lines down to the check, that step
+# and a `)` — never the check bare, whose `exit` would close your shell.
 (
 # The passwords /etc/watcher/.env already carries — never new ones, and read
 # from it rather than typed, so neither lands in shell history. Parsed by the

@@ -4,12 +4,15 @@
 this repo's owner knows: the window, the backup that stands in for a dump, the
 command that says whether a job is running. **A malformed line makes the host
 report-only** until it is fixed, which reads as "nothing to do" at the next
-monthly run rather than as an error, so the skill's own reader is run here.
+weekly run rather than as an error, so the skill's own reader is run here.
 
 The reader ships in the submodule, which CI's checkout does not initialise: off
 the host that is a skip, on it a failure. The rest are pure parses of the
 tracked files, run everywhere, plus the installed apt pins on the host:
 
+- **The run is weekly** (decided 2026-11-13, #438), declared by the knob's own
+  ``cadence`` line rather than left to the skill's default, which happens to
+  agree today.
 - **The window is Mon 01:00-03:00 UTC**, the owner's Sun 17:00-19:00 Pacific
   once DST ends (decided 2026-10-23, epic #394), and clear of the backup's
   timer and the disk GC's (#385), each under a quiet line.
@@ -153,6 +156,9 @@ def test_the_knob_reads_clean() -> None:
     assert knob["report_only"] is False, knob["report_only_reasons"]
     assert knob["class"]["value"] == "production"
     assert knob["posture"]["value"] == "scheduled"
+    # From the knob's own line, not the skill's default (#438).
+    assert knob["cadence"]["value"] == "weekly"
+    assert knob["cadence"]["line"] is not None, "cadence is the skill's default, not declared"
     assert [(w["weekday"], w["start"], w["end"]) for w in knob["window"]] == [
         ("Mon", "01:00", "03:00")
     ]
@@ -168,6 +174,11 @@ def test_no_exception_reason_is_cut_short_by_a_comment() -> None:
             assert _strip_comment(raw) == " ".join(raw.split()), (
                 f"' #' opens a comment, cutting this reason short: {raw}"
             )
+
+
+def test_the_run_is_weekly() -> None:
+    """Declared, not defaulted (#438): the reader's check above skips in CI."""
+    assert _named("cadence") == [["weekly"]]
 
 
 def test_the_window_is_the_owners_slot_in_utc() -> None:

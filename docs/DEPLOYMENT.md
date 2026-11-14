@@ -67,8 +67,8 @@ sudo tailscale set --auto-update=false
 
 ### OS patching (#382)
 
-Patched by the vendored `patching-hosts` skill, `posture scheduled`: a monthly
-owner-approved run, the apt timers masked. **What only this repo knows is in
+Patched by the vendored `patching-hosts` skill, `posture scheduled`: a weekly
+owner-approved run (#438), the apt timers masked. **What only this repo knows is in
 `.skills/patching-hosts`**: the window (Mon 01:00–03:00 UTC, the owner's Sun
 17:00–19:00 Pacific in winter), the backup that stands in for a dump, the
 `inflight` and `health` commands, the Tailscale hold. `tests/deploy/test_patching_knob.py`

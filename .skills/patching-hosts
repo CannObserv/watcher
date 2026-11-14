@@ -7,6 +7,11 @@ class production
 posture scheduled
 
 # --- when -----------------------------------------------------------------
+# Weekly (decided 2026-11-13, the owner, #438; monthly before). The skill's
+# default is weekly too: stated here so the decision doesn't rest on it. Each
+# run is still owner-approved, step by step.
+cadence weekly
+
 # The owner's window, Sun 17:00-19:00 Pacific (decided 2026-10-23, epic #394;
 # address-validator's slot). A knob time is UTC and the weekday is the UTC day
 # the range starts, so it is Monday here: Sun 17:00 PST is Mon 01:00Z. Fixed in

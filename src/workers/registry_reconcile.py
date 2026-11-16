@@ -71,6 +71,7 @@ from src.core.models.watched_item import WatchedItem
 from src.core.scheduling.cadence import parse_interval
 from src.core.ulids import parse_canonical_ulid
 from src.core.validators import canonical_specs
+from src.workers.fetch_facts import log_poll_recovery
 from src.workers.watch_status import defer_status_republish
 
 logger = get_logger(__name__)
@@ -365,6 +366,15 @@ async def run_registry_consumer(
     announcements a no-op, so boot and steady state run the same code. A stream
     that has been trimmed replays fewer messages, not wrong ones — retention is a
     consumer contract carried by the producer's ``maxlen``.
+
+    **The end of a failure run is logged** (#436), as in ``run_fact_consumer``:
+    every pass that backs off — a read failure, a reconcile failure, the
+    give-up pass that drops — adds to ``failed_passes``, and the first pass
+    that completes logs ``info.registry poll cycle recovered``
+    (``log_poll_recovery``). Completed includes an idle read, the replay's
+    first empty one and a frame ``seek``-ed past. It is loop-level, separate
+    from ``attempts``, which counts against one held announcement (CR-11). A
+    restart resets it.
     """
     reader = AsyncBusTailReader(client, topic=streams.INFO_REGISTRY)
     replayed = False
@@ -375,6 +385,9 @@ async def run_registry_consumer(
     # if READ_COUNT is ever raised (CR-13); at count=1 it holds at most one.
     pending: deque[RegistryAnnouncementState] = deque()
     attempts = 0
+    # Passes that backed off since the last one that completed (#436). Not
+    # `attempts`: that one is per held announcement and resets on its apply.
+    failed_passes = 0
 
     while not stop.is_set():
         try:
@@ -386,10 +399,9 @@ async def run_registry_consumer(
                     if not replayed:
                         replayed = True
                         logger.info("info.registry replay complete — tailing")
-                        continue
-                    # A client that ignores `block` would busy-spin without this.
-                    await asyncio.sleep(IDLE_SLEEP_SECONDS)
-                    continue
+                    else:
+                        # A client that ignores `block` would busy-spin without this.
+                        await asyncio.sleep(IDLE_SLEEP_SECONDS)
 
                 for message in messages:
                     if not isinstance(message.payload, RegistryAnnouncementState):
@@ -399,18 +411,19 @@ async def run_registry_consumer(
                         )
                         continue
                     pending.append(message.payload)
-                if not pending:
-                    continue
 
-            announcement = pending[0]
-            async with session_factory() as session:
-                outcome = await reconcile_announcement(session, announcement)
-            logger.info(
-                "info.registry announcement processed",
-                extra={"info_item_id": announcement.info_item_id, "outcome": outcome},
-            )
-            pending.popleft()
-            attempts = 0
+            # No `continue`s above: an idle or all-ignored pass completes too,
+            # and must reach the reset below.
+            if pending:
+                announcement = pending[0]
+                async with session_factory() as session:
+                    outcome = await reconcile_announcement(session, announcement)
+                logger.info(
+                    "info.registry announcement processed",
+                    extra={"info_item_id": announcement.info_item_id, "outcome": outcome},
+                )
+                pending.popleft()
+                attempts = 0
         except BusMessageAnomaly as exc:
             # No group, so no ack to skip past a poison frame with: the cursor
             # must be advanced explicitly or the next read raises on the same
@@ -423,10 +436,10 @@ async def run_registry_consumer(
             )
             if message_id and message_id != "?":
                 reader.seek(message_id)
-            continue
         except asyncio.CancelledError:
             raise
         except Exception:
+            failed_passes += 1
             # One backoff for the *loop*, not per message. A reconcile failure is
             # almost always global (the database is down), and retrying each of N
             # announcements through its own escalating sleep turns a five-minute
@@ -460,6 +473,8 @@ async def run_registry_consumer(
             except TimeoutError:
                 pass
             continue
+        # The pass completed: the one handler that backs off `continue`d above.
+        failed_passes = log_poll_recovery(logger, streams.INFO_REGISTRY, failed_passes)
 
 
 def start_registry_consumer(client: Redis, session_factory, *, stop: asyncio.Event) -> asyncio.Task:

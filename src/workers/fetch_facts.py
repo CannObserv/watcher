@@ -39,6 +39,7 @@ second run a no-op — at-least-once ends at the row, exactly-once at the apply.
 """
 
 import asyncio
+import logging
 from typing import Protocol
 
 import psycopg
@@ -340,6 +341,27 @@ async def _back_off(stop: asyncio.Event, seconds: float) -> None:
         pass
 
 
+def log_poll_recovery(log: logging.Logger, topic: str, failed_passes: int) -> int:
+    """Log the end of a failure run, if there was one, and return the reset count (#436).
+
+    One INFO ``<topic> poll cycle recovered`` with ``after_failures`` — the
+    cohort's grep phrase (CannObserv/replicator#188) — so a broker incident's
+    journal shows when each loop came back, not only when it stopped failing.
+    It means "this loop is passing again", not "the broker is back": the
+    WARNINGs before it carry each failure's cause. ``log`` is the caller's
+    logger, so the record names the loop's own module. Shared by both consume
+    loops (``run_fact_consumer``, ``run_registry_consumer``) for the reason
+    :func:`_back_off` gives: a second copy drifts.
+    """
+    if failed_passes:
+        log.info(
+            "%s poll cycle recovered",
+            topic,
+            extra={"topic": topic, "after_failures": failed_passes},
+        )
+    return 0
+
+
 def is_connection_error(exc: BaseException) -> bool:
     """Whether ``exc`` says a dependency is unreachable rather than that this
     message cannot be processed (#389).
@@ -508,6 +530,16 @@ async def run_fact_consumer(
     registry loop's equivalent branch needs no such guard — it advances a local
     cursor (``seek``) rather than issuing a command — so do not add one there
     for symmetry.
+
+    **The end of a failure run is logged** (#436): every pass that backs off —
+    a broker error, ``process`` raising, an ``ensure_group`` refusal, the
+    failed undecodable-frame ack — adds to ``failed_passes``, and the first
+    pass that completes without backing off logs ``<topic> poll cycle
+    recovered`` (:func:`log_poll_recovery`) and resets it. A completed pass
+    includes an idle one and an undecodable frame acked past or left for the
+    DLQ (the broker answered). A pass that reads and then fails in ``process``
+    is a failure, which is why the one reset sits after the ``try`` and every
+    backing-off handler ``continue``s past it. A restart resets the count.
     """
     loop = asyncio.get_running_loop()
     next_claim = loop.time()  # first pass drains any crash leftovers immediately
@@ -516,6 +548,8 @@ async def run_fact_consumer(
     # message_id → (attempts that counted, the last one's exception class). An
     # entry leaves on ack or retirement, so it holds only messages now failing.
     failures: dict[str, tuple[int, str]] = {}
+    # Passes that backed off since the last one that completed (#436).
+    failed_passes = 0
 
     while not stop.is_set():
         try:
@@ -534,8 +568,8 @@ async def run_fact_consumer(
 
             if not messages:
                 # A client that ignores `block` would busy-spin without this.
+                # No `continue`: an idle pass completes, and ends a failure run.
                 await asyncio.sleep(IDLE_SLEEP_SECONDS)
-                continue
 
             for message in messages:
                 attempts, error = failures.get(message.message_id, (0, ""))
@@ -575,43 +609,48 @@ async def run_fact_consumer(
                     extra={"message_id": message_id, "error": str(exc)},
                 )
                 next_claim = loop.time()
-                continue
-            # Undecodable frame: ack past it (see module docstring).
-            logger.warning(
-                "undecodable frame on %s — skipping",
-                topic,
-                extra={"message_id": message_id, "error": str(exc)},
-            )
-            if message_id and message_id != "?":
-                try:
-                    await consumer.ack(message_id)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    # This ack is the one fallible step that sits *outside* the
-                    # guard below — it runs in a sibling `except`, so that
-                    # handler cannot catch it (#289). Unguarded, an undecodable
-                    # frame plus any broker blip on the ack killed the task and
-                    # the fact inbox with it. Backing off here restores the
-                    # docstring's invariant; the frame stays unacked, is
-                    # re-read, and re-raises this branch to try again.
-                    logger.warning(
-                        "could not ack an undecodable frame — backing off",
-                        extra={"message_id": message_id, "topic": topic},
-                        exc_info=True,
-                    )
-                    next_claim = loop.time()
-                    await _back_off(stop, error_backoff_seconds)
-            continue
+            else:
+                # Undecodable frame: ack past it (see module docstring).
+                logger.warning(
+                    "undecodable frame on %s — skipping",
+                    topic,
+                    extra={"message_id": message_id, "error": str(exc)},
+                )
+                if message_id and message_id != "?":
+                    try:
+                        await consumer.ack(message_id)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        # This ack is the one fallible step that sits *outside*
+                        # the guard below — it runs in a sibling `except`, so
+                        # that handler cannot catch it (#289). Unguarded, an
+                        # undecodable frame plus any broker blip on the ack
+                        # killed the task and the fact inbox with it. Backing
+                        # off here restores the docstring's invariant; the frame
+                        # stays unacked, is re-read, and re-raises this branch
+                        # to try again. It is a failed pass, so it counts too.
+                        logger.warning(
+                            "could not ack an undecodable frame — backing off",
+                            extra={"message_id": message_id, "topic": topic},
+                            exc_info=True,
+                        )
+                        failed_passes += 1
+                        next_claim = loop.time()
+                        await _back_off(stop, error_backoff_seconds)
+                        continue
         except asyncio.CancelledError:
             raise
         except Exception:
+            failed_passes += 1
             logger.warning("%s consumer error — backing off", topic, exc_info=True)
             # An unacked in-process message should come back promptly, not
             # after the full claim interval.
             next_claim = loop.time()
             await _back_off(stop, error_backoff_seconds)
             continue
+        # The pass completed: every path that backed off `continue`d above.
+        failed_passes = log_poll_recovery(logger, topic, failed_passes)
 
 
 async def run_blobs_consumer(

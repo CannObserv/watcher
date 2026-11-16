@@ -94,8 +94,10 @@ sudo journalctl -u watcher --since today -o cat | grep -E 'info.watch-check|watc
 
 A dead letter logs `info.watch-check frame dead-lettered` at ERROR, with
 `message_id`, `command_id` (null for an undecodable frame), `dlq_id` and `reason`. The attempts before it each log
-`info.watch-check consumer error — backing off` with the traceback. broker
-probes the DLQ's length and age.
+`info.watch-check consumer error — backing off` with the traceback; the first
+pass after such a run that completes logs `info.watch-check poll cycle recovered`
+at INFO with `after_failures` (#436; [BUS.md](BUS.md)). broker probes the DLQ's
+length and age.
 
 The rejections are queued in `pending_watch_events`; see
 [WATCH-EVENTS.md](WATCH-EVENTS.md) → *Operating it*.

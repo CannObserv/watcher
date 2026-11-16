@@ -29,10 +29,17 @@ hypothetical and ``ensure_group`` is the one that really fires. It is a boot-tim
 call, which is what makes the re-arm load-bearing: a Watcher restarted while the
 broker is full must retry the group until the cap clears, not die before its
 first read.
+
+#436 adds the other end of a failure run: each loop logs one ``<topic> poll
+cycle recovered`` when its first pass after one completes — Replicator's cases
+(CannObserv/replicator#188) for both loops, plus the handler-failure and
+``ensure_group`` ones, at the bottom of this module.
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -472,3 +479,290 @@ class TestRegistryConsumerSurvivesABrokerFailure:
 
 def _never_called_session_factory():
     raise AssertionError("no message was read, so no session should have been opened")
+
+
+# --- #436: a failure run ends with one recovery record ------------------------
+#
+# Replicator's cases (CannObserv/replicator#188, PR #193), for both loops. Each
+# step of a script is one read: "fail" raises a broker error, "ok" returns
+# nothing (an idle pass), "skip" raises an undecodable frame, "msg" returns one
+# message. The loop stops after the script's last read, and that pass still
+# finishes, so a recovery on the last step is still logged.
+
+_RECOVERED = "poll cycle recovered"
+
+
+@dataclass
+class _ScriptedReads:
+    """One read per script step; ``ensure_group``/``ack`` fail a set number of times."""
+
+    script: list[str]
+    stop_event: asyncio.Event
+    error: BaseException = field(default_factory=lambda: RedisConnectionError("broker down"))
+    group_failures: int = 0
+    ack_failures: int = 0
+    reads: int = 0
+    groups: int = 0
+    acks: int = 0
+    seeks: list[str] = field(default_factory=list)
+
+    async def ensure_group(self, *, start_id: str) -> None:
+        await asyncio.sleep(0)
+        self.groups += 1
+        if self.groups <= self.group_failures:
+            raise self.error
+
+    async def claim_stale(self, *, min_idle_ms: int, count: int) -> list[Any]:
+        await asyncio.sleep(0)
+        return []
+
+    async def claim_stale_page(self, *, min_idle_ms: int, count: int) -> Any:
+        await asyncio.sleep(0)
+        return SimpleNamespace(poison=[], messages=[])
+
+    async def read(self, *, count: int, block_ms: int | None) -> list[Any]:
+        await asyncio.sleep(0)
+        step = self.script[self.reads] if self.reads < len(self.script) else "ok"
+        self.reads += 1
+        if self.reads >= len(self.script):
+            self.stop_event.set()
+        if step == "fail":
+            raise self.error
+        if step == "skip":
+            raise BusMessageMissingFieldError(
+                "event_type", topic="content.blobs", message_id=f"170000000000-{self.reads}"
+            )
+        if step == "msg":
+            return [
+                SimpleNamespace(
+                    message_id=f"170000000000-{self.reads}",
+                    payload=_Announcement(info_item_id=f"item-{self.reads}"),
+                )
+            ]
+        return []
+
+    async def ack(self, message_id: str) -> None:
+        await asyncio.sleep(0)
+        self.acks += 1
+        if self.acks <= self.ack_failures:
+            raise self.error
+
+    def seek(self, message_id: str) -> None:
+        self.seeks.append(message_id)
+
+
+@dataclass
+class _Announcement:
+    """Stands in for ``RegistryAnnouncementState``; the loop reads only the id."""
+
+    info_item_id: str
+
+
+@asynccontextmanager
+async def _session():
+    yield MagicMock()
+
+
+def _recoveries(caplog, topic: str) -> list[int]:
+    """The ``after_failures`` of each recovery record, in order — asserting its shape."""
+    found = []
+    for r in caplog.records:
+        if _RECOVERED in r.getMessage():
+            assert r.getMessage() == f"{topic} {_RECOVERED}"
+            assert r.levelname == "INFO"
+            assert r.topic == topic
+            found.append(r.after_failures)
+    return found
+
+
+async def _run_fact_loop(bus, stop, *, process=None, dead_letter_poison=False):
+    async def _ok(session, message):
+        return "processed"
+
+    await asyncio.wait_for(
+        ff_mod.run_fact_consumer(
+            bus,
+            _session,
+            stop=stop,
+            topic="content.blobs",
+            process=process or _ok,
+            block_ms=1,
+            error_backoff_seconds=_FAST_BACKOFF,
+            dead_letter_poison=dead_letter_poison,
+        ),
+        timeout=5,
+    )
+
+
+class TestFactConsumerLogsRecovery:
+    """``run_fact_consumer`` is the one loop behind all three grouped inboxes, so
+    these cover ``content.blobs``, ``content.derived`` and ``info.watch-check``."""
+
+    @pytest.mark.parametrize("error", BROKER_FAILURES)
+    async def test_a_failure_run_then_a_good_pass_logs_one_recovery(self, error, caplog):
+        stop = asyncio.Event()
+        bus = _ScriptedReads(["fail", "fail", "ok"], stop, error=error)
+        with caplog.at_level("INFO", logger="src.workers.fetch_facts"):
+            await _run_fact_loop(bus, stop)
+        assert _recoveries(caplog, "content.blobs") == [2]
+
+    async def test_two_failure_runs_log_two_recoveries(self, caplog):
+        """A missed reset reads ``[1, 2]``."""
+        stop = asyncio.Event()
+        bus = _ScriptedReads(["fail", "ok", "fail", "ok"], stop)
+        with caplog.at_level("INFO", logger="src.workers.fetch_facts"):
+            await _run_fact_loop(bus, stop)
+        assert _recoveries(caplog, "content.blobs") == [1, 1]
+
+    async def test_an_acked_past_frame_ends_the_run(self, caplog):
+        """The broker answered (Replicator's CR #9)."""
+        stop = asyncio.Event()
+        bus = _ScriptedReads(["fail", "skip", "fail", "ok"], stop)
+        with caplog.at_level("INFO", logger="src.workers.fetch_facts"):
+            await _run_fact_loop(bus, stop)
+        assert _recoveries(caplog, "content.blobs") == [1, 1]
+
+    async def test_a_frame_queued_for_the_dlq_ends_the_run(self, caplog):
+        """The ``dead_letter_poison`` branch does not back off; it is not a failure."""
+        stop = asyncio.Event()
+        bus = _ScriptedReads(["fail", "skip", "fail", "ok"], stop)
+        with caplog.at_level("INFO", logger="src.workers.fetch_facts"):
+            await _run_fact_loop(bus, stop, dead_letter_poison=True)
+        assert _recoveries(caplog, "content.blobs") == [1, 1]
+
+    async def test_no_failure_logs_no_recovery(self, caplog):
+        stop = asyncio.Event()
+        bus = _ScriptedReads(["ok", "msg", "ok"], stop)
+        with caplog.at_level("INFO", logger="src.workers.fetch_facts"):
+            await _run_fact_loop(bus, stop)
+        assert _recoveries(caplog, "content.blobs") == []
+
+    async def test_a_failed_undecodable_frame_ack_counts(self, caplog):
+        """That ack backs off in a sibling ``except`` (#289), which the generic
+        handler cannot see — it needs its own increment."""
+        stop = asyncio.Event()
+        bus = _ScriptedReads(["skip", "fail", "ok"], stop, ack_failures=1)
+        with caplog.at_level("INFO", logger="src.workers.fetch_facts"):
+            await _run_fact_loop(bus, stop)
+        assert _recoveries(caplog, "content.blobs") == [2]
+
+    async def test_a_handler_failure_counts_and_does_not_end_the_run(self, caplog):
+        """Decision 1: every pass that backs off counts, whatever its cause.
+
+        The read succeeding is not the end of the run: a pass whose ``process``
+        raises is a failure. A reset placed after the read reads ``[1, 1]``.
+        """
+        stop = asyncio.Event()
+        bus = _ScriptedReads(["msg", "msg", "ok"], stop)
+        calls = 0
+
+        async def _fails_twice(session, message):
+            nonlocal calls
+            calls += 1
+            if calls <= 2:
+                raise ValueError("handler failed")
+            return "processed"
+
+        with caplog.at_level("INFO", logger="src.workers.fetch_facts"):
+            await _run_fact_loop(bus, stop, process=_fails_twice)
+        assert _recoveries(caplog, "content.blobs") == [2]
+
+    @pytest.mark.parametrize("error", BROKER_FAILURES)
+    async def test_an_ensure_group_refusal_counts(self, error, caplog):
+        stop = asyncio.Event()
+        bus = _ScriptedReads(["ok"], stop, error=error, group_failures=2)
+        with caplog.at_level("INFO", logger="src.workers.fetch_facts"):
+            await _run_fact_loop(bus, stop)
+        assert bus.groups == 3
+        assert _recoveries(caplog, "content.blobs") == [2]
+
+
+async def _run_registry_loop(stop):
+    await asyncio.wait_for(
+        rr_mod.run_registry_consumer(
+            MagicMock(),
+            _session,
+            stop=stop,
+            block_ms=1,
+            error_backoff_seconds=_FAST_BACKOFF,
+        ),
+        timeout=5,
+    )
+
+
+class TestRegistryConsumerLogsRecovery:
+    """The loop-level counter sits beside ``attempts`` and leaves it alone."""
+
+    @pytest.fixture(autouse=True)
+    def _fakes(self, monkeypatch):
+        monkeypatch.setattr(rr_mod, "RegistryAnnouncementState", _Announcement)
+        self.reconcile_calls = 0
+        self.reconcile_failures = 0
+
+        async def _reconcile(session, announcement):
+            self.reconcile_calls += 1
+            if self.reconcile_calls <= self.reconcile_failures:
+                raise ValueError("reconcile failed")
+            return "applied"
+
+        monkeypatch.setattr(rr_mod, "reconcile_announcement", _reconcile)
+
+    def _reader(self, monkeypatch, script, stop, **kw):
+        reader = _ScriptedReads(script, stop, **kw)
+        monkeypatch.setattr(rr_mod, "AsyncBusTailReader", lambda *a, **k: reader)
+        return reader
+
+    @pytest.mark.parametrize("error", BROKER_FAILURES)
+    async def test_a_failure_run_then_a_good_pass_logs_one_recovery(
+        self, error, monkeypatch, caplog
+    ):
+        stop = asyncio.Event()
+        self._reader(monkeypatch, ["fail", "fail", "ok"], stop, error=error)
+        with caplog.at_level("INFO", logger="src.workers.registry_reconcile"):
+            await _run_registry_loop(stop)
+        assert _recoveries(caplog, "info.registry") == [2]
+
+    async def test_two_failure_runs_log_two_recoveries(self, monkeypatch, caplog):
+        stop = asyncio.Event()
+        self._reader(monkeypatch, ["fail", "ok", "fail", "ok"], stop)
+        with caplog.at_level("INFO", logger="src.workers.registry_reconcile"):
+            await _run_registry_loop(stop)
+        assert _recoveries(caplog, "info.registry") == [1, 1]
+
+    async def test_a_seeked_past_frame_ends_the_run(self, monkeypatch, caplog):
+        stop = asyncio.Event()
+        reader = self._reader(monkeypatch, ["fail", "skip", "fail", "ok"], stop)
+        with caplog.at_level("INFO", logger="src.workers.registry_reconcile"):
+            await _run_registry_loop(stop)
+        assert reader.seeks == ["170000000000-2"]
+        assert _recoveries(caplog, "info.registry") == [1, 1]
+
+    async def test_no_failure_logs_no_recovery(self, monkeypatch, caplog):
+        stop = asyncio.Event()
+        self._reader(monkeypatch, ["ok", "msg", "ok"], stop)
+        with caplog.at_level("INFO", logger="src.workers.registry_reconcile"):
+            await _run_registry_loop(stop)
+        assert _recoveries(caplog, "info.registry") == []
+
+    async def test_a_reconcile_failure_counts_and_does_not_end_the_run(self, monkeypatch, caplog):
+        """A reconcile that raises backs off on a held announcement; the retry
+        that applies it ends the run. ``attempts`` keeps its own job."""
+        self.reconcile_failures = 2
+        stop = asyncio.Event()
+        self._reader(monkeypatch, ["msg", "ok"], stop)
+        with caplog.at_level("INFO", logger="src.workers.registry_reconcile"):
+            await _run_registry_loop(stop)
+        assert self.reconcile_calls == 3
+        assert not any("dropping" in r.getMessage() for r in caplog.records)
+        assert _recoveries(caplog, "info.registry") == [2]
+
+    async def test_a_dropped_announcement_counts_its_backoff(self, monkeypatch, caplog):
+        """The give-up pass drops and backs off, so it is a failure too; the run
+        ends on the next read."""
+        self.reconcile_failures = rr_mod.MAX_APPLY_ATTEMPTS
+        stop = asyncio.Event()
+        self._reader(monkeypatch, ["msg", "ok"], stop)
+        with caplog.at_level("INFO", logger="src.workers.registry_reconcile"):
+            await _run_registry_loop(stop)
+        assert any("dropping" in r.getMessage() for r in caplog.records)
+        assert _recoveries(caplog, "info.registry") == [rr_mod.MAX_APPLY_ATTEMPTS]

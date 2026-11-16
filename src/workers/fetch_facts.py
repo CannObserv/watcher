@@ -39,7 +39,6 @@ second run a no-op — at-least-once ends at the row, exactly-once at the apply.
 """
 
 import asyncio
-import logging
 from typing import Protocol
 
 import psycopg
@@ -62,6 +61,7 @@ from src.core.models.fetch_command import (
     FetchCommandStatus,
 )
 from src.core.models.watched_item import WatchedItem
+from src.workers.consume_loop import back_off, log_poll_recovery
 from src.workers.fetch_commands import (
     apply_fetch_blob,
     apply_fetch_failure,
@@ -321,47 +321,6 @@ async def process_fact_message(
     return "ignored_unknown_type"
 
 
-async def _back_off(stop: asyncio.Event, seconds: float) -> None:
-    """Park for ``seconds``, cut short by shutdown.
-
-    Extracted so the two error handlers in :func:`run_blobs_consumer` cannot
-    drift: one of them was added by #289, and a copy-pasted second wait is how a
-    later change to the backoff reaches only one of the paths that needs it.
-
-    **It covers two of the three copies in this repo.** ``run_registry_consumer``
-    still has the same wait inline (``src/workers/registry_reconcile.py``), and
-    the argument above applies to it verbatim — it is left alone only because
-    sharing this across the two worker modules is a wider change than #289.
-    Anyone touching the backoff should change that one too, or finish the
-    extraction.
-    """
-    try:
-        await asyncio.wait_for(stop.wait(), timeout=seconds)
-    except TimeoutError:
-        pass
-
-
-def log_poll_recovery(log: logging.Logger, topic: str, failed_passes: int) -> int:
-    """Log the end of a failure run, if there was one, and return the reset count (#436).
-
-    One INFO ``<topic> poll cycle recovered`` with ``after_failures`` — the
-    cohort's grep phrase (CannObserv/replicator#188) — so a broker incident's
-    journal shows when each loop came back, not only when it stopped failing.
-    It means "this loop is passing again", not "the broker is back": the
-    WARNINGs before it carry each failure's cause. ``log`` is the caller's
-    logger, so the record names the loop's own module. Shared by both consume
-    loops (``run_fact_consumer``, ``run_registry_consumer``) for the reason
-    :func:`_back_off` gives: a second copy drifts.
-    """
-    if failed_passes:
-        log.info(
-            "%s poll cycle recovered",
-            topic,
-            extra={"topic": topic, "after_failures": failed_passes},
-        )
-    return 0
-
-
 def is_connection_error(exc: BaseException) -> bool:
     """Whether ``exc`` says a dependency is unreachable rather than that this
     message cannot be processed (#389).
@@ -491,7 +450,7 @@ async def run_fact_consumer(
     ``content.derived`` (``src/workers/derived_facts.py``, #325) and the
     ``info.watch-check`` command inbox (``src/workers/watch_check.py``, #371) —
     so the error handling below exists once: a second copy is how a later fix
-    reaches only one of the paths that needs it (see ``_back_off``). Each
+    reaches only one of the paths that needs it (see ``consume_loop``). Each
     caller builds its own ``AsyncBusConsumer`` from a streams constant and a
     ``group_name`` binding, because ``tests/test_bus_stream_kinds.py`` reads
     exactly that call site; ``topic`` only labels the log lines.
@@ -637,7 +596,7 @@ async def run_fact_consumer(
                         )
                         failed_passes += 1
                         next_claim = loop.time()
-                        await _back_off(stop, error_backoff_seconds)
+                        await back_off(stop, error_backoff_seconds)
                         continue
         except asyncio.CancelledError:
             raise
@@ -647,7 +606,7 @@ async def run_fact_consumer(
             # An unacked in-process message should come back promptly, not
             # after the full claim interval.
             next_claim = loop.time()
-            await _back_off(stop, error_backoff_seconds)
+            await back_off(stop, error_backoff_seconds)
             continue
         # The pass completed: every path that backed off `continue`d above.
         failed_passes = log_poll_recovery(logger, topic, failed_passes)

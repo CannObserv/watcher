@@ -71,7 +71,7 @@ from src.core.models.watched_item import WatchedItem
 from src.core.scheduling.cadence import parse_interval
 from src.core.ulids import parse_canonical_ulid
 from src.core.validators import canonical_specs
-from src.workers.fetch_facts import log_poll_recovery
+from src.workers.consume_loop import back_off, log_poll_recovery
 from src.workers.watch_status import defer_status_republish
 
 logger = get_logger(__name__)
@@ -468,10 +468,7 @@ async def run_registry_consumer(
                     attempts = 0
             else:
                 logger.warning("info.registry read failed — backing off", exc_info=True)
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=error_backoff_seconds)
-            except TimeoutError:
-                pass
+            await back_off(stop, error_backoff_seconds)
             continue
         # The pass completed: the one handler that backs off `continue`d above.
         failed_passes = log_poll_recovery(logger, streams.INFO_REGISTRY, failed_passes)

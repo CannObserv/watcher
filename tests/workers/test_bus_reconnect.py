@@ -367,7 +367,7 @@ class TestBlobsConsumerSurvivesAFailedAnomalyAck:
     async def test_the_failed_ack_parks_the_loop_instead_of_spinning(self, monkeypatch):
         """ "Backs off" is the half the sibling test cannot see.
 
-        Without the ``_back_off`` call the loop still "keeps reading" — it just
+        Without the ``back_off`` call the loop still "keeps reading" — it just
         does it as fast as the event loop allows, hammering a broker that is
         already failing. Verified by mutation: dropping that one line leaves
         every other test in this class green.

@@ -11,9 +11,14 @@ and a quiet bot reads like "no updates available". Notifier's pattern
   the ``uv`` block.
 * **Every exact pin is ignored by name.** co-core's ``==`` pins move when
   Processor coordinates a contract change, not on a bot's schedule, so the
-  ``ignore:`` list *is* the ``==`` names in ``[project].dependencies``: a new
-  exact pin can't be bumped by accident. A name-only entry ignores every
-  version, and the updater then drops the package before any version lookup.
+  name-only ``ignore:`` entries *are* the ``==`` names in
+  ``[project].dependencies``: a new exact pin can't be bumped by accident. A
+  name-only entry ignores every version, and the updater then drops the
+  package before any version lookup.
+* **One narrowed entry, and only from an allow-list.** redis skips majors
+  (#441) until CannObserv/broker#85 settles the broker's Redis and a
+  co-core-aio release lifts its ``redis<8``; minors and patches keep flowing.
+  Any other narrowed entry fails, so a typo can't half-ignore a package.
 * **``increase-if-necessary``.** The default ``auto`` resolves to ``widen``,
   which uv can't do (dependabot-core#15290).
 * **Dev tools are one grouped PR; runtime packages are one PR each.**
@@ -49,6 +54,12 @@ WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 
 ECOSYSTEMS = ["github-actions", "uv"]
+
+# The `uv` ignores narrowed by `versions` or `update-types`, by canonical name,
+# matched exactly (#441). redis 8 can't resolve while co-core-aio's `bus` extra
+# caps redis<8, and the operator ties taking it to CannObserv/broker#85. Remove
+# the entry, with dependabot.yml's, once both have moved.
+NARROWED_IGNORES = {"redis": {"update-types": ["version-update:semver-major"]}}
 
 # AGENTS.md → Conventions → Commit Messages.
 COMMIT_TYPES = {"feat", "fix", "refactor", "docs", "test", "chore"}
@@ -227,22 +238,40 @@ def test_uv_dev_tools_are_one_grouped_pr(uv_block: dict) -> None:
 def test_uv_ignores_exactly_the_exact_pins(uv_block: dict) -> None:
     """co-core's ``==`` pins move when Processor coordinates a contract change
     (#366), so the bot must never propose one. Deriving the list from
-    ``pyproject.toml`` means a new exact pin is ignored or this fails."""
+    ``pyproject.toml`` means a new exact pin is ignored or this fails. The only
+    narrowed entries are ``NARROWED_IGNORES``, key for key (#441)."""
     pins = _exact_pins()
     assert pins, "found no `==` pin in [project].dependencies — the derivation broke"
     entries = uv_block.get("ignore", [])
     # As written, not canonicalized: whether Dependabot normalizes a
     # `dependency-name` before matching is unverified, so spell it canonically.
-    names = [e.get("dependency-name", "") for e in entries]
-    assert sorted(names) == sorted(pins), (
-        f"ignore: {sorted(names)}, but the exact pins are {sorted(pins)}; each "
-        "`==` runtime pin needs a name-only ignore entry, spelled canonically "
-        "(lowercase, hyphens), and nothing else does"
+    name_only = [e.get("dependency-name", "") for e in entries if set(e) == {"dependency-name"}]
+    assert sorted(name_only) == sorted(pins), (
+        f"name-only ignores: {sorted(name_only)}, but the exact pins are {sorted(pins)}; "
+        "each `==` runtime pin needs a name-only ignore entry, spelled canonically "
+        "(lowercase, hyphens), and nothing else does. A narrowed entry lets the bot "
+        "propose the versions it doesn't name"
     )
     narrowed = [e for e in entries if set(e) != {"dependency-name"}]
-    assert not narrowed, (
-        f"{narrowed}: an ignore narrowed by `versions` or `update-types` lets the "
-        "bot propose the rest; a name-only entry ignores every version"
+    by_name = {
+        e.get("dependency-name", ""): {k: v for k, v in e.items() if k != "dependency-name"}
+        for e in narrowed
+    }
+    assert len(by_name) == len(narrowed) and by_name == NARROWED_IGNORES, (
+        f"narrowed ignores: {narrowed}; expected exactly {NARROWED_IGNORES}, one "
+        "entry each. A narrowed entry is an exception with a named exit (#441): "
+        "add it to NARROWED_IGNORES with that exit, or make it name-only"
+    )
+
+
+def test_narrowed_ignores_name_ranged_runtime_dependencies() -> None:
+    """A narrowed entry for a package we no longer depend on, or one we pin
+    ``==``, is stale: the pin needs the name-only form instead."""
+    runtime = {canonicalize_name(r.name) for r in _runtime_requirements()}
+    stale = sorted(set(NARROWED_IGNORES) - (runtime - _exact_pins()))
+    assert not stale, (
+        f"{stale}: in NARROWED_IGNORES but not a ranged runtime dependency of "
+        "pyproject.toml; drop the entry from it and from dependabot.yml"
     )
 
 

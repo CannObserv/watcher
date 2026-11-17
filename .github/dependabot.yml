@@ -45,8 +45,18 @@ updates:
     # updater drops the package before any lookup. co-core's exact pins move
     # when Processor coordinates a contract change (#366), by hand (#408, #414).
     # Resolution still needs the index: every other bump re-locks co-core from it.
+    #
+    # redis skips majors only, so 7.x minors and patches still flow (#441). No 8
+    # resolves while co-core-aio's `bus` extra caps redis<8, and the operator
+    # ties taking 8 to the broker's next Redis. Exit: remove the entry once
+    # CannObserv/broker#85 settles that **and** a co-core-aio release lifts <8,
+    # then re-measure docs/BUS-CONNECTION-POLICY.md (redis-py 7.4.1). GitHub
+    # documents `ignore` as covering security PRs, but not `update-types` under
+    # it; moot here, since a fix only in 8.x can't resolve either.
     ignore:
       - dependency-name: "co-core"
       - dependency-name: "co-core-aio"
+      - dependency-name: "redis"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "chore"

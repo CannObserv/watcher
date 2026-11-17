@@ -140,9 +140,12 @@ sudo systemctl restart watcher                 # then /health reports the SHA, a
 - **A cap-crossing PR** rewrites the `pyproject.toml` specifier. It's a major:
   read its changelog against the code, as #294's caps intend.
 - **redis is held by co-core-aio, not by our cap:** 0.48.2's `bus` extra
-  still requires `redis<8,>=5` (measured, #408), so no redis 8 bump resolves
-  until a later co-core bump lifts it, and the updater reports none or a
-  resolution failure for it. Taking 8 means re-measuring docs/BUS-CONNECTION-POLICY.md.
+  still requires `redis<8,>=5` (measured, #408), so no redis 8 bump resolves.
+  The operator tied taking 8 to CannObserv/broker#85, the broker's next Redis
+  (2026-11-17), so the `uv` block ignores redis majors only (#441). 7.x minors
+  and patches still flow. Remove the entry, here and in the test's
+  `NARROWED_IGNORES`, once broker#85 settles **and** a co-core-aio release lifts
+  `<8`. Then re-measure docs/BUS-CONNECTION-POLICY.md (redis-py 7.4.1).
 - **A security PR** (its body lists the advisory) is a lock-only fix: add its
   `_FLOORS` row (*Advisory floors*) as a commit on top of the fast-forward,
   before the push.

@@ -25,7 +25,17 @@ The runtime dependencies that resolve from somewhere other than PyPI: co-core an
 2. `bash scripts/co-pypi.sh uv lock`. The pin is exact, so `--upgrade-package` alone moves nothing.
 3. `bash scripts/co-pypi.sh uv sync`.
 
-On the host, after the merge, run `bash scripts/co-pypi.sh uv sync --locked`, then restart. Currently pinned: **v0.37.0** (#370, #386). What each pin carried and what its wheel diff found: [DEPENDENCIES-HISTORY.md](DEPENDENCIES-HISTORY.md).
+On the host, after the merge, run `bash scripts/co-pypi.sh uv sync --locked`, then restart. Currently pinned: **v0.48.2** (#408), taken for cannobserv#494: `SourceRevisionObservedEmit.blob_fingerprint` is required, so the digest joined `WIRE_REQUIRED_PROVENANCE_FIELDS` and the drain hands it to the Emit as stored ([CONTENT-REVISIONS.md](CONTENT-REVISIONS.md)). It also carries the `render` field #414 passes through, and matches Replicator's floor. Earlier pins, what each carried and what its wheel diff found: [DEPENDENCIES-HISTORY.md](DEPENDENCIES-HISTORY.md).
+
+**The 0.37.0 → 0.48.2 diff** (eleven MINORs), wheel-to-wheel on every module watcher imports; the synced venv is byte-identical to the tree diffed:
+- `extract/media_type.py` gains only `.json` → `application/json` (cannobserv#354). A `.json` path behind a missing or ambiguous header now resolves to the essence Processor's `JsonExtractor` takes, which refuses a `css` selector, `xpath` and `ignore_selectors`. Measured before the deploy: 0 active items resolve differently.
+- `changes.py`: `SourceRevisionObservedEmit.blob_fingerprint` is required. `render` (`str | None`) joins `ContentFetchCommand` and `RegistryAnnouncementState`, narrowed to `RenderMode` on their Emits, and `ContentFetchCommandEmit` refuses any header but `user-agent` beside `render="browser"`. Watcher sets no `render`, so its `content.fetch` frames carry `"render": null`. The rest (the capture trio, `FetchPolicyEmit.generation` required, `ContentReplicateCommandEmit`'s alias rule) is on payloads watcher neither builds nor consumes.
+- `envelope.py` and `streams.py` add the capture stream, its kinds and keys. `info_item_primary_changed`'s key gains `:occurred_at` (#578); watcher doesn't touch that event.
+- `extract/spec_fingerprint.py` serializes through the new `_canonical_json`, with the same `json.dumps` arguments, so `spec1:` bytes don't move. `extract/__init__.py` re-exports `JsonExtractConfig` and still pulls no parser; `base.py`, `config.py`, `errors.py` and `extraction_defaults.py` move for the JSON extractor only. `util/blobstore.py` adds `Stored` and the `*_reporting` store twins, with `validate_fingerprint` unchanged. `util/aliases.py` adds the alias checks `changes.py` imports.
+- Byte-identical: `effects/bus.py`, `bus/__init__.py`, `bus/dead_letter.py`, `bus/exceptions.py`, `extract/canonical.py`, `extract/simhash.py`, `util/hashing.py`, `util/media_type.py` and all of `co_core_aio/bus.py`. Both `__init__` modules move only in `__version__` and a docstring.
+- Everything else that moved is a surface watcher does not import: co/v1, WordPress, disclosure and Gdrive, `workflows/`, the concrete parsers, and `co_core_aio`'s `fetch.py` / `transport.py`. The `uv.lock` diff moves co-core and co-core-aio alone, and pyasn1 stays 0.6.5.
+
+**Deploy order is free:** Processor (0.38.0) already takes `application/json`, and `render: null` decodes on every consumer (`extra="ignore"`). **The `bus` extra still caps `redis<8`** (*Dependabot PRs*).
 
 **Every bump is diffed wheel-to-wheel** on every module watcher imports, and the diff is recorded in that version's history entry. Re-run that diff on the next multi-minor bump — a floor spanning three MINORs is not covered by any one release's notes. The download goes through the wrapper.
 
@@ -129,10 +139,10 @@ sudo systemctl restart watcher                 # then /health reports the SHA, a
   limits*).
 - **A cap-crossing PR** rewrites the `pyproject.toml` specifier. It's a major:
   read its changelog against the code, as #294's caps intend.
-- **redis is held by co-core-aio, not by our cap:** 0.37.0's `bus` extra
-  requires `redis<8,>=5`, so no redis 8 bump resolves until a co-core bump
-  (#408, #414) lifts it, and the updater reports none or a resolution failure
-  for it. Taking 8 means re-measuring docs/BUS-CONNECTION-POLICY.md.
+- **redis is held by co-core-aio, not by our cap:** 0.48.2's `bus` extra
+  still requires `redis<8,>=5` (measured, #408), so no redis 8 bump resolves
+  until a later co-core bump lifts it, and the updater reports none or a
+  resolution failure for it. Taking 8 means re-measuring docs/BUS-CONNECTION-POLICY.md.
 - **A security PR** (its body lists the advisory) is a lock-only fix: add its
   `_FLOORS` row (*Advisory floors*) as a commit on top of the fast-forward,
   before the push.

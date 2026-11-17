@@ -63,6 +63,12 @@ class TestExtensionMediaType:
         assert extension_media_type("https://x.gov/feed.rss") == "application/rss+xml"
         assert extension_media_type("https://x.gov/feed.atom") == "application/atom+xml"
 
+    def test_json_extension(self):
+        # #408: co-core 0.38.0 (cannobserv#354) maps .json to the essence Processor's
+        # JsonExtractor takes; adopted at 0.48.2, measured 0 active items moving.
+        assert extension_media_type("https://x.gov/data.json") == "application/json"
+        assert extension_media_type("https://x.gov/DATA.JSON?v=2") == "application/json"
+
     def test_query_string_ignored(self):
         assert extension_media_type("https://x.gov/a.pdf?v=2") == "application/pdf"
 
@@ -100,6 +106,17 @@ class TestResolveDispatchEssence:
             "application/atom+xml"
         )
         assert resolve_dispatch_essence(None, "https://x.gov/feed.xml") == "application/xml"
+
+    def test_ambiguous_or_missing_header_falls_back_to_json_extension(self):
+        # #408: through 0.37.0 these resolved to the header's essence, so HTML.
+        assert resolve_dispatch_essence(None, "https://x.gov/data.json") == "application/json"
+        assert (
+            resolve_dispatch_essence("text/plain; charset=utf-8", "https://x.gov/data.json")
+            == "application/json"
+        )
+
+    def test_informative_header_wins_over_json_extension(self):
+        assert resolve_dispatch_essence("text/html", "https://x.gov/data.json") == "text/html"
 
     def test_informative_xml_header_wins_over_feed_extension(self):
         # Tailscale's feed: served as text/xml, so it resolves the same on 0.19.7 and 0.32.0.

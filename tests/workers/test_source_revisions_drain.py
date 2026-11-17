@@ -160,57 +160,6 @@ class TestPublish:
 
         assert result["published"] == 1
 
-    async def test_a_row_without_a_blob_fingerprint_still_publishes(self, db_session, monkeypatch):
-        """#329: rows enqueued before the column landed drain as they always did."""
-        await _setup_pending_row(db_session, blob_fingerprint=None)
-        _wire(db_session, monkeypatch)
-        client = fakeredis.FakeAsyncRedis()
-
-        result = await drain_pending_archiver_sync(batch_size=10, bus_client=client)
-
-        assert result["published"] == 1
-        entries = await client.xrange(streams.CONTENT_REVISIONS)
-        payload = from_wire(
-            {k.decode(): v.decode() for k, v in entries[0][1].items()},
-            topic=streams.CONTENT_REVISIONS,
-            message_id=entries[0][0].decode(),
-        ).payload
-        assert payload.blob_fingerprint is None
-
-    @pytest.mark.parametrize("digest", ["sha256:" + "e" * 64, "e" * 12, "E" * 64])
-    async def test_an_off_spec_blob_fingerprint_is_dropped_not_dead_lettered(
-        self, digest, db_session, monkeypatch, caplog
-    ):
-        """#329: an optional field must not cost a revision.
-
-        The Emit twin refuses anything but bare lowercase hex, which would
-        dead-letter the whole observation. Archiver's ingest logs and drops an
-        off-spec digest and keeps the revision; the drain does the same, sending
-        ``None`` rather than reshaping the value.
-        """
-        _, _, pending = await _setup_pending_row(db_session, blob_fingerprint=digest)
-        _wire(db_session, monkeypatch)
-        client = fakeredis.FakeAsyncRedis()
-
-        with caplog.at_level("WARNING", logger="src.workers.source_revisions_drain"):
-            result = await drain_pending_archiver_sync(batch_size=10, bus_client=client)
-
-        assert result["published"] == 1
-        assert result["dead_lettered"] == 0
-        entries = await client.xrange(streams.CONTENT_REVISIONS)
-        payload = from_wire(
-            {k.decode(): v.decode() for k, v in entries[0][1].items()},
-            topic=streams.CONTENT_REVISIONS,
-            message_id=entries[0][0].decode(),
-        ).payload
-        assert payload.blob_fingerprint is None
-        (record,) = [
-            r
-            for r in caplog.records
-            if r.getMessage() == "drain: off-spec blob_fingerprint — sending none"
-        ]
-        assert record.change_revision_id == str(pending.change_revision_id)
-
 
 class TestClassification:
     """Transient vs deterministic — the split #253 asked to be ported."""
@@ -238,6 +187,53 @@ class TestClassification:
         ).scalar_one()
         assert row.dead_lettered_at is not None
         assert row.last_error
+
+    async def test_a_row_without_a_blob_fingerprint_dead_letters(self, db_session, monkeypatch):
+        """#408: the Emit requires the raw digest since co-core 0.40.0 (cannobserv#494).
+
+        A null is a payload that can never be built, so it dead-letters at once
+        like any other unbuildable row, rather than publishing without the digest
+        or spinning against an identical refusal every loop.
+        """
+        _, _, pending = await _setup_pending_row(db_session, blob_fingerprint=None)
+        _wire(db_session, monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+
+        result = await drain_pending_archiver_sync(batch_size=10, bus_client=client)
+
+        assert result == {"published": 0, "failed": 0, "dead_lettered": 1, "backoffs_cleared": 0}
+        assert await client.xlen(streams.CONTENT_REVISIONS) == 0
+        row = await db_session.get(PendingArchiverSync, pending.id)
+        assert row.dead_lettered_at is not None
+        assert row.last_error.startswith("unbuildable_payload:")
+        assert "blob_fingerprint" in row.last_error
+
+    @pytest.mark.parametrize("digest", ["sha256:" + "e" * 64, "e" * 12, "E" * 64])
+    async def test_an_off_spec_blob_fingerprint_dead_letters_on_the_emits_refusal(
+        self, digest, db_session, monkeypatch, caplog
+    ):
+        """#408 decision 2: the value goes to the Emit as stored, never reshaped.
+
+        The Emit's bare-hex validator refuses it, and the error recorded is that
+        refusal, naming the value. A drain that mapped it to ``None`` first would
+        record a missing field instead, which names neither the value nor the
+        rule it broke. No WARNING either: the dead-letter's ERROR is the one line.
+        """
+        _, _, pending = await _setup_pending_row(db_session, blob_fingerprint=digest)
+        _wire(db_session, monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+
+        with caplog.at_level("WARNING", logger="src.workers.source_revisions_drain"):
+            result = await drain_pending_archiver_sync(batch_size=10, bus_client=client)
+
+        assert result["dead_lettered"] == 1
+        assert result["published"] == 0
+        assert await client.xlen(streams.CONTENT_REVISIONS) == 0
+        row = await db_session.get(PendingArchiverSync, pending.id)
+        assert row.last_error.startswith("unbuildable_payload:")
+        assert "fingerprint must be the lowercase hex sha256" in row.last_error
+        assert repr(digest) in row.last_error
+        assert [r.levelname for r in caplog.records] == ["ERROR"]
 
     async def test_dead_lettered_rows_are_not_selected_again(self, db_session, monkeypatch):
         await _setup_pending_row(db_session, source_media_type=None)
@@ -542,6 +538,7 @@ class TestRenewal:
                 command_id="01KZMNQR9B5CQZ1CRGR1E393R7",
                 blob_uri="gs://co-gcs-blobs/abc",
                 blob_expires_at=later,
+                blob_fingerprint="d" * 64,  # a renewal's raw digest, its own (#329)
                 source_media_type="text/html",
                 content_media_type="text/plain; charset=utf-8",
                 spec_fingerprint="spec1:sha256:" + "b" * 64,
@@ -567,4 +564,5 @@ class TestRenewal:
         assert second.blob_expires_at == later
         assert second.blob_uri == "gs://co-gcs-blobs/abc"
         assert second.command_id == "01KZMNQR9B5CQZ1CRGR1E393R7"
+        assert second.blob_fingerprint == "d" * 64
         assert (await db_session.execute(select(PendingArchiverSync))).scalars().all() == []

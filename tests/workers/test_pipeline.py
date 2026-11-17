@@ -53,6 +53,7 @@ _BLOB = BlobProvenance(
     command_id="01KZMNQR9B5CQZ1CRGR1E393R6",
     blob_uri="gs://co-gcs-blobs/blobs/test.bin",
     source_media_type="text/html",
+    blob_fingerprint="a" * 64,  # wire-required since co-core 0.40.0 (#408)
 )
 
 
@@ -553,6 +554,34 @@ class TestBlobReferenceRenewal:
         assert row.source_media_type == "text/html"
         assert row.blob_expires_at == _FIRST_BLOB.blob_expires_at
         assert row.blob_fingerprint == _FIRST_BLOB.blob_fingerprint  # the pair stays whole
+
+    async def test_a_digestless_reference_never_degrades_a_queued_row(self, db_session):
+        """#408: the raw digest is wire-required since co-core 0.40.0 (cannobserv#494).
+
+        A renewal without one would swap a publishable row for one the drain
+        dead-letters, the vector CR 1 closed for the other required fields.
+        """
+        wi = await self._item(db_session)
+        await self._baseline_then_change(db_session, wi)
+        await db_session.flush()
+        (queued,) = await self._outbox_rows(db_session, wi)
+        queued_id = queued.id
+
+        digestless = BlobProvenance(
+            command_id=_RENEWED_BLOB.command_id,
+            blob_uri=_RENEWED_BLOB.blob_uri,
+            source_media_type=_RENEWED_BLOB.source_media_type,
+            blob_expires_at=_RENEWED_BLOB.blob_expires_at,
+            blob_fingerprint=None,
+        )
+        result = await apply_extraction_outcome(db_session, wi, _outcome(NEXT_FP), blob=digestless)
+        await db_session.flush()
+
+        assert result.renewal_enqueued is False
+        (row,) = await self._outbox_rows(db_session, wi)
+        assert row.id == queued_id
+        assert row.blob_fingerprint == _FIRST_BLOB.blob_fingerprint
+        assert row.blob_expires_at == _FIRST_BLOB.blob_expires_at  # the pair stays whole
 
     async def test_an_unpublishable_reference_enqueues_nothing_when_drained(self, db_session):
         """The same guard with no row to protect: a renewal that could only

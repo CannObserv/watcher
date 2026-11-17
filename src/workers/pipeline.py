@@ -34,8 +34,14 @@ logger = get_logger(__name__)
 # and importing the bus contract into the pipeline to answer this would move it.
 # `tests/test_renewal_wire_contract.py` pins the pair against co-core's own
 # model, so promoting a field to required there fails the suite rather than
-# silently reopening the vector (CR 9).
-WIRE_REQUIRED_PROVENANCE_FIELDS = ("blob_uri", "source_media_type", "content_media_type")
+# silently reopening the vector (CR 9). ``blob_fingerprint`` joined at co-core
+# 0.40.0 (cannobserv#494, #408).
+WIRE_REQUIRED_PROVENANCE_FIELDS = (
+    "blob_uri",
+    "blob_fingerprint",
+    "source_media_type",
+    "content_media_type",
+)
 
 
 @dataclass(frozen=True)

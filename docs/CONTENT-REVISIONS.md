@@ -30,11 +30,13 @@ Archiver records absence rather than a guess.
 `blob_fingerprint` is how Archiver persists a revision into Replicator's
 permanent store by digest (replicator#114, archiver#283). It is echoed
 verbatim, **never** parsed out of `blob_uri`, and is not `extracted_fingerprint`
-— different bytes, different service. Optional on the wire until
-cannobserv#494; the drain sends an off-spec value (anything but 64 lowercase
-hex) as `None` with a warning rather than dead-lettering the revision, which is
-Archiver's own ingest rule. When #494 lands, `tests/test_renewal_wire_contract.py`
-fails until the field joins `WIRE_REQUIRED_PROVENANCE_FIELDS`.
+— different bytes, different service. **Required on the wire since co-core
+0.40.0** (cannobserv#494, adopted in #408). The drain hands the row's value to
+the Emit as stored, so a null or off-spec digest (anything but 64 lowercase hex)
+dead-letters `unbuildable_payload`, with the Emit's refusal as `last_error`. It
+is in `WIRE_REQUIRED_PROVENANCE_FIELDS`, so a renewal without one never
+overwrites a queued row. `tests/test_renewal_wire_contract.py` derives that list
+from the Emit.
 
 Snapshotted rather than joined from `fetch_commands` at drain time: the command
 row's lifecycle is not the outbox row's — delivery to Archiver is the thing being
@@ -135,7 +137,7 @@ the row `FOR UPDATE`:
 
 **A renewal may only ever improve a row.** It is the one writer that overwrites
 provenance rather than creating it, so a reference missing a wire-required
-field (`blob_uri`, `source_media_type`) would replace a publishable row with
+field (`blob_uri`, `blob_fingerprint`, `source_media_type`) would replace a publishable row with
 one the drain dead-letters — a real revision lost to a refresh, where the
 change path's equivalent gap costs only an observation that never existed. The
 renewal declines and logs instead, and reports `renewal_enqueued=False`.

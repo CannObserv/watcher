@@ -338,3 +338,128 @@ class TestFetchCommandTimeoutSeconds:
         with caplog.at_level(logging.WARNING, logger="src.core.fetch_commands"):
             assert fetch_command_timeout_seconds() == DEFAULT_FETCH_COMMAND_TIMEOUT_SECONDS
         assert any(FETCH_COMMAND_TIMEOUT_ENV in r.getMessage() for r in caplog.records)
+
+
+async def _raw_payloads(client) -> list[str]:
+    """The ``payload`` field of every ``content.fetch`` entry, as written."""
+    entries = await client.xrange(streams.CONTENT_FETCH)
+    return [fields[b"payload"].decode() for _message_id, fields in entries]
+
+
+@_integration
+class TestRenderMode:
+    """#414: the item's render mode, snapshotted on the row and sent on the Emit.
+
+    A browser fetch may carry ``user-agent`` and nothing else: the Emit raises
+    for anything more (cannobserv#602, #635), and it raises inside
+    ``publish_fetch_command`` on every sweep — the row would never publish and
+    its open status would hold the item's scheduling forever.
+    """
+
+    async def _item_with_fresh_pair(self, db_session, *, render):
+        wi = await make_watched_item(
+            db_session, primary_url="https://lcb.wa.gov/notices", render=render
+        )
+        wi.etag = 'W/"v2"'
+        wi.last_modified = "Wed, 13 Aug 2026 10:00:00 GMT"
+        wi.last_full_fetch_at = NOW - timedelta(hours=1)
+        wi.blob_expires_at = wi.last_full_fetch_at + timedelta(days=7)
+        wi.validator_source_key = validator_source_key(
+            effective_url=wi.effective_url,
+            source_specs=wi.source_specs,
+            generation=wi.processor_version,
+        )
+        await db_session.flush()
+        return wi
+
+    async def test_a_browser_item_with_a_replayable_pair_publishes_user_agent_alone(
+        self, db_session, monkeypatch
+    ):
+        # Hazard 1: the pair was stored under "http" and its key still matches.
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        wi = await self._item_with_fresh_pair(db_session, render="browser")
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.flush()
+        client = fakeredis.FakeAsyncRedis()
+
+        await publish_fetch_command(client, row, now=NOW)
+
+        assert row.render == "browser"
+        assert row.request_etag is None
+        assert row.request_last_modified is None
+        assert row.status == FetchCommandStatus.IN_FLIGHT
+        (message,) = await _decode_commands(client)
+        assert message.payload.render == "browser"
+        assert message.payload.headers == {"user-agent": WATCHER_USER_AGENT}
+
+    @pytest.mark.parametrize("render", [None, "http", "browser"])
+    async def test_the_mode_is_snapshotted_on_the_row(self, db_session, render):
+        wi = await make_watched_item(db_session, render=render)
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.flush()
+
+        assert row.render == render
+
+    async def test_an_http_item_still_replays_its_pair(self, db_session, monkeypatch):
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        wi = await self._item_with_fresh_pair(db_session, render="http")
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        client = fakeredis.FakeAsyncRedis()
+
+        await publish_fetch_command(client, row, now=NOW)
+
+        (message,) = await _decode_commands(client)
+        assert message.payload.render == "http"
+        assert message.payload.headers["if-none-match"] == 'W/"v2"'
+
+    async def test_a_command_minted_before_a_flip_keeps_its_own_mode(self, db_session):
+        # The sweep republishes what was minted, not what the item says now.
+        wi = await make_watched_item(db_session, render="browser")
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.flush()
+        wi.render = "http"
+        client = fakeredis.FakeAsyncRedis()
+
+        await publish_fetch_command(client, row, now=NOW)
+
+        (message,) = await _decode_commands(client)
+        assert message.payload.render == "browser"
+
+    async def test_a_null_row_frame_is_unchanged(self, db_session):
+        # Wire continuity: every item is NULL at the deploy, and its frame must
+        # be byte-for-byte what was sent before #414.
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        client = fakeredis.FakeAsyncRedis()
+
+        await publish_fetch_command(client, row, now=NOW)
+
+        assert row.render is None
+        (payload,) = await _raw_payloads(client)
+        assert payload == (
+            '{"schema_version":1,"event_type":"content_fetch",'
+            '"occurred_at":"2026-08-06T16:00:00+00:00",'
+            f'"command_id":"{row.command_id}","url":"https://lcb.wa.gov/notices",'
+            f'"info_source_id":"{wi.archiver_info_source_id}",'
+            '"headers":{"user-agent":"watcher/0.1.0"},'
+            '"timeout_seconds":null,"render":null}'
+        )
+
+    async def test_a_browser_row_frame(self, db_session):
+        wi = await make_watched_item(
+            db_session, primary_url="https://lcb.wa.gov/notices", render="browser"
+        )
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        client = fakeredis.FakeAsyncRedis()
+
+        await publish_fetch_command(client, row, now=NOW)
+
+        (payload,) = await _raw_payloads(client)
+        assert payload == (
+            '{"schema_version":1,"event_type":"content_fetch",'
+            '"occurred_at":"2026-08-06T16:00:00+00:00",'
+            f'"command_id":"{row.command_id}","url":"https://lcb.wa.gov/notices",'
+            f'"info_source_id":"{wi.archiver_info_source_id}",'
+            '"headers":{"user-agent":"watcher/0.1.0"},'
+            '"timeout_seconds":null,"render":"browser"}'
+        )

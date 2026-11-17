@@ -2,8 +2,21 @@
 
 import enum
 from datetime import datetime
+from typing import get_args
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, text
+from co_core.pure.models.changes import RenderMode
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
@@ -14,6 +27,18 @@ from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
 # — this is a sanity cap shared by the column and the detection truncation in
 # src/workers/tasks.py; the API schema shared it until #378).
 CONTENT_MEDIA_TYPE_MAX_LEN = 2048
+
+# The fetch modes a ``content.fetch`` command can send (#414): read from
+# co-core's ``RenderMode``, never transcribed, because a mode outside it makes
+# ``ContentFetchCommandEmit`` raise at publish. The ``render`` CHECK on both
+# tables is built from it, so the database cannot hold an unsendable mode.
+RENDER_MODES: tuple[str, ...] = get_args(RenderMode)
+
+
+def render_check(table: str) -> CheckConstraint:
+    """The ``render IN (...)`` CHECK for ``table`` — NULL passes, as it means http."""
+    modes = ", ".join(f"'{mode}'" for mode in RENDER_MODES)
+    return CheckConstraint(f"render IN ({modes})", name=f"ck_{table}_render")
 
 
 class WatchHealthStatus(enum.StrEnum):
@@ -175,6 +200,12 @@ class WatchedItem(Base, TimestampMixin):
     error_since: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    # How Replicator fetches this item (#414): the registry's mode for the
+    # source, mirrored by the reconcile. NULL means the registry has no opinion
+    # yet, which co-core reads as "http"; it is stored as is, so a NULL item's
+    # command is byte-identical to one sent before the column existed. Under
+    # "browser" no validator is replayed (src/core/validators.py).
+    render: Mapped[str | None] = mapped_column(String(16), nullable=True, default=None)
 
     # Plain unique index since #251 — the column is NOT NULL, so the partial
     # predicate that used to exempt bare rows has nothing left to exempt.
@@ -184,6 +215,7 @@ class WatchedItem(Base, TimestampMixin):
             "archiver_info_item_id",
             unique=True,
         ),
+        render_check("watched_items"),
     )
 
     def __init__(self, **kwargs: object) -> None:

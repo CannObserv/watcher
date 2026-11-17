@@ -37,9 +37,20 @@ deliberately does not validate the document's contents, because raising at
 decode on a **no-DLQ** stream would drop the message entirely and leave the LWW
 key stale. That tolerance has to live here.
 
+*``render`` is not ``active``* (#414). ``None`` is stored as NULL, which means
+``http``, as co-core reads it: NULL and ``http`` fetch the same way, so the only
+announcement an abstention would change is Archiver clearing a mode it once set,
+and then "no opinion yet, fetch over http" is the right reading. An
+*unrecognized* mode decodes (the field is a plain ``str``) but
+``ContentFetchCommandEmit`` refuses it, so storing it would wedge every publish
+of the item's commands; falling back to ``http`` would bring back the empty
+shell ``browser`` exists to avoid; and dropping the announcement would freeze
+its specs and cadence. So it keeps the stored mode (NULL on a create), logs a
+WARNING, and the rest of the announcement applies.
+
 *Watcher owns what Archiver does not.* The announcement is authoritative for
-exactly five columns — ``archiver_info_source_id``, ``effective_url``,
-``source_specs``, ``announced_schedule_config``, ``is_active`` — plus
+exactly six columns — ``archiver_info_source_id``, ``effective_url``,
+``source_specs``, ``announced_schedule_config``, ``is_active``, ``render`` — plus
 ``domain_name`` and its denormalized state, and only when the host actually
 moves. Everything else is Watcher's and survives: health, timings,
 ``domain_suspended``, media type, validators, audit rows.
@@ -67,7 +78,7 @@ from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_susp
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.revoked_info_item import RevokedInfoItem
-from src.core.models.watched_item import WatchedItem
+from src.core.models.watched_item import RENDER_MODES, WatchedItem
 from src.core.scheduling.cadence import parse_interval
 from src.core.ulids import parse_canonical_ulid
 from src.core.validators import canonical_specs
@@ -151,6 +162,7 @@ _ANNOUNCED_COLUMNS = (
     "source_specs",
     "announced_schedule_config",
     "is_active",
+    "render",
 )
 
 
@@ -278,6 +290,22 @@ async def reconcile_announcement(session, payload: RegistryAnnouncementState) ->
     # sticky (archiver#150).
     if payload.active is not None:
         row.is_active = payload.active
+
+    # `render is None` is NOT an abstention (#414): NULL means http. An unknown
+    # mode keeps the stored one rather than wedging the publish or dropping the
+    # rest of the announcement — see the module docstring.
+    if payload.render is None or payload.render in RENDER_MODES:
+        row.render = payload.render
+    else:
+        logger.warning(
+            "announcement carries an unrecognized render mode — keeping the stored one",
+            extra={
+                "info_item_id": key,
+                "generation": payload.generation,
+                "render": repr(payload.render),
+                "stored_render": row.render,
+            },
+        )
 
     # Re-derive the domain only when the host actually moves. Doing it on every
     # announcement would clear a `domain_suspended` an operator set — host-level

@@ -53,6 +53,16 @@ implementation detail):
    apply lag: seconds normally, hours after a worker outage, against a margin
    of half the horizon. A blob applied at all was applied before it expired, so
    the midpoint still falls before the expiry.
+
+**Under ``render="browser"`` nothing is replayed (#414).** Not an invalidation
+rule but the wire's: a rendered page has no upstream validator to match, and
+``ContentFetchCommandEmit`` refuses one beside ``browser``. A pair stored under
+``http`` keeps a matching key across a flip, so without this guard the Emit
+would raise at every publish of the command and the item would stop being
+checked. A browser fact carries no ``etag`` / ``last_modified``, and
+``record_validators`` always overwrites, so a later flip back starts
+unconditional. The guard rather than a ``render`` term in the key: moving the
+key costs every stored pair once.
 """
 
 import hashlib
@@ -232,6 +242,8 @@ def replayable_validators(
     publish time: the pending-publish sweep holds only that row.
     """
     if force_full_fetch:
+        return (None, None)
+    if watched_item.render == "browser":
         return (None, None)
     if not conditional_get_enabled(watched_item.id):
         return (None, None)

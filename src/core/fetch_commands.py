@@ -31,6 +31,11 @@ this module:
   ``not_modified`` outcome) and #249 part 1 (Watcher's handling of it) are both
   in production — a validator sent to a deployment that still classifies 304 as
   a plain fetch failure reproduces the trap #249 closed.
+* **#414** — the command sends the item's ``render`` mode, snapshotted onto the
+  row at issue like the validators. Under ``browser`` the command carries
+  ``user-agent`` alone: ``replayable_validators`` resolves no pair, because the
+  Emit refuses one and would raise on every republish. NULL sends ``None``,
+  which Replicator reads as ``http`` — the pre-#414 frame, byte for byte.
 """
 
 import os
@@ -123,6 +128,9 @@ async def create_fetch_command(
         request_last_modified=request_last_modified,
         forced_full_fetch=force_full_fetch,
         check_command_id=check_command_id,
+        # Snapshotted like the validators (#414): the sweep republishes the mode
+        # this occasion was minted under, whatever the item says by then.
+        render=watched_item.render,
     )
     session.add(row)
     return row
@@ -145,6 +153,7 @@ async def publish_fetch_command(
         url=row.url,
         info_source_id=row.info_source_id,
         headers=_command_headers(row),
+        render=row.render,
     )
     await AsyncBusPublisher(client).execute(BusPublish(streams.CONTENT_FETCH, to_wire(command)))
     row.status = FetchCommandStatus.IN_FLIGHT

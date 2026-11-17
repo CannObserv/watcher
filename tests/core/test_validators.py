@@ -61,6 +61,7 @@ def _item(**kwargs):
         "last_full_fetch_at": NOW - timedelta(hours=1),
         "blob_expires_at": NOW - timedelta(hours=1) + HORIZON,
         "processor_version": VERSION,
+        "render": None,
     }
     base.update(kwargs)
     return SimpleNamespace(**base)
@@ -282,6 +283,22 @@ class TestReplayableValidators:
         etag, last_modified = replayable_validators(_item(), now=NOW)
         assert etag == 'W/"abc"'
         assert last_modified == "Wed, 13 Aug 2026 10:00:00 GMT"
+
+    @pytest.mark.parametrize("render", [None, "http"])
+    def test_an_http_item_replays_as_before(self, monkeypatch, render):
+        # #414: NULL and "http" fetch the same way, so neither changes the rule.
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        assert replayable_validators(_item(render=render), now=NOW) == (
+            'W/"abc"',
+            "Wed, 13 Aug 2026 10:00:00 GMT",
+        )
+
+    def test_a_browser_item_replays_nothing(self, monkeypatch):
+        # #414: a rendered page has no upstream validator to match, and the Emit
+        # refuses one beside render="browser" — so a pair stored under "http"
+        # and still keyed to the item would wedge every publish of the command.
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        assert replayable_validators(_item(render="browser"), now=NOW) == (None, None)
 
     def test_the_gate_being_off_sends_nothing(self, monkeypatch):
         monkeypatch.delenv(CONDITIONAL_GET_ENV, raising=False)

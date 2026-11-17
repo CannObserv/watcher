@@ -42,6 +42,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
 
 from src.core.models.base import Base, TimestampMixin, ULIDType
+from src.core.models.watched_item import render_check
 
 
 class FetchCommandStatus(enum.StrEnum):
@@ -123,6 +124,7 @@ class FetchCommand(Base, TimestampMixin):
             "check_command_id",
             postgresql_where=text("check_command_id IS NOT NULL"),
         ),
+        render_check("fetch_commands"),
     )
 
     command_id: Mapped[str] = mapped_column(String(26), primary_key=True)
@@ -167,6 +169,10 @@ class FetchCommand(Base, TimestampMixin):
     # rather than refusing it as ``fetch_open``. Archiver's id, so ``Text``:
     # nothing promises it is a ULID.
     check_command_id: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # The item's render mode at the occasion (#414), snapshotted like the
+    # validators so the sweep republishes exactly what was minted. A re-issue is
+    # a new occasion and takes the item's current mode. NULL means "http".
+    render: Mapped[str | None] = mapped_column(String(16), nullable=True, default=None)
 
     # --- fact fields (upserted by the content.blobs consumer) ---
     fact_at: Mapped[datetime | None] = mapped_column(

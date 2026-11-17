@@ -124,6 +124,25 @@ class TestPublishPendingSweep:
         command = from_wire(fields, topic=streams.CONTENT_FETCH).payload
         assert command.info_source_id == wi.archiver_info_source_id
 
+    async def test_republishes_a_browser_row_with_user_agent_alone(self, db_session):
+        # #414: the sweep holds only the row, so the mode is the row's snapshot.
+        wi = await make_watched_item(db_session, render="browser")
+        await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.flush()
+        client = fakeredis.FakeAsyncRedis()
+
+        result = await publish_pending_fetch_commands(session=db_session, bus_client=client)
+
+        assert result == {"published": 1}
+        entries = await client.xrange(streams.CONTENT_FETCH)
+        fields = {
+            (k.decode() if isinstance(k, bytes) else k): (v.decode() if isinstance(v, bytes) else v)
+            for k, v in entries[0][1].items()
+        }
+        command = from_wire(fields, topic=streams.CONTENT_FETCH).payload
+        assert command.render == "browser"
+        assert command.headers == {"user-agent": "watcher/0.1.0"}
+
     async def test_failed_publish_keeps_row_pending(self, db_session, monkeypatch):
         wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
         row = await create_fetch_command(db_session, wi, now=NOW)

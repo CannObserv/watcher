@@ -18,8 +18,15 @@ is silent rather than loud:
   own default"** — and neither may stop scheduling.
 * **Watcher-local columns survive.** The registry has no opinion on health,
   timings, suspension, or notification config.
+* **``render is None`` is stored as NULL** (#414), unlike ``active``: NULL and
+  ``http`` fetch the same way, so co-core's "no opinion yet, fetch over http"
+  is the right reading when Archiver clears a mode it once set. **An unknown
+  mode is not stored**: the Emit refuses it, so it keeps the stored mode, logs
+  a WARNING, and the rest of the announcement still applies.
 """
 
+import json
+import logging
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -55,6 +62,7 @@ def _announcement(
     active=True,
     watch_spec=None,
     occurred_at=NOW,
+    render=None,
 ):
     """A decoded ``info.registry`` message.
 
@@ -79,8 +87,34 @@ def _announcement(
             source_specs=source_specs if source_specs is not None else LIVE_SPECS,
             active=active,
             watch_spec=watch_spec if watch_spec is not None else {"schema_version": 1},
+            render=render,
         )
     return from_wire(to_wire(event), topic=streams.INFO_REGISTRY, message_id="1-1").payload
+
+
+def _announcement_with_raw_render(info_item_id, raw_render, **kwargs):
+    """A live announcement whose ``render`` the Emit would refuse to build.
+
+    ``RegistryAnnouncementEmit`` narrows the mode to ``RenderMode``; the decode
+    accepts any ``str``. So the frame is built valid and its payload edited, and
+    the edited frame goes through the real decode path.
+    """
+    event = RegistryAnnouncementEmit(
+        occurred_at=kwargs.pop("occurred_at", NOW),
+        info_item_id=str(info_item_id),
+        generation=kwargs.pop("generation", 1),
+        info_source_id=kwargs.pop("info_source_id", None) or str(ULID()),
+        url=kwargs.pop("url", "https://lcb.wa.gov/notices"),
+        source_specs=LIVE_SPECS,
+        active=True,
+        watch_spec={"schema_version": 1},
+    )
+    assert not kwargs, kwargs
+    frame = to_wire(event)
+    payload = json.loads(frame["payload"])
+    payload["render"] = raw_render
+    frame["payload"] = json.dumps(payload)
+    return from_wire(frame, topic=streams.INFO_REGISTRY, message_id="1-1").payload
 
 
 async def _get(session, info_item_id) -> WatchedItem | None:
@@ -1036,6 +1070,125 @@ class TestStatusRepublishOnReconcile:
         assert spy.await_count == 0
 
 
+class TestRenderMode:
+    """#414: the sixth announced column, under decisions 1, 2 and 4."""
+
+    SOURCE_ID = str(ULID())
+
+    def _ann(self, info_item_id, **kwargs):
+        kwargs.setdefault("info_source_id", self.SOURCE_ID)
+        return _announcement(info_item_id, **kwargs)
+
+    @pytest.mark.parametrize("render", [None, "http", "browser"])
+    async def test_a_create_stores_the_mode_as_announced(self, db_session, render):
+        info_item_id = ULID()
+        await reconcile_announcement(db_session, self._ann(info_item_id, render=render))
+        assert (await _get(db_session, info_item_id)).render == render
+
+    async def test_an_update_moves_the_mode(self, db_session):
+        info_item_id = ULID()
+        await reconcile_announcement(db_session, self._ann(info_item_id, generation=1))
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=2, render="browser")
+        )
+        assert (await _get(db_session, info_item_id)).render == "browser"
+
+    async def test_none_clears_a_stored_mode(self, db_session):
+        """Decision 1: not an abstention. NULL means http, as co-core reads it,
+        so Archiver clearing a mode it once set puts the item back on http."""
+        info_item_id = ULID()
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=1, render="browser")
+        )
+        await reconcile_announcement(db_session, self._ann(info_item_id, generation=2, render=None))
+        assert (await _get(db_session, info_item_id)).render is None
+
+    @pytest.mark.parametrize("raw", ["HTTP", "chrome", ""])
+    async def test_an_unknown_mode_keeps_the_stored_one_and_applies_the_rest(
+        self, db_session, caplog, raw
+    ):
+        """Decision 2. Storing it would wedge every publish (the Emit refuses
+        it), falling back to http brings back the empty shell, and dropping the
+        announcement would freeze its specs and cadence. ``"HTTP"`` is unknown
+        too: Replicator matches the mode exactly."""
+        info_item_id = ULID()
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=1, render="browser")
+        )
+
+        with caplog.at_level(logging.WARNING, logger="src.workers.registry_reconcile"):
+            outcome = await reconcile_announcement(
+                db_session,
+                _announcement_with_raw_render(
+                    info_item_id,
+                    raw,
+                    generation=2,
+                    info_source_id=self.SOURCE_ID,
+                    url="https://lcb.wa.gov/moved",
+                ),
+            )
+
+        wi = await _get(db_session, info_item_id)
+        assert outcome == "updated"
+        assert wi.render == "browser"
+        assert wi.effective_url == "https://lcb.wa.gov/moved"
+        assert wi.applied_generation == 2
+        (record,) = [r for r in caplog.records if "render mode" in r.getMessage()]
+        assert record.levelno == logging.WARNING
+        assert record.render == repr(raw)
+        assert record.info_item_id == str(info_item_id)
+
+    async def test_an_unknown_mode_on_a_create_stores_null(self, db_session, caplog):
+        """Nothing stored to keep, so the item starts on http — with the WARNING."""
+        info_item_id = ULID()
+        with caplog.at_level(logging.WARNING, logger="src.workers.registry_reconcile"):
+            await reconcile_announcement(
+                db_session, _announcement_with_raw_render(info_item_id, "chrome")
+            )
+
+        assert (await _get(db_session, info_item_id)).render is None
+        (record,) = [r for r in caplog.records if "render mode" in r.getMessage()]
+        assert record.levelno == logging.WARNING
+
+    async def test_a_flip_is_one_recorded_change(self, db_session):
+        """Decision 4: announced as one change, no re-baseline."""
+        info_item_id = ULID()
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=1, render="http")
+        )
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=2, render="browser")
+        )
+
+        (row,) = await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED)
+        assert row.payload["changes"] == {"render": {"old": "http", "new": "browser"}}
+
+    async def test_a_reannounced_mode_records_nothing(self, db_session):
+        info_item_id = ULID()
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=1, render="browser")
+        )
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=2, render="browser")
+        )
+
+        assert await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED) == []
+
+    async def test_an_unknown_mode_records_no_render_change(self, db_session):
+        info_item_id = ULID()
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=1, render="browser")
+        )
+        await reconcile_announcement(
+            db_session,
+            _announcement_with_raw_render(
+                info_item_id, "chrome", generation=2, info_source_id=self.SOURCE_ID
+            ),
+        )
+
+        assert await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED) == []
+
+
 class TestAnnouncementAudit:
     """The reconcile must leave a record of what the registry changed (#274).
 
@@ -1045,7 +1198,7 @@ class TestAnnouncementAudit:
     detection already existed (``validator_source_key`` invalidates on it); it
     was simply never surfaced to a human.
 
-    Scoped to the five announcement-authoritative columns. ``domain_name`` is
+    Scoped to the six announcement-authoritative columns. ``domain_name`` is
     excluded: derived, and it only ever moves with ``effective_url``, which is
     already in the diff.
     """

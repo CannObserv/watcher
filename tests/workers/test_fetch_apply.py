@@ -918,6 +918,23 @@ class TestForcedFetchLineage:
         assert reissued.request_etag is None
 
 
+class TestRenderOnReissue:
+    """#414: a re-issue is a new occasion, so it takes the item's *current*
+    mode — unlike the forced intent and the watch_check, which are lineage."""
+
+    async def test_a_reissue_takes_the_items_current_mode(self, db_session):
+        wi, row = await _row_with_fact(db_session)
+        assert row.render is None
+        wi.render = "browser"
+        row.status = FetchCommandStatus.EXPIRED
+        await db_session.flush()
+
+        new_id = await reissue_fetch_command(db_session, wi, row, AsyncMock())
+
+        reissued = await db_session.get(FetchCommand, new_id)
+        assert reissued.render == "browser"
+
+
 class TestWatchCheckLineage:
     """#371: the commanding ``watch_check`` is lineage, like the forced intent.
     A reaped commanded fetch that came back unmarked would complete with no

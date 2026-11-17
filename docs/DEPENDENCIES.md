@@ -35,9 +35,9 @@ On the host, after the merge, run `bash scripts/co-pypi.sh uv sync --locked`, th
 - Byte-identical: `effects/bus.py`, `bus/__init__.py`, `bus/dead_letter.py`, `bus/exceptions.py`, `extract/canonical.py`, `extract/simhash.py`, `util/hashing.py`, `util/media_type.py` and all of `co_core_aio/bus.py`. Both `__init__` modules move only in `__version__` and a docstring.
 - Everything else that moved is a surface watcher does not import: co/v1, WordPress, disclosure and Gdrive, `workflows/`, the concrete parsers, and `co_core_aio`'s `fetch.py` / `transport.py`. The `uv.lock` diff moves co-core and co-core-aio alone, and pyasn1 stays 0.6.5.
 
-**Deploy order is free:** Processor (0.38.0) already takes `application/json`, and `render: null` decodes on every consumer (`extra="ignore"`). **The `bus` extra still caps `redis<8`** (*Dependabot PRs*).
+**Deploy order is free:** Processor (0.38.0) already takes `application/json`, and `render: null` decodes on every consumer (`extra="ignore"`). The outbox held 0 live (not dead-lettered) rows with a null or off-spec digest (read 2026-11-17T03:54:59Z), so none dead-letters at the restart. **The `bus` extra still caps `redis<8`** (*Dependabot PRs*).
 
-**Every bump is diffed wheel-to-wheel** on every module watcher imports, and the diff is recorded in that version's history entry. Re-run that diff on the next multi-minor bump — a floor spanning three MINORs is not covered by any one release's notes. The download goes through the wrapper.
+**Every bump is diffed wheel-to-wheel** on every module watcher imports — a floor spanning several MINORs is not covered by any one release's notes. The current pin's diff lives above; on the next bump it moves to that version's history entry. The download goes through the wrapper.
 
 `co-core` carries no extra: the `extract` parsers left with local extraction (#350). The content-acquisition pipeline (fetch → extract → fingerprint) is co-core's, run by Replicator and the processor; watcher no longer fetches at all (#241 step 5) — `src/core/fetch.py` is gone; the `watcher/0.1.0` User-Agent now lives in `src/core/fetch_commands.py` beside its only consumer and rides out on every `content.fetch` command's headers to preserve fingerprint byte-continuity.
 

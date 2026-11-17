@@ -583,6 +583,34 @@ class TestBlobReferenceRenewal:
         assert row.blob_fingerprint == _FIRST_BLOB.blob_fingerprint
         assert row.blob_expires_at == _FIRST_BLOB.blob_expires_at  # the pair stays whole
 
+    @pytest.mark.parametrize("digest", ["sha256:" + "d" * 64, "d" * 12, "D" * 64])
+    async def test_an_off_spec_digest_never_degrades_a_queued_row(self, digest, db_session):
+        """#408: present is not publishable. The Emit refuses anything but bare
+        lowercase hex, so an off-spec digest dead-letters exactly as a null does;
+        the guard treats it as missing rather than swapping a publishable row out.
+        """
+        wi = await self._item(db_session)
+        await self._baseline_then_change(db_session, wi)
+        await db_session.flush()
+        (queued,) = await self._outbox_rows(db_session, wi)
+        queued_id = queued.id
+
+        off_spec = BlobProvenance(
+            command_id=_RENEWED_BLOB.command_id,
+            blob_uri=_RENEWED_BLOB.blob_uri,
+            source_media_type=_RENEWED_BLOB.source_media_type,
+            blob_expires_at=_RENEWED_BLOB.blob_expires_at,
+            blob_fingerprint=digest,
+        )
+        result = await apply_extraction_outcome(db_session, wi, _outcome(NEXT_FP), blob=off_spec)
+        await db_session.flush()
+
+        assert result.renewal_enqueued is False
+        (row,) = await self._outbox_rows(db_session, wi)
+        assert row.id == queued_id
+        assert row.blob_fingerprint == _FIRST_BLOB.blob_fingerprint
+        assert row.blob_expires_at == _FIRST_BLOB.blob_expires_at
+
     async def test_an_unpublishable_reference_enqueues_nothing_when_drained(self, db_session):
         """The same guard with no row to protect: a renewal that could only
         dead-letter is not worth queueing."""

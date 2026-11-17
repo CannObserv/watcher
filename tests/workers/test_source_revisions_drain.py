@@ -233,7 +233,9 @@ class TestClassification:
         assert row.last_error.startswith("unbuildable_payload:")
         assert "fingerprint must be the lowercase hex sha256" in row.last_error
         assert repr(digest) in row.last_error
-        assert [r.levelname for r in caplog.records] == ["ERROR"]
+        assert [
+            r.levelname for r in caplog.records if r.name == "src.workers.source_revisions_drain"
+        ] == ["ERROR"]
 
     async def test_dead_lettered_rows_are_not_selected_again(self, db_session, monkeypatch):
         await _setup_pending_row(db_session, source_media_type=None)

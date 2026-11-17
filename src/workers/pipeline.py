@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from co_core.pure.extract import CANONICAL_TEXT_MEDIA_TYPE
+from co_core.pure.util.blobstore import validate_fingerprint
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +33,7 @@ logger = get_logger(__name__)
 # renewal must not blank out on a queued row (#293, CR 1). Named here rather
 # than derived from the model: the wire coupling belongs to the drain (#253),
 # and importing the bus contract into the pipeline to answer this would move it.
-# `tests/test_renewal_wire_contract.py` pins the pair against co-core's own
+# `tests/test_renewal_wire_contract.py` pins the list against co-core's own
 # model, so promoting a field to required there fails the suite rather than
 # silently reopening the vector (CR 9). ``blob_fingerprint`` joined at co-core
 # 0.40.0 (cannobserv#494, #408).
@@ -110,6 +111,15 @@ def _provenance_columns(blob: BlobProvenance, outcome: ExtractionOutcome) -> dic
         "content_media_type": outcome.content_media_type,
         "spec_fingerprint": outcome.spec_fingerprint,
     }
+
+
+def _is_bare_hex_digest(value: str) -> bool:
+    """Whether ``value`` passes the Emit's ``blob_fingerprint`` validator (#408)."""
+    try:
+        validate_fingerprint(value)
+    except ValueError:
+        return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -217,12 +227,17 @@ async def _renew_blob_reference(
     a refresh, where the change path's equivalent gap costs only an observation
     that never existed. Declining also keeps a row that could only dead-letter
     out of the outbox when there is nothing there to protect. Unreachable
-    today: a command is unsendable without a ``blob_uri``, and the consumer
-    writes ``media_type`` in the same upsert — but nothing else enforces it,
-    and the asymmetry is what makes it worth a guard.
+    today: a command is unsendable without a ``blob_uri``, the consumer
+    writes ``media_type`` in the same upsert, and a process command is
+    unsendable without a bare-hex ``content_fingerprint`` — but nothing else
+    enforces it, and the asymmetry is what makes it worth a guard. A present
+    but off-spec ``blob_fingerprint`` counts as missing: the Emit refuses it
+    just as it refuses a null (#408).
     """
     provenance = _provenance_columns(blob, outcome)
     missing = [name for name in WIRE_REQUIRED_PROVENANCE_FIELDS if provenance[name] is None]
+    if blob.blob_fingerprint is not None and not _is_bare_hex_digest(blob.blob_fingerprint):
+        missing.append("blob_fingerprint")
     if missing:
         logger.warning(
             "blob reference is unpublishable — declining to renew",

@@ -137,8 +137,9 @@ the row `FOR UPDATE`:
 
 **A renewal may only ever improve a row.** It is the one writer that overwrites
 provenance rather than creating it, so a reference missing a wire-required
-field (`blob_uri`, `blob_fingerprint`, `source_media_type`) would replace a publishable row with
-one the drain dead-letters — a real revision lost to a refresh, where the
+field (`blob_uri`, `blob_fingerprint`, `source_media_type`, `content_media_type`;
+an off-spec digest counts as missing) would replace a publishable row with one
+the drain dead-letters — a real revision lost to a refresh, where the
 change path's equivalent gap costs only an observation that never existed. The
 renewal declines and logs instead, and reports `renewal_enqueued=False`.
 The consumer writes `media_type` in the same upsert as the reference; the

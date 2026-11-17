@@ -204,7 +204,9 @@ def test_a_soak_ending_is_not_a_failure(tmp_path: Path, stage: str) -> None:
 def test_any_other_lapsed_exception_fails(tmp_path: Path, what: str) -> None:
     knob = _read_knob(_knob_plus(tmp_path, f"exception {what} 2000-01-01 a lapse"), "2000-01-02")
     assert [f["kind"] for f in knob["findings"]] == ["expired-exception"]
-    assert len(_failing(knob)) == 2, _failing(knob)
+    added = len(KNOB.read_text().splitlines()) + 1
+    failing = _failing(knob)
+    assert len(failing) == 2 and all(f.startswith(f"line {added}: ") for f in failing), failing
 
 
 def test_the_knob_reads_clean() -> None:

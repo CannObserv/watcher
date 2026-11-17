@@ -88,6 +88,6 @@ exception setup-script:redelivered 2027-04-30 contained in place, 600 root and e
 exception not-restarter:watcher-backup.service 2027-04-30 a DynamicUser running pg_dump, pg_restore and the GCS upload (src.ops.backup); starts nothing
 # Drift from the image while it ships nginx: pruned here, as Archiver pruned
 # its own (#440). The date is the disable's 7-day soak; the purge follows it.
-exception disabled:nginx 2026-11-24 never started, logs empty since the image; masked 2026-11-17, savepoint taken in the soak (watcher#440)
+exception disabled:nginx 2026-11-24 never started, logs empty since the image; masked 2026-11-17; purged after the soak, by way of a savepoint (watcher#440)
 # No image-owner line: this repo is public and the image repo is not
 # (gregoryfoster/skills#350).

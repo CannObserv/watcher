@@ -86,5 +86,8 @@ exception database:watcher_test 2027-04-30 the suite's database (tests/conftest.
 exception database:watcher_dev 2027-04-30 a dev server's and the restore rehearsals' target (docs/RECOVERY-REHEARSALS.md); rebuilt from a production dump on demand
 exception setup-script:redelivered 2027-04-30 contained in place, 600 root and exe-setup.service disabled, key revoked (watcher#331, watcher#347); delivery still re-runs at every boot (CannObserv/provisioner#4)
 exception not-restarter:watcher-backup.service 2027-04-30 a DynamicUser running pg_dump, pg_restore and the GCS upload (src.ops.backup); starts nothing
+# Drift from the image while it ships nginx: pruned here, as Archiver pruned
+# its own (#440). The date is the disable's 7-day soak; the purge follows it.
+exception disabled:nginx 2026-11-24 never started, logs empty since the image; masked 2026-11-17, savepoint taken in the soak (watcher#440)
 # No image-owner line: this repo is public and the image repo is not
 # (gregoryfoster/skills#350).

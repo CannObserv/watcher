@@ -91,6 +91,12 @@ trap: the skill's `SKILL.md` → *The run*.
   `600 root:root`, `exe-setup.service` disabled. Delivery re-runs at every boot
   (CannObserv/provisioner#4); the knob's `setup-script:redelivered` exception
   records why that isn't a finding.
+- **The image's nginx is being pruned** (#440, the skill's `references/pruning.md`):
+  masked 2026-11-17, declared `disabled:nginx`; the purge follows the soak. Undo the
+  disable with `sudo systemctl unmask nginx` alone (it was never enabled or
+  started). Stage logs and the savepoint: `/var/backups/patching-hosts-prune-nginx`,
+  root-only. Past a `disabled:`/`removed:` date the knob test passes the
+  `soak-ended` finding; any other lapsed exception still fails it.
 
 ### Managing the Service
 

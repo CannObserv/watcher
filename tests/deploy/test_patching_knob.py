@@ -37,12 +37,18 @@ tracked files, run everywhere, plus the installed apt pins on the host:
   (``github-watcher:``), which the probe can't read as a GitHub repo.
 - **No ``image-owner`` and no private ``caller``**: this repo is public
   (gregoryfoster/skills#350).
+- **A prune's soak ending is not a lapse** (#440). Past its review-by date, a
+  ``disabled:`` or ``removed:`` line is ``expired`` with the finding
+  ``soak-ended``: the prompt for the next stage (gregoryfoster/skills#636).
+  Only those two pass; ``expired-exception`` fails on every other line,
+  ``purged:`` included, so a lapsed deviation still turns the host suite red.
 """
 
 import json
 import math
 import re
 import subprocess
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -140,19 +146,70 @@ def _pins(path: Path) -> list[dict[str, str]]:
     return stanzas
 
 
-def test_the_knob_reads_clean() -> None:
+#: The prune stages whose review-by date is a soak, not a deviation's lapse.
+SOAK_STAGES = ("disabled:", "removed:")
+
+
+def _read_knob(config: Path = KNOB, today: str | None = None) -> dict:
+    """The skill's own reader's JSON for ``config``, as of ``today`` (UTC)."""
     if not READ_KNOB.is_file():
         if _on_host():
             pytest.fail(f"{READ_KNOB} missing on the host: git submodule update --init")
         pytest.skip("patching-hosts submodule not initialised")
-    out = subprocess.run(
-        ["bash", str(READ_KNOB), "--config", str(KNOB), "--host", HOST],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    knob = json.loads(out)
-    assert knob["findings"] == []
+    argv = ["bash", str(READ_KNOB), "--config", str(config), "--host", HOST]
+    if today is not None:
+        argv += ["--today", today]
+    out = subprocess.run(argv, capture_output=True, text=True, check=True).stdout
+    return json.loads(out)
+
+
+def _failing(knob: dict) -> list[str]:
+    """Every finding and expired exception that fails the knob.
+
+    A ``disabled:`` or ``removed:`` line past its date is a soak that ended:
+    its ``soak-ended`` finding and its ``expired`` flag pass, on that line only.
+    """
+    soaks = {e["line"] for e in knob["exception"] if e["what"].startswith(SOAK_STAGES)}
+    failing = [
+        f"line {f['line']}: {f['kind']}: {f['message']}"
+        for f in knob["findings"]
+        if not (f["kind"] == "soak-ended" and f["line"] in soaks)
+    ]
+    failing += [
+        f"line {e['line']}: {e['what']} expired"
+        for e in knob["exception"]
+        if e["expired"] and e["line"] not in soaks
+    ]
+    return failing
+
+
+def _knob_plus(tmp_path: Path, line: str) -> Path:
+    config = tmp_path / "patching-hosts"
+    config.write_text(KNOB.read_text() + line + "\n")
+    return config
+
+
+@pytest.mark.parametrize("stage", ["disabled", "removed"])
+def test_a_soak_ending_is_not_a_failure(tmp_path: Path, stage: str) -> None:
+    knob = _read_knob(
+        _knob_plus(tmp_path, f"exception {stage}:qdrant 2000-01-01 a soak"), today="2000-01-02"
+    )
+    assert [f["kind"] for f in knob["findings"]] == ["soak-ended"]
+    assert _failing(knob) == []
+
+
+@pytest.mark.parametrize(
+    "what", ["purged:qdrant", "keep:qdrant", "database:watcher_scratch", "disabledx:qdrant"]
+)
+def test_any_other_lapsed_exception_fails(tmp_path: Path, what: str) -> None:
+    knob = _read_knob(_knob_plus(tmp_path, f"exception {what} 2000-01-01 a lapse"), "2000-01-02")
+    assert [f["kind"] for f in knob["findings"]] == ["expired-exception"]
+    assert len(_failing(knob)) == 2, _failing(knob)
+
+
+def test_the_knob_reads_clean() -> None:
+    knob = _read_knob()
+    assert _failing(knob) == []
     assert knob["report_only"] is False, knob["report_only_reasons"]
     assert knob["class"]["value"] == "production"
     assert knob["posture"]["value"] == "scheduled"
@@ -162,10 +219,25 @@ def test_the_knob_reads_clean() -> None:
     assert [(w["weekday"], w["start"], w["end"]) for w in knob["window"]] == [
         ("Mon", "01:00", "03:00")
     ]
-    assert not any(e["expired"] for e in knob["exception"])
     # The reader's reason is the whole raw reason: no comment cut one short.
     raw = {words[0]: " ".join(words[2:]) for words in _named("exception")}
     assert {e["what"]: e["reason"] for e in knob["exception"]} == raw
+
+
+def test_the_knob_stays_clean_once_a_soak_ends() -> None:
+    """The day after each soak's review-by date, the host suite stays green."""
+    for what, review_by, *_ in _named("exception"):
+        if what.startswith(SOAK_STAGES):
+            today = (date.fromisoformat(review_by) + timedelta(days=1)).isoformat()
+            assert _failing(_read_knob(today=today)) == [], f"{what} past {review_by}"
+
+
+def test_nginx_is_pruned_as_drift_from_the_image() -> None:
+    """Pruned on this host while the image ships it (#440): one stage line,
+    moved along as the prune goes, never ``keep:``."""
+    stages = [words[0] for words in _named("exception") if words[0].endswith(":nginx")]
+    assert len(stages) == 1, stages
+    assert stages[0] in ("disabled:nginx", "removed:nginx", "purged:nginx")
 
 
 def test_no_exception_reason_is_cut_short_by_a_comment() -> None:

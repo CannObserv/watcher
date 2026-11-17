@@ -13,7 +13,8 @@ mechanics (groupless tail, replay from `0-0`, no DLQ, `generation` ordering) are
 [BUS.md](BUS.md).
 
 **What an announcement owns**, and nothing else: `archiver_info_source_id`,
-`effective_url`, `source_specs`, `announced_schedule_config`, `is_active` — plus
+`effective_url`, `source_specs`, `announced_schedule_config`, `is_active`,
+`render` (#414) — plus
 `domain_name` and its two denormalized facts, and **only when the host actually
 moves**. Re-deriving the domain on every announcement would clear a
 `domain_suspended` an operator set, which is host-level mechanism the registry has
@@ -23,7 +24,7 @@ no opinion on — the `src.ops.suspend_domain` break-glass (#372) relies on it.
 audit row. A create emits `watched_item.created` with `source: "registry"` —
 parity with the API create path (deleted at #378), so a registry-born item does not read as having
 appeared from nowhere. An update emits `watched_item.announcement_applied`
-carrying `changes: {column: {old, new}}` over the five owned columns above,
+carrying `changes: {column: {old, new}}` over the six owned columns above,
 **only when that diff is non-empty**: the hourly snapshot re-announces every item
 unchanged, and an event per item per hour would bury the one that matters. The
 generation guard returns before any write, so the groupless replay from `0-0` at
@@ -48,7 +49,8 @@ acknowledgement (#274) went with the dashboard (#377), and #380 dropped its
 `health_status_code`, `error_since`, `last_checked_at`,
 `last_observed_at`, `last_changed_at`, `last_full_fetch_at`,
 `domain_suspended`, `content_media_type`, the validator state (`etag`,
-`last_modified`, `validator_source_key`), audit rows, fetch-command history.
+`last_modified`, `validator_source_key`), audit rows, fetch-command history —
+including each command's own `render` snapshot.
 Pinned by `TestLocalColumnsSurvive` — "we did not write it" is a weaker
 guarantee than "a test fails if someone does". #380 dropped the rest of the old
 list: `last_reviewed_at`, `archived_at`, `throttle_floor_interval`,
@@ -64,6 +66,20 @@ the registry has no opinion yet, so the column is left exactly as it is. Reading
 `null` as `true` would un-pause every item an operator paused, which is precisely
 what the rollout window looks like before CannObserv/archiver#150's import populates
 the column.
+
+**`render` is the source's fetch mode (#414)**, mirrored onto the item and
+sent on every `content.fetch` it issues. It is **not** an abstention like
+`active`: `null` is stored as NULL, which co-core reads as `http`, so a NULL
+item's frame is the pre-#414 one byte for byte, and Archiver clearing a mode puts
+the item back on `http`. An **unrecognized** mode (the decode takes any string;
+the Emit refuses all but `http` / `browser`, exactly) keeps the stored one —
+NULL on a create — logs a WARNING, and the rest of the announcement applies.
+Storing it would wedge the item's publish, falling back to `http` brings back
+the empty shell `browser` exists to avoid, and dropping the announcement would
+freeze its specs and cadence. A flip is one `changes.render` entry and no
+re-baseline: the rendered bytes really differ, so the next fetch reads as a
+change, and Archiver records the flip on its side (CannObserv/archiver#379). A
+CHECK on the column admits only those two modes or NULL.
 
 **A local pause is not offered.** `active` applies unconditionally, and
 item-level pause lives in Archiver's control plane alone. A control that

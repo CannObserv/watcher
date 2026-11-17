@@ -30,6 +30,21 @@ headers than the command it is replaying — and a 304 with no record of which
 validator earned it is undiagnosable. Values go out **verbatim and unparsed**:
 `W/` prefix, quotes, and the origin's own date spelling.
 
+**Under `render="browser"` nothing replays (#414)**, whatever the rules
+below say. A rendered page has no upstream validator to match, and
+`ContentFetchCommandEmit` refuses one beside `browser` (cannobserv#602, #635):
+Replicator's browser sends `user-agent` and nothing else. A pair stored under
+`http` keeps a matching `validator_source_key` across a flip, so without the
+guard the Emit would raise inside `publish_fetch_command`, the sweep would
+retry it every tick, and the open row would hold the item's scheduling — with
+only a WARNING to show for it. The guard is the first check in
+`replayable_validators`, rather than `render` folded into the key, because
+moving the key costs every stored pair one full fetch. A browser fact carries no
+`etag` / `last_modified` and the item write always overwrites, so a later flip
+back to `http` starts unconditional. The mode is snapshotted on the row with the
+pair (`fetch_commands.render`); a re-issue is a new occasion and takes the item's
+current mode.
+
 **Seven rules decide whether an occasion may replay** — `src/core/validators.py`,
 one pure predicate. Listed by subject; evaluation order is not a contract:
 

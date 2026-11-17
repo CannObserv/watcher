@@ -44,7 +44,12 @@ going to mean when it was stored; see
 the extraction identity of the latest successful outcome, refreshed even when
 the fingerprint is unchanged: Option A's comparison base, and the key's
 generation when the processor decides — see
-[docs/CONTENT-PIPELINE.md](CONTENT-PIPELINE.md)). **Schedule resolution is announced, else the system default (#375, F2).**
+[docs/CONTENT-PIPELINE.md](CONTENT-PIPELINE.md)); `render` (#414 — how
+Replicator fetches the item: `http`, `browser`, or NULL for "no opinion yet",
+which fetches over `http`; mirrored from the announcement, snapshotted onto each
+command and sent as `ContentFetchCommand.render`, CHECK-limited to those modes;
+no validator replays under `browser` —
+[REGISTRY.md](REGISTRY.md), [CONDITIONAL-GET.md](CONDITIONAL-GET.md)). **Schedule resolution is announced, else the system default (#375, F2).**
 `resolved_schedule_config` (`src/core/scheduling/resolution.py`) returns
 `announced_schedule_config` when set (an explicit `{}` passes through as "no
 interval"), otherwise `SYSTEM_DEFAULT_SCHEDULE_CONFIG` (`1d`). Archiver resolves

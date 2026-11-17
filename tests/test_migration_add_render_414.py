@@ -7,6 +7,7 @@ the models, which already map the column, so each test starts upgraded.
 """
 
 import importlib.util
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from alembic.operations import Operations
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
+from src.core.fetch_commands import create_fetch_command
 from src.core.models.watched_item import RENDER_MODES
 from tests.conftest import make_watched_item
 
@@ -113,4 +115,22 @@ async def test_the_check_refuses_an_unsendable_mode(db_session, value):
             await db_session.execute(
                 text("UPDATE watched_items SET render = :v WHERE id = :id"),
                 {"v": value, "id": str(wi.id)},
+            )
+
+
+@pytest.mark.parametrize("value", ["HTTP", "chrome", ""])
+async def test_the_command_check_refuses_an_unsendable_mode(db_session, value):
+    # The sweep republishes from the row alone, so the row's CHECK is the one
+    # that keeps an unsendable mode off the wire.
+    await _run(db_session, "downgrade")
+    await _run(db_session, "upgrade")
+    wi = await make_watched_item(db_session)
+    row = await create_fetch_command(db_session, wi, now=datetime.now(UTC))
+    await db_session.flush()
+
+    with pytest.raises(IntegrityError, match="ck_fetch_commands_render"):
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text("UPDATE fetch_commands SET render = :v WHERE command_id = :id"),
+                {"v": value, "id": row.command_id},
             )

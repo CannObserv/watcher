@@ -39,11 +39,11 @@ guard the Emit would raise inside `publish_fetch_command`, the sweep would
 retry it every tick, and the open row would hold the item's scheduling — with
 only a WARNING to show for it. The guard is the first check in
 `replayable_validators`, rather than `render` folded into the key, because
-moving the key costs every stored pair one full fetch. A browser fact carries no
-`etag` / `last_modified` and the item write always overwrites, so a later flip
-back to `http` starts unconditional. The mode is snapshotted on the row with the
-pair (`fetch_commands.render`); a re-issue is a new occasion and takes the item's
-current mode.
+moving the key costs every stored pair one full fetch. A browser success stores
+no pair (`close_succeeded` drops one even if the fact carried it) and the item
+write always overwrites, so a later flip back to `http` starts unconditional.
+The mode is snapshotted on the row with the pair (`fetch_commands.render`); a
+re-issue is a new occasion and takes the item's current mode.
 
 **Seven rules decide whether an occasion may replay** — `src/core/validators.py`,
 one pure predicate. Listed by subject; evaluation order is not a contract:

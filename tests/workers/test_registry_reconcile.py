@@ -37,6 +37,7 @@ from sqlalchemy import select
 from ulid import ULID
 
 from src.core.domains import set_domain_active
+from src.core.fetch_commands import create_fetch_command
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.revoked_info_item import RevokedInfoItem
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
@@ -1173,6 +1174,26 @@ class TestRenderMode:
         )
 
         assert await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED) == []
+
+    async def test_a_flip_leaves_an_open_commands_mode_alone(self, db_session):
+        """The command's own ``render`` is fetch-command history, not an
+        announced column: the sweep republishes what was minted."""
+        info_item_id = ULID()
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=1, render="http")
+        )
+        command = await create_fetch_command(
+            db_session, await _get(db_session, info_item_id), now=NOW
+        )
+        await db_session.flush()
+
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=2, render="browser")
+        )
+
+        await db_session.refresh(command)
+        assert command.render == "http"
+        assert (await _get(db_session, info_item_id)).render == "browser"
 
     async def test_an_unknown_mode_records_no_render_change(self, db_session):
         info_item_id = ULID()

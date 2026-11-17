@@ -59,10 +59,10 @@ rule but the wire's: a rendered page has no upstream validator to match, and
 ``ContentFetchCommandEmit`` refuses one beside ``browser``. A pair stored under
 ``http`` keeps a matching key across a flip, so without this guard the Emit
 would raise at every publish of the command and the item would stop being
-checked. A browser fact carries no ``etag`` / ``last_modified``, and
-``record_validators`` always overwrites, so a later flip back starts
-unconditional. The guard rather than a ``render`` term in the key: moving the
-key costs every stored pair once.
+checked. A browser success stores no pair (``close_succeeded`` drops one
+even if the fact carried it), and ``record_validators`` always overwrites, so
+a later flip back starts unconditional. The guard rather than a ``render``
+term in the key: moving the key costs every stored pair once.
 """
 
 import hashlib

@@ -566,6 +566,29 @@ class TestDecisiveApply:
         assert item.etag is None
         assert item.last_modified is None
 
+    async def test_a_browser_200_stores_no_pair_even_if_the_fact_carries_one(
+        self, db_session, monkeypatch
+    ):
+        # #414: a rendered page has no upstream validator. Stored, a pair from a
+        # browser fact keeps a matching key across a flip back to http, so the
+        # first http command would replay it, take a 304, and keep the rendered
+        # bytes as the baseline until the age ceiling forced a full fetch.
+        row = await _decisive(
+            db_session,
+            item_over={"render": "browser"},
+            fetch_over={"etag": '"rendered"', "last_modified": "Mon, 11 Aug 2026 10:00:00 GMT"},
+            **_completed(),
+        )
+        _wire(db_session, monkeypatch)
+        _spy_change_fact(monkeypatch)
+
+        await apply_process_fact(row.command_id)
+
+        item = await self._item(db_session, row)
+        assert (await self._fetch(db_session, row)).render == "browser"
+        assert item.etag is None
+        assert item.last_modified is None
+
     async def test_the_first_success_republishes_status_once(self, db_session, monkeypatch):
         # #264: a health transition defers a watch-status republish.
         row = await _decisive(db_session, **_completed())

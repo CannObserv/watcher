@@ -433,7 +433,16 @@ async def close_succeeded(
     """
     row.status = FetchCommandStatus.SUCCEEDED
     row.applied_at = now
-    record_validators(watched_item, etag=row.etag, last_modified=row.last_modified, now=now)
+    # #414: a rendered page has no upstream validator, whatever the fact says. A
+    # pair kept from a browser fetch would still match the key after a flip back
+    # to http, and its 304 would hold the rendered bytes as the baseline.
+    rendered = row.render == "browser"
+    record_validators(
+        watched_item,
+        etag=None if rendered else row.etag,
+        last_modified=None if rendered else row.last_modified,
+        now=now,
+    )
     extra = dict(audit_extra or {})
     if result.renewal_enqueued:
         extra["renewal_enqueued"] = True

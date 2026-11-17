@@ -155,8 +155,11 @@ release's versioned files from `$(uv run procrastinate schema --migrations-path)
 named `<xx.yy.zz>_<nn>_<pre|post>_*.sql`: `pre` before the new code starts,
 `post` after ([procrastinate: *Migrate the schema*](https://procrastinate.readthedocs.io/en/stable/howto/production/migrations.html)).
 Before landing a bump, list the files newer than the installed version; none
-means no DDL. 3.7.2 → 3.10.0 (#426) shipped none: the newest file is still
-`03.04.00_50_post_add_retry_failed_job_procedure.sql`.
+means no DDL. 3.7.2 → 3.10.0 (#426) shipped none. 3.10.0 → 3.11.0 (#443)
+shipped one, the newest file now:
+`03.11.00_01_pre_fetch_job_skip_null_lock.sql`, a `CREATE OR REPLACE` of
+`procrastinate_fetch_job_v2` (same signature). It was applied 2026-11-17 as
+`watcher` (`psql -v ON_ERROR_STOP=1 -1 -f`) before the restart.
 
 ## The test role — one-time (#388)
 

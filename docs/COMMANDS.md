@@ -385,12 +385,11 @@ are the rework when xdist is actually adopted.
 
 ## CI (#220)
 
-GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`; the four jobs are
-the `main` ruleset's required checks, strict (#445). A
+GitHub Actions (`.github/workflows/ci.yml`) runs four jobs on push/PR to `main`, each a
+required check of the `main` ruleset, strict (#445): a
 **lint** job (`ruff check` + `ruff format --check`), a **test** job
 (`pytest -m "not integration and not live"` with **no database** — its
-`TEST_DATABASE_URL` points at port 1, so an unmarked test that connects fails there),
-an
+`TEST_DATABASE_URL` points at port 1, so an unmarked test that connects fails there), an
 **integration** job (`pytest -m integration` against its own `postgres:16`, then
 `scripts/check_no_skips.py` on the JUnit report — #353), and a
 **migrations** job (independent migration-chain smoke-check, #234 — `alembic

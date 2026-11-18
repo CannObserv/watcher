@@ -112,7 +112,8 @@ main checkout, which is the deploy, and runs Step 8 there. The `main` ruleset ha
 the two automated pushers open PRs too: the daily skills refresh one from `skills/submodule-refresh`
 (`GH_TOKEN` from `.env`, so CI runs on it), and `context-cadence.yml` one from
 `context/weekly-measurement` (`GITHUB_TOKEN`, so no check runs until someone closes and reopens
-it). Every reader takes the knob from the primary checkout, never a worktree's;
+it). Every host-side reader takes the knob from the primary checkout, never a worktree's (the
+workflow reads its own checkout);
 [tests/ci/test_merge_mode.py](../tests/ci/test_merge_mode.py) pins it and the cadence render.
 
 **Step 1 resolves each script on its own.** The vendor's `skill-scripts` block probes `scripts/`

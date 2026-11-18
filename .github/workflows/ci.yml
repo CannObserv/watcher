@@ -23,7 +23,7 @@ jobs:
   lint:
     name: lint
     runs-on: ubuntu-24.04
-    timeout-minutes: 10 # #416: the measured maximum is 54 s; a hang stops here, not at 6 h
+    timeout-minutes: 10 # #416, every job: the slowest measured (integration) took 54 s
     # WIF: mint an OIDC token for google-github-actions/auth to impersonate the
     # read-only co-pypi-reader SA, whose access token reads the co-pypi index
     # co-core resolves from (#358). Job-scoped so no other job gains cloud

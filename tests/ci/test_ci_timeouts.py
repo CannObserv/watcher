@@ -21,7 +21,7 @@ GITHUB_DEFAULT_MINUTES = 360
 
 
 def _jobs() -> dict:
-    return yaml.safe_load(CI.read_text(encoding="utf-8")).get("jobs") or {}
+    return (yaml.safe_load(CI.read_text(encoding="utf-8")) or {}).get("jobs") or {}
 
 
 def _bounded(minutes: object) -> bool:
@@ -40,9 +40,9 @@ def test_every_ci_job_has_a_positive_timeout() -> None:
     jobs = _jobs()
     assert jobs, "found no ci.yml jobs — the derivation broke"
     unbounded = {
-        name: job.get("timeout-minutes")
+        name: (job or {}).get("timeout-minutes")
         for name, job in jobs.items()
-        if not _bounded(job.get("timeout-minutes"))
+        if not _bounded((job or {}).get("timeout-minutes"))
     }
     assert not unbounded, (
         f"ci.yml jobs without a bounded timeout-minutes: {unbounded}. "

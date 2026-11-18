@@ -99,18 +99,21 @@ run. *"did not inject $ACTIONS_ID_TOKEN_REQUEST_TOKEN"* — no OIDC token was
 granted. Past both, a token-exchange failure — the `github-ci` provider's
 attribute condition or the SA binding ([COMMANDS.md](COMMANDS.md) → *CI*). None is the bump's fault.
 
-**How one lands — locally, like everything else.** Dependabot only opens PRs;
-watcher merges to `main` on the VM, behind the ship gate:
+**How one lands — by squash PR, like everything else (#445).** Dependabot opens
+the PR; the `main` ruleset merges it on GitHub only once `lint`, `test`,
+`integration` and `migrations` pass on a branch up to date with `main`. The host
+pulls afterwards:
 
 ```bash
 # Read the action's release notes, not just the diff: a major bump can change inputs.
 gh pr comment <N> --body "@dependabot rebase"  # only if main moved; wait for its force-push (silent? below)
-gh pr checks <N> --watch                       # every job green, on the commit that lands
-git fetch origin "$(gh pr view <N> --json headRefName -q .headRefName)"
-git merge --ff-only FETCH_HEAD
-bash scripts/pre-ship.sh
-git push origin main                           # GitHub marks the PR merged
+gh pr checks <N> --watch --required            # the four required checks, green on the head
+gh pr merge <N> --squash                       # refused while the branch is behind or a check is red
+git pull --ff-only                             # on the host, in the main checkout: the deploy
 ```
+
+Never GitHub's *Update branch* on a Dependabot PR: it adds a commit that isn't
+Dependabot's, and Dependabot then stops rebasing that PR.
 
 **A rebase request can go unanswered** (6 of 20 in the first `uv` batch, #416).
 With no reaction and no *Dependabot Updates* job after about 6 minutes, post it
@@ -119,9 +122,14 @@ twice gets `@dependabot recreate` instead: it rebuilds the PR from `main` (#442:
 the same diff, in 2 minutes) and drops any manual edit, so only on a PR nobody
 edited.
 
-Fast-forward only: the commit CI tested is the commit that lands, and its subject
-already takes the repo's form (`chore: bump …`, the `commit-message` prefix). One
-PR at a time — after each push the next may need `@dependabot rebase`. **Restart**
+Strict checks: the tree CI tested is the tree that lands. The squash commit gets
+a new SHA, but the branch had to be up to date, so after the pull
+`git fetch -q origin pull/<N>/head && git rev-parse FETCH_HEAD^{tree}` equals
+`git rev-parse HEAD^{tree}` (the head branch is deleted on merge, so its commit
+is fetched by the PR ref), and the push run re-tests it on `main`. The PR's
+title already takes the repo's form (`chore: bump …`, the `commit-message`
+prefix). One PR at a time — after each merge the next is behind and needs
+`@dependabot rebase`. **Restart**
 (`sudo systemctl restart watcher`) only when the diff touches something outside
 `.github/`; an action bump never does.
 
@@ -132,11 +140,10 @@ start, a crash restart included. So each landing syncs, and the batch restarts
 once:
 
 ```bash
-# …the fetch and the ff-merge above, then:
-git diff -U0 ORIG_HEAD -- pyproject.toml uv.lock | grep -E '^[-+].*co[-_]core'  # must print nothing
+gh pr diff <N> | grep -E '^[-+].*co[-_]core'   # before the merge: must print nothing
+# …the merge and the pull above, then:
 source scripts/load-env.sh && bash scripts/co-pypi.sh uv sync --locked
 bash scripts/pre-ship.sh                       # tests/test_dependency_index.py: co-core still on the index
-git push origin main
 # After the batch's last landing:
 sudo systemctl restart watcher                 # then /health reports the SHA, and NRestarts=0
 ```
@@ -155,8 +162,9 @@ sudo systemctl restart watcher                 # then /health reports the SHA, a
   `tests/ci/test_dependabot.py` once broker#85 settles **and** a co-core-aio
   release lifts `<8`. Then re-measure docs/BUS-CONNECTION-POLICY.md (redis-py 7.4.1).
 - **A security PR** (its body lists the advisory) is a lock-only fix: add its
-  `_FLOORS` row (*Advisory floors*) as a commit on top of the fast-forward,
-  before the push.
+  `_FLOORS` row (*Advisory floors*) as a commit pushed to its branch before the
+  merge (CI re-runs on it; Dependabot then won't rebase that PR, so merge it
+  next, or bring it up to date with *Update branch*), or as a follow-up PR.
 - **A batch shares `uv.lock`**, as do the hand-made co-core re-locks (#408,
   #414), so after each landing the next PR may need `@dependabot rebase`.
   `audit.yml` runs on each one (report-only).
@@ -173,6 +181,8 @@ DEPENDABOT.md → step 4.
 
 **`context-cadence.yml` is generated** (`install-cadence.sh`, vendored in
 `skills-vendor/`), and Dependabot bumps its `actions/checkout` with `ci.yml`'s.
-Take the bump; a later re-run of the generator reverts it to the generator's
-own `@v5` (gregoryfoster/skills#373), which the pin test fails — so after a
-regeneration, restore its `uses:` line before committing.
+Take the bump: a re-run of the generator keeps an installed SHA pin
+(gregoryfoster/skills#373; `--check` says `checkout pin: kept`). Since #445 it
+renders the `pr` workflow (`.skills/merge_mode`): each run opens or updates one
+PR from `context/weekly-measurement`. `GITHUB_TOKEN` opened it, so no check runs
+on it until someone closes and reopens it.

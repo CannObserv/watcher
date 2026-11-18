@@ -106,6 +106,15 @@ the retired `shipping-work-python-fastapi` fork, and where each now lives:
 | `compatibility:` — needs `/etc/watcher/.env` | The wrapper loads it (below); without it the DB-backed tests have no URL |
 | Notes: the wrapper wins for `pre-ship.sh` alone | Below, and [tests/test_shipping_work_scripts.py](../tests/test_shipping_work_scripts.py) |
 
+**`pr` mode (#445).** `.skills/merge_mode` is `pr`, so a ship is two passes (the vendor's
+`references/pr-mode.md`): the PR pass ends with a squash PR open; the post-merge pass pulls the
+main checkout, which is the deploy, and runs Step 8 there. The `main` ruleset has no bypass, so
+the two automated pushers open PRs too: the daily skills refresh one from `skills/submodule-refresh`
+(`GH_TOKEN` from `.env`, so CI runs on it), and `context-cadence.yml` one from
+`context/weekly-measurement` (`GITHUB_TOKEN`, so no check runs until someone closes and reopens
+it). Every reader takes the knob from the primary checkout, never a worktree's;
+[tests/ci/test_merge_mode.py](../tests/ci/test_merge_mode.py) pins it and the cadence render.
+
 **Step 1 resolves each script on its own.** The vendor's `skill-scripts` block probes `scripts/`
 first, per script ([gregoryfoster/skills#301](https://github.com/gregoryfoster/skills/issues/301)),
 so [scripts/pre-ship.sh](../scripts/pre-ship.sh) wins for `pre-ship.sh` alone and the other five

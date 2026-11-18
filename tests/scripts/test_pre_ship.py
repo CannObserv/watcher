@@ -1,8 +1,8 @@
 """Tests for ``scripts/pre-ship.sh``, watcher's wrapper around the vendored ship gate.
 
-The vendored gate deselects integration-marked tests, and watcher merges to
-``main`` locally and restarts the service from it, so CI reports only after the
-code is live. The wrapper therefore runs ``pytest -m integration`` itself once
+The vendored gate deselects integration-marked tests, and CI's ``integration``
+job is a required check on ``main`` (#445), so a red one blocks the PR's merge a
+round-trip later. The wrapper therefore runs ``pytest -m integration`` itself once
 the vendored gate passes (#353), and fails on a skip as well as a failure
 (``scripts/check_no_skips.py``).
 

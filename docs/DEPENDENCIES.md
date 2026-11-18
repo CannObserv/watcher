@@ -104,13 +104,19 @@ watcher merges to `main` on the VM, behind the ship gate:
 
 ```bash
 # Read the action's release notes, not just the diff: a major bump can change inputs.
-gh pr comment <N> --body "@dependabot rebase"  # only if main moved; wait for its force-push
+gh pr comment <N> --body "@dependabot rebase"  # only if main moved; wait for its force-push (silent? below)
 gh pr checks <N> --watch                       # every job green, on the commit that lands
 git fetch origin "$(gh pr view <N> --json headRefName -q .headRefName)"
 git merge --ff-only FETCH_HEAD
 bash scripts/pre-ship.sh
 git push origin main                           # GitHub marks the PR merged
 ```
+
+**A rebase request can go unanswered** (6 of 20 in the first `uv` batch, #416).
+With no reaction and no *Dependabot Updates* job after about 6 minutes, post it
+again, and keep re-posting until one takes. A **group** PR silent twice gets
+`@dependabot recreate` instead: it rebuilds the PR from `main` (#442: the same
+diff, in 2 minutes) and drops any manual edit, so only on a PR nobody edited.
 
 Fast-forward only: the commit CI tested is the commit that lands, and its subject
 already takes the repo's form (`chore: bump …`, the `commit-message` prefix). One

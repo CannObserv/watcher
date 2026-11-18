@@ -57,8 +57,8 @@ This is watcher's thin wrapper — it loads the env files above, delegates to th
 vendored gate in `shipping-work`, and once that passes runs
 `pytest -m integration` (~20 s against the local test DB), failing on a skip or xfail as well
 as a failure (#353). The vendored gate deselects the mark; watcher runs it here
-because merging to `main` locally and restarting means CI reports only after the code
-is live. Run it from the repo root; it exits non-zero on any failure and 2 on
+because it is the gate before the PR opens: CI's `integration` job is a required
+check (#445), and a red one blocks the merge a round-trip later. Run it from the repo root; it exits non-zero on any failure and 2 on
 tooling/infra problems (including an uninitialized `skills-vendor/` submodule). See [SKILLS.md](SKILLS.md) for why the gate itself is not
 forked.
 
@@ -138,9 +138,10 @@ needs the same flag, or it emits plain text alongside the JSON records.
 
 ### Testing code changes against the live site
 
-After committing to main, restart the service to pick up changes:
+After the PR merges, pull it into this checkout and restart the service to pick up changes:
 
 ```bash
+git pull --ff-only
 sudo systemctl restart watcher
 # Verify
 curl -s http://localhost:8000/health | python3 -m json.tool
@@ -384,7 +385,8 @@ are the rework when xdist is actually adopted.
 
 ## CI (#220)
 
-GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`: a
+GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`; the four jobs are
+the `main` ruleset's required checks, strict (#445). A
 **lint** job (`ruff check` + `ruff format --check`), a **test** job
 (`pytest -m "not integration and not live"` with **no database** — its
 `TEST_DATABASE_URL` points at port 1, so an unmarked test that connects fails there),

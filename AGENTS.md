@@ -44,7 +44,7 @@ Full tool table, index scope, client contract and traps: [docs/SOCRATICODE.md](d
 
 ## Infrastructure
 
-**Single-VM setup.** Dev and prod on the same VM. Code committed to `main` is the deployed code.
+**Single-VM setup.** Dev and prod on the same VM. Code reaches `main` only by squash PR (#445; `.skills/merge_mode` is `pr`), then is pulled into this checkout: the pull is the deploy.
 
 | Service | Port | Managed by |
 |---|---|---|
@@ -65,7 +65,7 @@ The exe.dev proxy forwards 3000–9999; dev server at `https://co-watcher.exe.xy
 
 **Port 8000 belongs to systemd. Never start uvicorn manually on port 8000.**
 
-After committing to `main`: `sudo systemctl restart watcher`. After DB model changes: `uv run alembic upgrade head` then restart. Logs: `sudo journalctl -u watcher -f`.
+After the PR merges: `git pull --ff-only` here, then `sudo systemctl restart watcher`. After DB model changes: `uv run alembic upgrade head` then restart. Logs: `sudo journalctl -u watcher -f`.
 
 Dev server (port 8001, leaves prod alone):
 
@@ -141,7 +141,7 @@ Where pause does live, the authoritative column list: [docs/REGISTRY.md](docs/RE
 #<number> [type]: <description>      # with issue
 [type]: <description>                # without issue
 ```
-Types: feat, fix, refactor, docs, test, chore.
+Types: feat, fix, refactor, docs, test, chore. A PR title takes the same form: it becomes the squash commit's subject.
 
 **Logging:**
 ```python

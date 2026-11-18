@@ -124,8 +124,9 @@ edited.
 
 Strict checks: the tree CI tested is the tree that lands. The squash commit gets
 a new SHA, but the branch had to be up to date, so after the pull
-`git rev-parse <headRefOid>^{tree}` (`gh pr view <N> --json headRefOid`) equals
-`git rev-parse HEAD^{tree}`, and the push run re-tests it on `main`. The PR's
+`git fetch -q origin pull/<N>/head && git rev-parse FETCH_HEAD^{tree}` equals
+`git rev-parse HEAD^{tree}` (the head branch is deleted on merge, so its commit
+is fetched by the PR ref), and the push run re-tests it on `main`. The PR's
 title already takes the repo's form (`chore: bump …`, the `commit-message`
 prefix). One PR at a time — after each merge the next is behind and needs
 `@dependabot rebase`. **Restart**
@@ -163,7 +164,7 @@ sudo systemctl restart watcher                 # then /health reports the SHA, a
 - **A security PR** (its body lists the advisory) is a lock-only fix: add its
   `_FLOORS` row (*Advisory floors*) as a commit pushed to its branch before the
   merge (CI re-runs on it; Dependabot then won't rebase that PR, so merge it
-  next), or as a follow-up PR.
+  next, or bring it up to date with *Update branch*), or as a follow-up PR.
 - **A batch shares `uv.lock`**, as do the hand-made co-core re-locks (#408,
   #414), so after each landing the next PR may need `@dependabot rebase`.
   `audit.yml` runs on each one (report-only).

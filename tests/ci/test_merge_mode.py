@@ -49,8 +49,13 @@ def test_the_cadence_is_rendered_for_pr() -> None:
 
 
 def test_the_vendored_reader_prints_pr() -> None:
+    """``shipping-work``'s own reader, run in this repo whatever pytest's cwd."""
     out = subprocess.run(
-        ["bash", str(_vendored(MERGE_MODE_SH))], capture_output=True, text=True, check=True
+        ["bash", str(_vendored(MERGE_MODE_SH))],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=REPO_ROOT,
     )
     assert out.stdout.strip() == "pr"
 

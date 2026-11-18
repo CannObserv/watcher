@@ -58,9 +58,10 @@ vendored gate in `shipping-work`, and once that passes runs
 `pytest -m integration` (~20 s against the local test DB), failing on a skip or xfail as well
 as a failure (#353). The vendored gate deselects the mark; watcher runs it here
 because it is the gate before the PR opens: CI's `integration` job is a required
-check (#445), and a red one blocks the merge a round-trip later. Run it from the repo root; it exits non-zero on any failure and 2 on
-tooling/infra problems (including an uninitialized `skills-vendor/` submodule). See [SKILLS.md](SKILLS.md) for why the gate itself is not
-forked.
+check (#445), and a red one blocks the merge a round-trip later. Run it from the
+repo root; it exits non-zero on any failure and 2 on tooling/infra problems
+(including an uninitialized `skills-vendor/` submodule). See [SKILLS.md](SKILLS.md)
+for why the gate itself is not forked.
 
 The vendored gate's default suite runs with CI's no-server `TEST_DATABASE_URL`, so the
 local default run matches CI's `test` job: a DB test missing its `integration` marker

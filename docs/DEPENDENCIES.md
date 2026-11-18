@@ -112,8 +112,8 @@ gh pr merge <N> --squash                       # refused while the branch is beh
 git pull --ff-only                             # on the host, in the main checkout: the deploy
 ```
 
-Never GitHub's *Update branch* on a Dependabot PR: it adds a commit that isn't
-Dependabot's, and Dependabot then stops rebasing that PR.
+Never GitHub's *Update branch* on a Dependabot PR nobody edited: it adds a commit
+that isn't Dependabot's, and Dependabot then stops rebasing that PR.
 
 **A rebase request can go unanswered** (6 of 20 in the first `uv` batch, #416).
 With no reaction and no *Dependabot Updates* job after about 6 minutes, post it

@@ -119,8 +119,9 @@ the next landing a head that moved is already behind. So the base check, not a
 force-push, says the request was answered. `BLOCKED` (read on an up-to-date
 head while its checks ran, #455) says only that the merge is blocked, not
 where the head sits, so anything but `CLEAN`, `BEHIND` or `DIRTY` goes to the
-exact form. It fetches the PR ref **first**, since `FETCH_HEAD` names the first ref fetched and `git fetch origin main
-"pull/<N>/head"` would test `main` against itself (`origin/main` still updates):
+exact form. It fetches the PR ref **first**, since `FETCH_HEAD` names the
+first ref fetched and `git fetch origin main "pull/<N>/head"` would test `main`
+against itself (`origin/main` still updates):
 
 ```bash
 git fetch -q origin "pull/<N>/head" main && git merge-base --is-ancestor origin/main FETCH_HEAD  # 0: on main; 1: not yet; else: failed

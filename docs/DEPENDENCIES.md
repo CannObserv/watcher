@@ -106,18 +106,33 @@ pulls afterwards:
 
 ```bash
 # Read the action's release notes, not just the diff: a major bump can change inputs.
-gh pr comment <N> --body "@dependabot rebase"  # only if main moved; wait for its force-push (silent? below)
+gh pr comment <N> --body "@dependabot rebase"  # only if main moved; then the base check (silent? below)
+gh pr view <N> --json mergeStateStatus -q .mergeStateStatus  # BLOCKED/CLEAN: on main; BEHIND/DIRTY: not yet; UNKNOWN: re-read
 gh pr checks <N> --watch --required            # the four required checks, green on the head
 gh pr merge <N> --squash                       # refused while the branch is behind or a check is red
 git pull --ff-only                             # on the host, in the main checkout: the deploy
+```
+
+**A moved head isn't a rebased one (#454).** After a landing, Dependabot may
+rebase the batch's other PRs onto the commit just landed, so a head that moved
+can already be behind. So the base check, not a force-push, says the request
+was answered, and `--watch` starts only once it passes: earlier, it can report
+before the new head's checks register (cosmetic; `gh pr merge` refuses
+regardless). The exact form fetches the PR ref **last**, since `FETCH_HEAD`
+names the first ref fetched and `git fetch origin main pull/<N>/head` would
+test `main` against itself:
+
+```bash
+git fetch -q origin main && git fetch -q origin "pull/<N>/head" && git merge-base --is-ancestor origin/main FETCH_HEAD  # exit 0 = on main
 ```
 
 Never GitHub's *Update branch* on a Dependabot PR nobody edited: it adds a commit
 that isn't Dependabot's, and Dependabot then stops rebasing that PR.
 
 **A rebase request can go unanswered** (6 of 20 in the first `uv` batch, #416).
-With no reaction and no *Dependabot Updates* job after about 6 minutes, post it
-again. A single-package PR gets re-posts until one takes; a **group** PR silent
+If the base check still fails about 6 minutes after the request, with no
+*Dependabot Updates* job running, post it again: only a push onto current
+`main` answers it. A single-package PR gets re-posts until one takes; a **group** PR silent
 twice gets `@dependabot recreate` instead: it rebuilds the PR from `main` (#442:
 the same diff, in 2 minutes) and drops any manual edit, so only on a PR nobody
 edited.

@@ -26,9 +26,9 @@ and a quiet bot reads like "no updates available". Notifier's pattern
   Dependabot opens nothing and says so nowhere (notifier#103). The bounds are
   derived — one PR per action from the workflows, one per runtime package not
   ignored plus one per group from ``pyproject.toml`` — never transcribed.
-* **Commits match AGENTS.md's convention**, because a Dependabot PR lands by
-  fast-forwarding its commit onto ``main`` (docs/DEPENDENCIES.md → *Dependabot
-  PRs*).
+* **Commits match AGENTS.md's convention**, because Dependabot's commit message
+  becomes the PR title, and a PR lands as a squash whose subject is that title
+  (#445; docs/DEPENDENCIES.md → *Dependabot PRs*).
 * **Every ``uses:`` pins a commit SHA with its version comment** (#360).
   Dependabot proposes refs in the pin's own form, so a floating major goes
   silent once upstream stops tagging majors (setup-uv after v7), and a moved

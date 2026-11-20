@@ -106,36 +106,41 @@ pulls afterwards:
 
 ```bash
 # Read the action's release notes, not just the diff: a major bump can change inputs.
-gh pr comment <N> --body "@dependabot rebase"  # only if main moved; then the base check (silent? below)
-gh pr view <N> --json mergeStateStatus -q .mergeStateStatus  # BLOCKED/CLEAN: on main; BEHIND/DIRTY: not yet; UNKNOWN: re-read
+gh pr comment <N> --body "@dependabot rebase"  # only if main moved; then the base check (unanswered? below)
+gh pr view <N> --json mergeStateStatus -q .mergeStateStatus  # CLEAN: on main; BEHIND/DIRTY: not yet; else: the exact form below
 gh pr checks <N> --watch --required            # the four required checks, green on the head
 gh pr merge <N> --squash                       # refused while the branch is behind or a check is red
 git pull --ff-only                             # on the host, in the main checkout: the deploy
 ```
 
-**A moved head isn't a rebased one (#454).** After a landing, Dependabot may
-rebase the batch's other PRs onto the commit just landed, so a head that moved
-can already be behind. So the base check, not a force-push, says the request
-was answered, and `--watch` starts only once it passes: earlier, it can report
-before the new head's checks register (cosmetic; `gh pr merge` refuses
-regardless). The exact form fetches the PR ref **last**, since `FETCH_HEAD`
-names the first ref fetched and `git fetch origin main pull/<N>/head` would
-test `main` against itself:
+**A moved head isn't a rebased one (#454).** A landing that conflicts in
+`uv.lock` makes Dependabot rebase the batch's other PRs onto it unasked, so by
+the next landing a head that moved is already behind. So the base check, not a
+force-push, says the request was answered. `BLOCKED` (read on an up-to-date
+head while its checks ran, #455) says only that the merge is blocked, not
+where the head sits, so anything but `CLEAN`, `BEHIND` or `DIRTY` goes to the
+exact form. It fetches the PR ref **first**, since `FETCH_HEAD` names the first ref fetched and `git fetch origin main
+"pull/<N>/head"` would test `main` against itself (`origin/main` still updates):
 
 ```bash
-git fetch -q origin main && git fetch -q origin "pull/<N>/head" && git merge-base --is-ancestor origin/main FETCH_HEAD  # exit 0 = on main
+git fetch -q origin "pull/<N>/head" main && git merge-base --is-ancestor origin/main FETCH_HEAD  # 0: on main; 1: not yet; else: failed
 ```
+
+`--watch` starts once the base check passes **and** `gh pr checks <N>` lists
+the new head's runs: they register seconds after the push, and a watch begun
+earlier can report too soon (cosmetic; `gh pr merge` refuses regardless).
 
 Never GitHub's *Update branch* on a Dependabot PR nobody edited: it adds a commit
 that isn't Dependabot's, and Dependabot then stops rebasing that PR.
 
 **A rebase request can go unanswered** (6 of 20 in the first `uv` batch, #416).
 If the base check still fails about 6 minutes after the request, with no
-*Dependabot Updates* job running, post it again: only a push onto current
-`main` answers it. A single-package PR gets re-posts until one takes; a **group** PR silent
-twice gets `@dependabot recreate` instead: it rebuilds the PR from `main` (#442:
-the same diff, in 2 minutes) and drops any manual edit, so only on a PR nobody
-edited.
+Dependabot reply and no *Dependabot Updates* job running, post it again: only a
+push onto current `main` answers it. A reply is an answer (it refuses a PR
+someone edited): read it, don't re-post. A single-package PR gets re-posts
+until one takes; a **group** PR unanswered twice gets `@dependabot recreate`
+instead: it rebuilds the PR from `main` (#442: the same diff, in 2 minutes) and
+drops any manual edit, so only on a PR nobody edited.
 
 Strict checks: the tree CI tested is the tree that lands. The squash commit gets
 a new SHA, but the branch had to be up to date, so after the pull

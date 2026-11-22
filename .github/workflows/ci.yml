@@ -85,6 +85,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      statuses: read # the attest step reads gate/local (#456)
     # No database, deliberately (#353 CR 2). conftest needs the variable set and
     # _test-suffixed, never a server; port 1 points at nothing, so an unmarked
     # test that connects fails HERE — the job that names the wrong half —
@@ -127,8 +128,42 @@ jobs:
       # `integration` job below builds it with Base.metadata.create_all
       # (conftest); the migration chain is smoke-checked in the `migrations`
       # job (#234). `live` tests (real GCS) run in no job (#353).
+      # Local-gate attestation (#456): shipping-work's push.sh, with
+      # .skills/attest-local-gate on, posts gate/local = success on a commit
+      # whose exact tree passed scripts/pre-ship.sh, which runs this job's
+      # suite with this job's TEST_DATABASE_URL (#406) and then the
+      # integration mark. Copied from the vendor's
+      # shipping-work/references/attestation.md, its explanation moved out of
+      # `run:` (tests split every step's run with shlex):
+      # - HEAD is the PR's head: on pull_request, github.sha is the merge
+      #   commit, which nobody gated.
+      # - The combined status keeps each context's latest state (/statuses
+      #   lists every one ever posted), a page of 100 contexts.
+      # - A refused read fails the step under bash -e: loud, never a silent
+      #   skip. tests/ci/test_attest_local_gate.py pins it.
+      - name: attest (gate/local)
+        id: attest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          n=$(gh api "repos/${{ github.repository }}/commits/$HEAD/status?per_page=100" \
+                --jq '[.statuses[] | select(.context == "gate/local" and .state == "success")] | length')
+          echo "attested=$([ "$n" -gt 0 ] && echo yes || echo no)" >>"$GITHUB_OUTPUT"
+
+      # Skipped only for an attested commit on a branch push or a PR, never
+      # for a bot's PR or a fork's (attestation.md's `if:`, verbatim). The
+      # squash commit on main is GitHub's and carries no status, so main's
+      # push runs always run it.
       - name: pytest (default, excludes integration and live)
         working-directory: watcher
+        if: >-
+          steps.attest.outputs.attested != 'yes'
+          || (github.event_name != 'push' && github.event_name != 'pull_request')
+          || startsWith(github.ref, 'refs/tags/')
+          || (github.event_name == 'pull_request'
+              && (github.event.pull_request.user.type == 'Bot'
+                  || github.event.pull_request.head.repo.full_name != github.repository))
         run: uv run pytest -m "not integration and not live"
 
   # The integration mark (#353): tests that need the test database and nothing
@@ -145,6 +180,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      statuses: read # the attest step reads gate/local (#456)
     services:
       postgres:
         # Docker Hub's official image via Google's mirror: GitHub's shared runners
@@ -196,14 +232,45 @@ jobs:
           UV_INDEX_CO_PYPI_PASSWORD: ${{ steps.auth.outputs.access_token }}
         run: uv sync --group dev
 
+      # The test job's attest step, identical (#456; see there).
+      - name: attest (gate/local)
+        id: attest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          n=$(gh api "repos/${{ github.repository }}/commits/$HEAD/status?per_page=100" \
+                --jq '[.statuses[] | select(.context == "gate/local" and .state == "success")] | length')
+          echo "attested=$([ "$n" -gt 0 ] && echo yes || echo no)" >>"$GITHUB_OUTPUT"
+
+      # Skipped only for an attested commit on a branch push or a PR, never
+      # for a bot's PR or a fork's (attestation.md's `if:`, verbatim). The
+      # squash commit on main is GitHub's and carries no status, so main's
+      # push runs always run it.
       - name: pytest (integration)
         working-directory: watcher
+        if: >-
+          steps.attest.outputs.attested != 'yes'
+          || (github.event_name != 'push' && github.event_name != 'pull_request')
+          || startsWith(github.ref, 'refs/tags/')
+          || (github.event_name == 'pull_request'
+              && (github.event.pull_request.user.type == 'Bot'
+                  || github.event.pull_request.head.repo.full_name != github.repository))
         run: uv run pytest -m integration --junitxml=integration-junit.xml
 
       # A self-skipping test (the backup rehearsal without pg_dump, say) passes
       # green while verifying nothing; this makes "runs in CI" true or red.
+      # The pytest step's `if:`: it reads the JUnit file that step writes, so
+      # it is skipped with it (#456).
       - name: no integration test skipped
         working-directory: watcher
+        if: >-
+          steps.attest.outputs.attested != 'yes'
+          || (github.event_name != 'push' && github.event_name != 'pull_request')
+          || startsWith(github.ref, 'refs/tags/')
+          || (github.event_name == 'pull_request'
+              && (github.event.pull_request.user.type == 'Bot'
+                  || github.event.pull_request.head.repo.full_name != github.repository))
         run: uv run python scripts/check_no_skips.py integration-junit.xml
 
   migrations:

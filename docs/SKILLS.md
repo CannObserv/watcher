@@ -116,6 +116,14 @@ it). Every host-side reader takes the knob from the primary checkout, never a wo
 workflow reads its own checkout);
 [tests/ci/test_merge_mode.py](../tests/ci/test_merge_mode.py) pins it and the cadence render.
 
+**`.skills/attest-local-gate` is `on`** (#456). `push.sh` refuses a dirty tree (an untracked
+file or a submodule edit counts), runs [scripts/pre-ship.sh](../scripts/pre-ship.sh) again at the
+push (the integration half records no pass, so ~20 s each time), pushes only a pass, then posts
+`gate/local` = `success` on the pushed SHA (the vendor's `references/attestation.md`). Ship from a
+full worktree with its submodules initialised. `ATTESTATION NOT POSTED` still pushed; CI then runs
+every step. Never post the status by hand, and never make it a required check. The public repo
+saves no money; it is adopted as the first real run of upstream's CI step.
+
 **Step 1 resolves each script on its own.** The vendor's `skill-scripts` block probes `scripts/`
 first, per script ([gregoryfoster/skills#301](https://github.com/gregoryfoster/skills/issues/301)),
 so [scripts/pre-ship.sh](../scripts/pre-ship.sh) wins for `pre-ship.sh` alone and the other five

@@ -404,6 +404,11 @@ nothing from archiver either — the #234 squash collapsed the pre-existing
 chain into a self-contained genesis baseline (`2addddea0b03`) that references
 no `information` schema, so `upgrade head` from empty is fully standalone (no
 archiver seeding, no cross-service ordering).
+**An attested PR skips the two pytest steps (#456).** `test` and `integration` read the
+`gate/local` status that `push.sh` posts on the PR's head (*Shipping* in `docs/SKILLS.md`) and
+skip `pytest` (and the no-skip check) only for a human's same-repo PR; `lint` and
+`migrations` always run. `main`'s push runs (the squash commit carries no status), Dependabot's
+PRs, forks and manual runs never skip. `tests/ci/test_attest_local_gate.py` pins the condition.
 Both database jobs pull `postgres:16` as `mirror.gcr.io/library/postgres:16`:
 GitHub's shared runners exhaust Docker Hub's anonymous pull limit, and the mirror
 needs no credential (`tests/ci/test_service_images.py`).

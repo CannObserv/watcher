@@ -206,4 +206,7 @@ Take the bump: a re-run of the generator keeps an installed SHA pin
 (gregoryfoster/skills#373; `--check` says `checkout pin: kept`). Since #445 it
 renders the `pr` workflow (`.skills/merge_mode`): each run opens or updates one
 PR from `context/weekly-measurement`. `GITHUB_TOKEN` opened it, so no check runs
-on it until someone closes and reopens it.
+on it until someone closes and reopens it. A run not on `main` fails before
+measuring (gregoryfoster/skills#683). `main` is squash-only, so the PR merged mid-run fails the
+run too: dispatch a fresh one (`gh workflow run context-cadence.yml`), never
+*Re-run jobs*.

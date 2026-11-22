@@ -31,6 +31,9 @@ SA = "co-pypi-reader@co-gcs.iam.gserviceaccount.com"
 USERNAME_VAR = "UV_INDEX_CO_PYPI_USERNAME"
 PASSWORD_VAR = "UV_INDEX_CO_PYPI_PASSWORD"
 TOKEN = "${{ steps.auth.outputs.access_token }}"
+# The two jobs whose attest step reads gate/local (#456) also read statuses;
+# a job's permissions replace the workflow's, so each declares its own.
+ATTESTING = {"test": {"statuses": "read"}, "integration": {"statuses": "read"}}
 
 
 def _workflow() -> dict:
@@ -80,7 +83,8 @@ def test_auth_mints_an_access_token_before_the_sync(name: str):
     assert step["with"]["service_account"] == SA
     assert step["with"]["workload_identity_provider"] == "${{ vars.GCP_WIF_PROVIDER }}"
     assert at < _sync_index(job)
-    assert job["permissions"] == {"contents": "read", "id-token": "write"}
+    want = {"contents": "read", "id-token": "write", **ATTESTING.get(name, {})}
+    assert job["permissions"] == want
 
 
 @pytest.mark.parametrize("name", _syncing_jobs())

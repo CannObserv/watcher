@@ -118,10 +118,11 @@ workflow reads its own checkout);
 
 **`.skills/attest-local-gate` is `on`** (#456). `push.sh` refuses a dirty tree (an untracked
 file or a submodule edit counts), runs [scripts/pre-ship.sh](../scripts/pre-ship.sh) again at the
-push (the integration half records no pass, so ~20 s each time), pushes only a pass, then posts
-`gate/local` = `success` on the pushed SHA (the vendor's `references/attestation.md`). Ship from a
-full worktree with its submodules initialised. `ATTESTATION NOT POSTED` still pushed; CI then runs
-every step. Never post the status by hand, and never make it a required check. The public repo
+push (the integration half records no pass: ~35 s per push, measured), pushes only a pass, then
+posts `gate/local` = `success` on the pushed SHA (the vendor's `references/attestation.md`). Ship
+from a full worktree with its submodules initialised. `ATTESTATION NOT POSTED` or `NOT CONFIRMED`
+still pushed; CI runs every step wherever the status is missing, and re-running `push.sh` retries
+the write. Never post the status by hand, and never make it a required check. The public repo
 saves no money; it is adopted as the first real run of upstream's CI step.
 
 **Step 1 resolves each script on its own.** The vendor's `skill-scripts` block probes `scripts/`

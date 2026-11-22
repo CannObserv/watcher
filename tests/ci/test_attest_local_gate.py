@@ -32,6 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CI = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 KNOB = REPO_ROOT / ".skills" / "attest-local-gate"
 ATTEST_GATE_SH = REPO_ROOT / "skills" / "shipping-work" / "scripts" / "_attest-gate.sh"
+ATTESTATION_MD = REPO_ROOT / "skills" / "shipping-work" / "references" / "attestation.md"
 INSTALLED_UNIT = Path("/etc/systemd/system/watcher.service")
 
 ATTESTING_JOBS = ("test", "integration")
@@ -216,6 +217,30 @@ class TestTheWorkflow:
         for name in ALWAYS_RUN_JOBS:
             assert not _gated_steps(jobs[name]), name
             assert "attest" not in [s.get("id") for s in jobs[name]["steps"]], name
+
+    @pytest.mark.parametrize("name", ATTESTING_JOBS)
+    def test_the_copy_matches_the_vendored_reference(self, name: str) -> None:
+        """Verbatim means verbatim: a submodule bump that changes upstream's CI side fails here."""
+        if not ATTESTATION_MD.is_file():
+            if INSTALLED_UNIT.exists():
+                pytest.fail(f"{ATTESTATION_MD} missing on the host: git submodule update --init")
+            pytest.skip("skills submodule not initialised")
+        text = ATTESTATION_MD.read_text(encoding="utf-8").split("## The CI side", 1)[1]
+        block = re.search(r"```yaml\n(.*?)```", text, flags=re.DOTALL)
+        assert block, "attestation.md's CI side has no yaml block"
+        ref_steps = yaml.safe_load(block[1])["jobs"]["test"]["steps"]
+        (ref_attest,) = [s for s in ref_steps if s.get("id") == "attest"]
+        (ref_gated,) = [s for s in ref_steps if "if" in s]
+
+        def code(run: str) -> list[str]:
+            return [ln.strip() for ln in run.splitlines() if not ln.strip().startswith("#")]
+
+        job = _jobs()[name]
+        at = _pytest_at(job)
+        attest = job["steps"][at - 1]
+        assert attest["env"] == ref_attest["env"]
+        assert code(attest["run"]) == code(ref_attest["run"])
+        assert _squash(ref_gated["if"]) == _squash(REFERENCE_IF)
 
     @pytest.mark.parametrize("name", ATTESTING_JOBS)
     def test_each_attesting_job_reads_statuses(self, name: str) -> None:

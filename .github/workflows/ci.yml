@@ -124,10 +124,6 @@ jobs:
           UV_INDEX_CO_PYPI_PASSWORD: ${{ steps.auth.outputs.access_token }}
         run: uv sync --group dev
 
-      # This job builds no schema — it has no database (see above). The
-      # `integration` job below builds it with Base.metadata.create_all
-      # (conftest); the migration chain is smoke-checked in the `migrations`
-      # job (#234). `live` tests (real GCS) run in no job (#353).
       # Local-gate attestation (#456): shipping-work's push.sh, with
       # .skills/attest-local-gate on, posts gate/local = success on a commit
       # whose exact tree passed scripts/pre-ship.sh, which runs this job's
@@ -151,10 +147,15 @@ jobs:
                 --jq '[.statuses[] | select(.context == "gate/local" and .state == "success")] | length')
           echo "attested=$([ "$n" -gt 0 ] && echo yes || echo no)" >>"$GITHUB_OUTPUT"
 
-      # Skipped only for an attested commit on a branch push or a PR, never
-      # for a bot's PR or a fork's (attestation.md's `if:`, verbatim). The
-      # squash commit on main is GitHub's and carries no status, so main's
-      # push runs always run it.
+      # This job builds no schema — it has no database (see above). The
+      # `integration` job below builds it with Base.metadata.create_all
+      # (conftest); the migration chain is smoke-checked in the `migrations`
+      # job (#234). `live` tests (real GCS) run in no job (#353).
+      # Skipped only for an attested human same-repo PR, never for a bot's PR
+      # or a fork's (attestation.md's `if:`, verbatim; its branch-push arm is
+      # inert here, where only main's push triggers). The squash commit on
+      # main is GitHub's and carries no status, so main's push runs always run
+      # it.
       - name: pytest (default, excludes integration and live)
         working-directory: watcher
         if: >-
@@ -243,10 +244,7 @@ jobs:
                 --jq '[.statuses[] | select(.context == "gate/local" and .state == "success")] | length')
           echo "attested=$([ "$n" -gt 0 ] && echo yes || echo no)" >>"$GITHUB_OUTPUT"
 
-      # Skipped only for an attested commit on a branch push or a PR, never
-      # for a bot's PR or a fork's (attestation.md's `if:`, verbatim). The
-      # squash commit on main is GitHub's and carries no status, so main's
-      # push runs always run it.
+      # The test job's pytest `if:`, identical (#456; see there).
       - name: pytest (integration)
         working-directory: watcher
         if: >-

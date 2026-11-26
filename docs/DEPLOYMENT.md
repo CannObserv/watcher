@@ -91,14 +91,24 @@ trap: the skill's `SKILL.md` → *The run*.
   `600 root:root`, `exe-setup.service` disabled. Delivery re-runs at every boot
   (CannObserv/provisioner#4); the knob's `setup-script:redelivered` exception
   records why that isn't a finding.
-- **The image's nginx is being pruned** (#440, the skill's `references/pruning.md`):
-  masked 2026-11-17, declared `disabled:nginx`; a savepoint taken during the soak
-  lets the purge follow it directly (without one, `remove` comes first). Undo the
-  disable with `sudo systemctl unmask nginx` alone (it was never enabled or
-  started). Stage logs, and the savepoint once taken:
-  `/var/backups/patching-hosts-prune-nginx`, root-only. Past a
-  `disabled:`/`removed:` date the knob test passes the `soak-ended` finding;
-  any other lapsed exception still fails it.
+- **The image's nginx is pruned** (#440, the skill's `references/pruning.md`):
+  masked 2026-11-17, then purged 2026-11-26 by way of the savepoint taken during
+  the soak, with no `remove` stage. Both packages (`nginx`, `nginx-common`) are
+  gone, with no `rc` residue, and so are `/etc/nginx`, `/var/log/nginx`,
+  `/var/lib/nginx` and `/var/www`. The knob
+  declares `purged:nginx`. Its date is a recheck, and the line stays while the
+  image ships nginx.
+  - **The mask stays** (`/etc/systemd/system/nginx.service` → `/dev/null`):
+    a later install stays down until someone unmasks it.
+  - **The stage logs and the savepoint** (config tarball, versions) are kept in
+    `/var/backups/patching-hosts-prune-nginx`, root-only.
+  - **Undo:** install the `versions` file's packages, restore `config.tar`,
+    then `sudo systemctl unmask nginx` alone: it was never enabled or started.
+    The archive may have dropped those versions; the list says what was there,
+    not what can come back.
+  - **The knob test:** past a `disabled:`/`removed:` date it passes the
+    `soak-ended` finding; any other lapsed exception, `purged:` included,
+    still fails it.
 
 ### Managing the Service
 

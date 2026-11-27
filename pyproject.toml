@@ -25,8 +25,8 @@ dependencies = [
     # it: bumped when CannObserv/processor coordinates a contract change, not on a
     # schedule (#366). Both resolve from the co-pypi index alone ([tool.uv.sources],
     # #358), and uv.lock holds each file's sha256.
-    "co-core==0.48.2",
-    "co-core-aio[bus]==0.48.2",
+    "co-core==0.53.2",
+    "co-core-aio[bus]==0.53.2",
     # Imported directly by the bus layer; docs/BUS-CONNECTION-POLICY.md was
     # measured on redis-py 7.4.1, so a major is ours to adopt, not co-core-aio's (#294).
     "redis>=7.4,<8",

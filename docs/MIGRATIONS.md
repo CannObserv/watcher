@@ -156,10 +156,35 @@ named `<xx.yy.zz>_<nn>_<pre|post>_*.sql`: `pre` before the new code starts,
 `post` after ([procrastinate: *Migrate the schema*](https://procrastinate.readthedocs.io/en/stable/howto/production/migrations.html)).
 Before landing a bump, list the files newer than the installed version; none
 means no DDL. 3.7.2 → 3.10.0 (#426) shipped none. 3.10.0 → 3.11.0 (#443)
-shipped one, the newest file now:
-`03.11.00_01_pre_fetch_job_skip_null_lock.sql`, a `CREATE OR REPLACE` of
-`procrastinate_fetch_job_v2` (same signature). It was applied 2026-11-17 as
-`watcher` (`psql -v ON_ERROR_STOP=1 -1 -f`) before the restart.
+shipped one `pre` file, applied 2026-11-17. 3.11.0 → 3.12.0 (#467) shipped
+five, applied 2026-11-27 as `watcher`: the `pre` files at 20:14Z, the `post`
+files at 20:32Z once the restart had run 3.12.
+
+- **`pre`, before the restart:** `03.12.00_01_pre_add_lock_mode` (the
+  `procrastinate_lock_mode` enum, a `lock_mode` column,
+  `procrastinate_defer_jobs_v2`, `procrastinate_defer_periodic_job_v3`, and a
+  replaced `procrastinate_fetch_job_v2`), then `_02_pre_retry_job_fail_on_queueing_lock_conflict`
+  and `_03_pre_add_todo_doing_lock_index`.
+- **`post`, once the new code runs:** `_50_post_add_lock_mode` drops
+  `procrastinate_defer_jobs_v1`, its type and `procrastinate_defer_periodic_job_v2`,
+  which 3.11 still calls. Run before the restart, it breaks every defer the
+  live worker makes (rehearsed: `type "procrastinate_job_to_defer_v1[]" does
+  not exist`). Then `_51_post_drop_id_lock_index`.
+
+**A `CONCURRENTLY` file runs without `-1`.** `_03` and `_51` build and drop an
+index concurrently, and a transaction block refuses that, so run them as
+`psql -v ON_ERROR_STOP=1 -f`. The rest keep `-1`. A failed concurrent build
+leaves an `INVALID` index behind. If `pg_index.indisvalid` is false for it,
+`DROP INDEX CONCURRENTLY` it and re-run the file. **Rehearse first**: CI builds
+procrastinate's schema fresh, so a green run says nothing about the upgrade
+path. Run every file, in order, on a scratch `*_test` database built at the old
+version with `SchemaManager.get_schema()`. Production matched that build object
+for object, and after the five files both the scratch database and production
+matched a fresh 3.12.0 build. **Run `pre` before the bump's sync, not after:**
+the old code runs on the `pre` schema (rehearsed), but once the venv holds the
+new version a crash restart would start it against the old schema.
+3.12.0's `procrastinate.contrib.alembic` isn't used: the chain excludes
+`procrastinate_*` (`alembic/env.py`).
 
 ## The test role — one-time (#388)
 

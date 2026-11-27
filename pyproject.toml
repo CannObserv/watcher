@@ -40,18 +40,18 @@ dev = [
     "anyio>=4.16.0,<5",
     # In-memory Redis for the bus producer and consumer tests (#245); mirrors
     # replicator's test harness so both ends of a stream test alike.
-    "fakeredis>=2.40.0,<3",
+    "fakeredis>=2.41.0,<3",
     # Imported directly by tests/test_dependency_extras.py; declared rather than
     # relied on as a transitive of procrastinate (#242).
-    "packaging>=24,<27",
+    "packaging>=26.4,<27",
     "pre-commit>=4.7.0,<5",
     "pytest>=9.2.0,<10",
     "pytest-asyncio>=1.5.0,<2",
     "pytest-cov>=7.1.0,<8",
     # Imported directly by tests/ci/ and others to read the workflow, Dependabot
     # and pre-commit configs (#352); declared, not relied on via pre-commit.
-    "pyyaml>=6,<7",
-    "ruff>=0.17.5,<0.18",
+    "pyyaml>=6.0.4,<7",
+    "ruff>=0.17.6,<0.18",
 ]
 
 [tool.pytest.ini_options]

@@ -143,6 +143,32 @@ class TestPublishPendingSweep:
         assert command.render == "browser"
         assert command.headers == {"user-agent": "watcher/0.1.0"}
 
+    async def test_republishes_a_policy_row_from_its_snapshot(self, db_session):
+        # #457: the sweep holds only the row, so the merge is the row's
+        # snapshot — whatever the item announces by then.
+        wi = await make_watched_item(
+            db_session,
+            fetch_headers={"User-Agent": "co-archiver/1", "Accept": "application/json"},
+            fetch_credential_headers={"X-Api-Key": "fetch-wa-leg-api"},
+        )
+        await create_fetch_command(db_session, wi, now=NOW)
+        wi.fetch_headers = None
+        wi.fetch_credential_headers = None
+        await db_session.flush()
+        client = fakeredis.FakeAsyncRedis()
+
+        result = await publish_pending_fetch_commands(session=db_session, bus_client=client)
+
+        assert result == {"published": 1}
+        entries = await client.xrange(streams.CONTENT_FETCH)
+        fields = {
+            (k.decode() if isinstance(k, bytes) else k): (v.decode() if isinstance(v, bytes) else v)
+            for k, v in entries[0][1].items()
+        }
+        command = from_wire(fields, topic=streams.CONTENT_FETCH).payload
+        assert command.headers == {"user-agent": "co-archiver/1", "accept": "application/json"}
+        assert command.credential_headers == {"x-api-key": "fetch-wa-leg-api"}
+
     async def test_failed_publish_keeps_row_pending(self, db_session, monkeypatch):
         wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
         row = await create_fetch_command(db_session, wi, now=NOW)

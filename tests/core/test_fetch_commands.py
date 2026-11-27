@@ -27,9 +27,13 @@ from src.core.fetch_commands import (
     FETCH_COMMAND_TIMEOUT_ENV,
     FETCH_MAX_REISSUES_ENV,
     WATCHER_USER_AGENT,
+    UnsendableFetchPolicy,
+    command_credential_headers,
+    command_headers,
     create_fetch_command,
     fetch_command_timeout_seconds,
     fetch_max_reissues,
+    fetch_policy_refusal,
     get_open_command,
     publish_fetch_command,
 )
@@ -426,8 +430,10 @@ class TestRenderMode:
         assert message.payload.render == "browser"
 
     async def test_a_null_row_frame_is_unchanged(self, db_session):
-        # Wire continuity: every item is NULL at the deploy, and its frame must
-        # be byte-for-byte what was sent before #414.
+        # Wire continuity: every item is NULL at the deploy, and its frame is
+        # what was sent before #414, plus the two nulls co-core added since:
+        # ``render`` (#414) and ``credential_headers`` (co-core 0.51.1, #457).
+        # Both decode on every consumer (``extra="ignore"``).
         wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
         row = await create_fetch_command(db_session, wi, now=NOW)
         client = fakeredis.FakeAsyncRedis()
@@ -442,7 +448,7 @@ class TestRenderMode:
             f'"command_id":"{row.command_id}","url":"https://lcb.wa.gov/notices",'
             f'"info_source_id":"{wi.archiver_info_source_id}",'
             '"headers":{"user-agent":"watcher/0.1.0"},'
-            '"timeout_seconds":null,"render":null}'
+            '"timeout_seconds":null,"render":null,"credential_headers":null}'
         )
 
     async def test_a_browser_row_frame(self, db_session):
@@ -461,5 +467,215 @@ class TestRenderMode:
             f'"command_id":"{row.command_id}","url":"https://lcb.wa.gov/notices",'
             f'"info_source_id":"{wi.archiver_info_source_id}",'
             '"headers":{"user-agent":"watcher/0.1.0"},'
-            '"timeout_seconds":null,"render":"browser"}'
+            '"timeout_seconds":null,"render":"browser","credential_headers":null}'
         )
+
+
+# ---------------------------------------------------------------------------
+# #457: Archiver's fetch-header policy (``RegistryAnnouncementState.fetch_headers``
+# / ``fetch_credential_headers``, co-core 0.53.2) carried onto the command.
+# ---------------------------------------------------------------------------
+
+SECRET = "sk-live-0123456789abcdef"  # a value pasted where a reference belongs
+
+
+class TestCommandHeadersMerge:
+    """Archiver's D3, Watcher's half: pinned UA < announced plain map < validators.
+
+    Every name goes on the wire lower-cased, one field line per name — the rule
+    ``_command_headers`` already held for the UA and the validators.
+    """
+
+    def test_no_policy_is_the_pinned_user_agent_alone(self):
+        assert command_headers(
+            fetch_headers=None, request_etag=None, request_last_modified=None
+        ) == {"user-agent": WATCHER_USER_AGENT}
+
+    def test_an_empty_map_is_no_policy(self):
+        assert command_headers(fetch_headers={}, request_etag=None, request_last_modified=None) == {
+            "user-agent": WATCHER_USER_AGENT
+        }
+
+    @pytest.mark.parametrize("spelling", ["user-agent", "User-Agent", "USER-AGENT"])
+    def test_a_policy_user_agent_replaces_the_pin_in_any_case(self, spelling):
+        headers = command_headers(
+            fetch_headers={spelling: "co-archiver/1 (+ops@example.org)"},
+            request_etag=None,
+            request_last_modified=None,
+        )
+        assert headers == {"user-agent": "co-archiver/1 (+ops@example.org)"}
+
+    def test_plain_policy_and_validators_together_lower_cased(self):
+        headers = command_headers(
+            fetch_headers={"Accept": "application/json", "X-Client": "co"},
+            request_etag='W/"v2"',
+            request_last_modified="Wed, 13 Aug 2026 10:00:00 GMT",
+        )
+        assert headers == {
+            "user-agent": WATCHER_USER_AGENT,
+            "accept": "application/json",
+            "x-client": "co",
+            "if-none-match": 'W/"v2"',
+            "if-modified-since": "Wed, 13 Aug 2026 10:00:00 GMT",
+        }
+
+    def test_values_are_sent_verbatim(self):
+        headers = command_headers(
+            fetch_headers={"Accept": "Text/HTML; q=0.9"},
+            request_etag=None,
+            request_last_modified=None,
+        )
+        assert headers["accept"] == "Text/HTML; q=0.9"
+
+    def test_credentials_are_copied_with_lower_cased_names(self):
+        assert command_credential_headers({"X-Api-Key": "fetch-wa-leg-api"}) == {
+            "x-api-key": "fetch-wa-leg-api"
+        }
+
+    @pytest.mark.parametrize("empty", [None, {}])
+    def test_no_credential_policy_sends_none(self, empty):
+        assert command_credential_headers(empty) is None
+
+
+class TestFetchPolicyRefusal:
+    """Decision 2 + C3: a set Watcher cannot send blocks the fetch.
+
+    ``ContentFetchCommandEmit`` decides most of it; Watcher adds the two checks
+    the Emit cannot see once names are folded (a name twice by case in the
+    plain map) or does not make under ``http`` (a validator in the policy).
+    The refusal names headers, never a value.
+    """
+
+    def _refusal(self, fetch_headers=None, fetch_credential_headers=None, render=None):
+        return fetch_policy_refusal(
+            fetch_headers=fetch_headers,
+            fetch_credential_headers=fetch_credential_headers,
+            render=render,
+        )
+
+    @pytest.mark.parametrize("render", [None, "http", "browser"])
+    def test_no_policy_is_sendable(self, render):
+        assert self._refusal(render=render) is None
+        assert self._refusal({}, {}, render=render) is None
+
+    def test_plain_and_credential_under_http_are_sendable(self):
+        assert (
+            self._refusal(
+                {"Accept": "application/json", "User-Agent": "co/1"},
+                {"X-Api-Key": "fetch-wa-leg-api"},
+                render="http",
+            )
+            is None
+        )
+
+    def test_browser_with_user_agent_alone_is_sendable(self):
+        assert self._refusal({"User-Agent": "co/1"}, None, render="browser") is None
+
+    @pytest.mark.parametrize(
+        ("plain", "credentials", "render", "names"),
+        [
+            # A non-str value: the decode is untyped by design (cannobserv#780).
+            ({"X-Count": 3}, None, None, ["X-Count"]),
+            (None, {"X-Api-Key": 7}, None, ["X-Api-Key"]),
+            # C3: lower-casing would keep one of the two values silently.
+            ({"Accept": "a", "accept": "b"}, None, None, ["Accept", "accept"]),
+            (None, {"X-Key": "fetch-a", "x-key": "fetch-b"}, None, ["X-Key", "x-key"]),
+            # C3: a policy validator would be sent on every unconditional occasion.
+            ({"If-None-Match": '"v1"'}, None, "http", ["If-None-Match"]),
+            ({"if-modified-since": "x"}, None, None, ["if-modified-since"]),
+            # The Emit's own refusals.
+            ({"Accept": "a"}, None, "browser", ["accept"]),
+            (None, {"X-Api-Key": "fetch-wa-leg-api"}, "browser", ["X-Api-Key"]),
+            (None, {"User-Agent": "fetch-ua"}, None, ["User-Agent"]),
+            (None, {"If-None-Match": "fetch-etag"}, None, ["If-None-Match"]),
+            ({"X-Api-Key": "plain"}, {"x-api-key": "fetch-wa-leg-api"}, None, ["X-Api-Key"]),
+            (None, {"X-Api-Key": SECRET}, None, ["X-Api-Key"]),
+        ],
+    )
+    def test_an_unsendable_set_is_refused_naming_headers_only(
+        self, plain, credentials, render, names
+    ):
+        refusal = self._refusal(plain, credentials, render=render)
+
+        assert refusal is not None
+        for name in names:
+            assert name.lower() in refusal.lower()
+        for value in [*(plain or {}).values(), *(credentials or {}).values()]:
+            if isinstance(value, str) and len(value) > 2:
+                assert value not in refusal
+
+
+@_integration
+class TestFetchPolicyOnTheCommand:
+    """The maps are snapshotted on the row at issue (decision 1), merged at
+    publish, and an unsendable set raises before any row exists (C1)."""
+
+    async def _item(self, db_session, **kwargs):
+        return await make_watched_item(
+            db_session, primary_url="https://lcb.wa.gov/notices", **kwargs
+        )
+
+    async def test_the_maps_are_snapshotted_verbatim(self, db_session):
+        wi = await self._item(
+            db_session,
+            fetch_headers={"Accept": "application/json"},
+            fetch_credential_headers={"X-Api-Key": "fetch-wa-leg-api"},
+        )
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.flush()
+
+        assert row.fetch_headers == {"Accept": "application/json"}
+        assert row.fetch_credential_headers == {"X-Api-Key": "fetch-wa-leg-api"}
+
+    async def test_the_frame_carries_the_merge_and_the_credentials(self, db_session):
+        wi = await self._item(
+            db_session,
+            fetch_headers={"User-Agent": "co-archiver/1", "Accept": "application/json"},
+            fetch_credential_headers={"X-Api-Key": "fetch-wa-leg-api"},
+        )
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        client = fakeredis.FakeAsyncRedis()
+
+        await publish_fetch_command(client, row, now=NOW)
+
+        (message,) = await _decode_commands(client)
+        assert message.payload.headers == {
+            "user-agent": "co-archiver/1",
+            "accept": "application/json",
+        }
+        assert message.payload.credential_headers == {"x-api-key": "fetch-wa-leg-api"}
+
+    async def test_a_republish_is_byte_identical_after_the_policy_moves(self, db_session):
+        wi = await self._item(
+            db_session,
+            fetch_headers={"Accept": "application/json"},
+            fetch_credential_headers={"X-Api-Key": "fetch-wa-leg-api"},
+        )
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.flush()
+        client = fakeredis.FakeAsyncRedis()
+        await publish_fetch_command(client, row, now=NOW)
+
+        wi.fetch_headers = {"Accept": "text/html"}
+        wi.fetch_credential_headers = None
+        await db_session.flush()
+        await publish_fetch_command(client, row, now=NOW)
+
+        first, second = await _raw_payloads(client)
+        assert first == second
+
+    async def test_an_unsendable_set_raises_and_mints_no_row(self, db_session):
+        wi = await self._item(db_session, fetch_credential_headers={"X-Api-Key": SECRET})
+
+        with pytest.raises(UnsendableFetchPolicy) as excinfo:
+            await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.flush()
+
+        assert SECRET not in str(excinfo.value)
+        assert "X-Api-Key" in str(excinfo.value)
+        assert await get_open_command(db_session, wi.id) is None
+
+    async def test_a_browser_item_with_a_plain_header_raises(self, db_session):
+        wi = await self._item(db_session, render="browser", fetch_headers={"Accept": "text/html"})
+        with pytest.raises(UnsendableFetchPolicy):
+            await create_fetch_command(db_session, wi, now=NOW)

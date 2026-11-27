@@ -12,6 +12,8 @@ remains here is the part that is still this task's: the short-circuit guards,
 plus `schedule_tick`'s due-calculation (post-actions are gone since #375).
 """
 
+import json
+import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -20,10 +22,13 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import src.workers.fetch_commands as fc_mod
 import src.workers.tasks as tasks_mod
-from src.core.models.audit_log import AuditLog
+from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
-from src.core.models.fetch_command import FetchCommand
+from src.core.models.fetch_command import FETCH_POLICY_UNSENDABLE_REASON, FetchCommand
+from src.core.models.pending_watch_event import PendingWatchEvent
+from src.core.models.watched_item import WatchHealthStatus
 from src.core.validators import CONDITIONAL_GET_ENV, validator_source_key
 from src.workers.tasks import check_watched_item, schedule_tick
 from tests.conftest import make_watched_item
@@ -298,3 +303,84 @@ class TestForcedFullFetch:
         row = await self._issue(db_session, monkeypatch, wi)
 
         assert row.request_etag == 'W/"v2"'
+
+
+class TestUnsendableFetchPolicy:
+    """#457 decision 2 + C1: a policy Watcher cannot send blocks the fetch.
+
+    No command (a row whose Emit raises would sit ``pending_publish`` for ever,
+    holding the open-command gate shut); a recorded check failure instead —
+    ERROR health, ``fetch_policy_unsendable``, an audit row, one ``watch_error``
+    on the edge — with ``last_checked_at`` stamped so the retry waits for the
+    item's cadence. A corrected announcement heals it on the next tick.
+    """
+
+    SECRET = "sk-live-0123456789abcdef"
+
+    async def _check(self, db_session, monkeypatch, wi):
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        republish = AsyncMock()
+        monkeypatch.setattr(fc_mod, "defer_status_republish", republish)
+        return await check_watched_item(str(wi.id), bus_client=AsyncMock())
+
+    async def _item(self, db_session):
+        wi = await make_watched_item(
+            db_session,
+            primary_url="https://lcb.wa.gov/notices",
+            fetch_credential_headers={"X-Api-Key": self.SECRET},
+        )
+        await db_session.commit()
+        return wi
+
+    async def test_no_command_and_a_recorded_failure(self, db_session, monkeypatch, caplog):
+        wi = await self._item(db_session)
+
+        with caplog.at_level(logging.DEBUG):
+            result = await self._check(db_session, monkeypatch, wi)
+
+        assert result == {"refused": FETCH_POLICY_UNSENDABLE_REASON}
+        assert await _command_count(db_session) == 0
+        await db_session.refresh(wi)
+        assert wi.health_status == WatchHealthStatus.ERROR
+        assert wi.health_reason == FETCH_POLICY_UNSENDABLE_REASON
+        assert wi.last_checked_at is not None
+        (audit_row,) = (
+            (
+                await db_session.execute(
+                    select(AuditLog).where(AuditLog.event_type == EventType.CHECK_FETCH_FAILED)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert audit_row.payload["reason"] == FETCH_POLICY_UNSENDABLE_REASON
+        assert "X-Api-Key" in audit_row.payload["detail"]
+        assert self.SECRET not in json.dumps(audit_row.payload)
+        facts = (await db_session.execute(select(PendingWatchEvent))).scalars().all()
+        assert [f.event_type for f in facts] == ["watch_error"]
+        assert all(self.SECRET not in r.getMessage() for r in caplog.records)
+        assert all(
+            self.SECRET not in str(value) for r in caplog.records for value in vars(r).values()
+        )
+
+    async def test_a_second_refusal_in_the_episode_stages_no_fact(self, db_session, monkeypatch):
+        wi = await self._item(db_session)
+        await self._check(db_session, monkeypatch, wi)
+        await self._check(db_session, monkeypatch, wi)
+
+        facts = (await db_session.execute(select(PendingWatchEvent))).scalars().all()
+        assert len(facts) == 1
+
+    async def test_a_corrected_announcement_heals_on_the_next_check(self, db_session, monkeypatch):
+        wi = await self._item(db_session)
+        await self._check(db_session, monkeypatch, wi)
+
+        wi.fetch_credential_headers = {"X-Api-Key": "fetch-wa-leg-api"}
+        await db_session.commit()
+        result = await self._check(db_session, monkeypatch, wi)
+
+        assert result["issued"]
+        row = (await db_session.execute(select(FetchCommand))).scalar_one()
+        assert row.fetch_credential_headers == {"X-Api-Key": "fetch-wa-leg-api"}

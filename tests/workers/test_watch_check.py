@@ -19,6 +19,7 @@ import contextlib
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import get_args
+from unittest.mock import AsyncMock
 
 import fakeredis
 import pytest
@@ -38,12 +39,17 @@ from redis.exceptions import ResponseError
 from sqlalchemy import event, select
 from ulid import ULID
 
+import src.workers.fetch_commands as fc_mod
 import src.workers.fetch_facts as ff_mod
 import src.workers.watch_check as wc_mod
 from src.core.check_now import CheckRefusal
 from src.core.fetch_commands import create_fetch_command
 from src.core.models.audit_log import AuditLog, EventType
-from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
+from src.core.models.fetch_command import (
+    FETCH_POLICY_UNSENDABLE_REASON,
+    FetchCommand,
+    FetchCommandStatus,
+)
 from src.core.models.pending_watch_event import PendingWatchEvent
 from src.workers.watch_check import (
     CONSUMER_GROUP,
@@ -136,6 +142,42 @@ class TestAccepted:
 
         assert await _process(db_session, message) == "duplicate"
         assert len(await _fetches(db_session, wi)) == 1
+
+
+class TestUnsendableFetchPolicy:
+    """#457 C2: a refused policy is not ``fetch_open``, and there is no
+    rejection token for it (``CheckRejectionReason`` is closed). The check is
+    answered the way a commanded fetch failure is: health ERROR with
+    ``fetch_policy_unsendable``, republished because it names the command."""
+
+    async def test_answered_as_a_failed_check_not_a_rejection(self, db_session, monkeypatch):
+        republish = AsyncMock()
+        monkeypatch.setattr(fc_mod, "defer_status_republish", republish)
+        wi = await make_watched_item(db_session, fetch_headers={"If-None-Match": '"v1"'})
+        client = fakeredis.FakeAsyncRedis()
+        message = _command(wi.archiver_info_item_id)
+
+        outcome = await _process(db_session, message, client)
+
+        assert outcome == "refused_fetch_policy"
+        assert await _fetches(db_session, wi) == []
+        assert await client.xlen(streams.CONTENT_FETCH) == 0
+        assert await _rejections(db_session) == []
+        await db_session.refresh(wi)
+        assert wi.health_reason == FETCH_POLICY_UNSENDABLE_REASON
+        republish.assert_awaited()
+        requested = (
+            (
+                await db_session.execute(
+                    select(AuditLog).where(
+                        AuditLog.event_type == EventType.WATCHED_ITEM_CHECK_REQUESTED
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(requested) == 1
 
 
 class TestRejected:

@@ -48,9 +48,19 @@ shell ``browser`` exists to avoid; and dropping the announcement would freeze
 its specs and cadence. So it keeps the stored mode (NULL on a create), logs a
 WARNING, and the rest of the announcement applies.
 
+*``fetch_headers`` and ``fetch_credential_headers`` are stored verbatim*
+(#457). ``None`` and ``{}`` both store NULL: no policy, today's command. Unlike
+``render``, a set Watcher cannot send is stored anyway, not kept back: keeping
+the old set could fetch with a stale credential, or none. The issue path
+refuses to fetch with it and records ``fetch_policy_unsendable``
+(``src/core/fetch_commands.py``), and the reconcile logs a WARNING naming the
+headers — never a value — so the cause is attributable before the first tick.
+Archiver's producer refuses every such set, so this is for a buggy or older one.
+
 *Watcher owns what Archiver does not.* The announcement is authoritative for
-exactly six columns — ``archiver_info_source_id``, ``effective_url``,
-``source_specs``, ``announced_schedule_config``, ``is_active``, ``render`` — plus
+exactly eight columns — ``archiver_info_source_id``, ``effective_url``,
+``source_specs``, ``announced_schedule_config``, ``is_active``, ``render``,
+``fetch_headers``, ``fetch_credential_headers`` — plus
 ``domain_name`` and its denormalized state, and only when the host actually
 moves. Everything else is Watcher's and survives: health, timings,
 ``domain_suspended``, media type, validators, audit rows.
@@ -75,6 +85,7 @@ from sqlalchemy import select
 
 from src.core import read_windows
 from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_suspension
+from src.core.fetch_commands import fetch_policy_refusal
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.revoked_info_item import RevokedInfoItem
@@ -140,6 +151,11 @@ def _announced_schedule_config(watch_spec: dict | None) -> dict | None:
     return {"interval": interval}
 
 
+def _announced_policy(policy: dict | None) -> dict | None:
+    """An announced fetch-header map as stored: verbatim, with ``{}`` as NULL (#457)."""
+    return dict(policy) if policy else None
+
+
 async def _stored_generation(session, info_item_id: str, row: WatchedItem | None) -> int | None:
     """The generation this key has applied — from the row, or its tombstone.
 
@@ -163,6 +179,8 @@ _ANNOUNCED_COLUMNS = (
     "announced_schedule_config",
     "is_active",
     "render",
+    "fetch_headers",
+    "fetch_credential_headers",
 )
 
 
@@ -305,6 +323,22 @@ async def reconcile_announcement(session, payload: RegistryAnnouncementState) ->
                 "render": repr(payload.render),
                 "stored_render": row.render,
             },
+        )
+
+    # Verbatim, `{}` as NULL (#457). An unsendable set is stored too, and named
+    # here by its headers alone: the issue path refuses to fetch with it.
+    row.fetch_headers = _announced_policy(payload.fetch_headers)
+    row.fetch_credential_headers = _announced_policy(payload.fetch_credential_headers)
+    refusal = fetch_policy_refusal(
+        fetch_headers=row.fetch_headers,
+        fetch_credential_headers=row.fetch_credential_headers,
+        render=row.render,
+    )
+    if refusal is not None:
+        logger.warning(
+            "announced fetch-header policy cannot be sent — the item's checks will "
+            "fail as fetch_policy_unsendable until it is corrected",
+            extra={"info_item_id": key, "generation": payload.generation, "detail": refusal},
         )
 
     # Re-derive the domain only when the host actually moves. Doing it on every

@@ -21,6 +21,7 @@ import src.workers.process_issue as pi_mod
 from src.core.fetch_commands import create_fetch_command, get_open_command
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.fetch_command import (
+    FETCH_POLICY_UNSENDABLE_REASON,
     OPEN_STATUSES,
     FetchCommand,
     FetchCommandStatus,
@@ -949,6 +950,58 @@ class TestWatchCheckLineage:
         new_id = await reissue_fetch_command(db_session, wi, row, AsyncMock())
 
         assert (await db_session.get(FetchCommand, new_id)).check_command_id == "01CHECK"
+
+
+class TestUnsendablePolicyOnReissue:
+    """#457 C1: a re-issue mints through ``create_fetch_command`` too, so a
+    policy that became unsendable since the issue must end the lineage as a
+    recorded failure, not a ``pending_publish`` row whose Emit raises at every
+    sweep (the reaper reads only ``in_flight``, so nothing would expire it)."""
+
+    async def _refusing(self, db_session, monkeypatch):
+        monkeypatch.setattr(fc_mod, "defer_status_republish", AsyncMock())
+        wi, row = await _row_with_fact(db_session)
+        row.check_command_id = "01CHECK"
+        wi.fetch_headers = {"Accept": "a", "accept": "b"}
+        row.status = FetchCommandStatus.EXPIRED
+        await db_session.flush()
+        return wi, row
+
+    async def test_the_lineage_fails_and_no_row_is_minted(self, db_session, monkeypatch):
+        wi, row = await self._refusing(db_session, monkeypatch)
+
+        new_id = await reissue_fetch_command(db_session, wi, row, AsyncMock())
+
+        assert new_id is None
+        assert row.status == FetchCommandStatus.FAILED
+        assert row.failure_reason == FETCH_POLICY_UNSENDABLE_REASON
+        assert row.applied_at is not None
+        assert await get_open_command(db_session, wi.id) is None
+        assert wi.health_status == WatchHealthStatus.ERROR
+        assert wi.health_reason == FETCH_POLICY_UNSENDABLE_REASON
+
+    async def test_the_watch_check_still_republishes(self, db_session, monkeypatch):
+        wi, row = await self._refusing(db_session, monkeypatch)
+        republish = AsyncMock()
+        monkeypatch.setattr(fc_mod, "defer_status_republish", republish)
+
+        await reissue_fetch_command(db_session, wi, row, AsyncMock())
+
+        republish.assert_awaited()
+
+    async def test_the_reaper_counts_it_as_no_reissue(self, db_session, monkeypatch):
+        monkeypatch.setattr(fc_mod, "defer_status_republish", AsyncMock())
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        row.status = FetchCommandStatus.IN_FLIGHT
+        row.published_at = datetime.now(UTC) - timedelta(minutes=60)
+        wi.fetch_credential_headers = {"User-Agent": "fetch-ua"}
+        await db_session.flush()
+
+        result = await reap_fetch_commands(session=db_session, bus_client=AsyncMock())
+
+        assert result == {"reissued": 0, "capped": 0, "reapplied": 0}
+        assert row.status == FetchCommandStatus.FAILED
 
 
 class TestValidatorStorage:

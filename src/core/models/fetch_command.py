@@ -38,6 +38,7 @@ from sqlalchemy import (
     Text,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
 
@@ -87,6 +88,12 @@ BLOB_UNREADABLE_REASON = "blob_unreadable"
 # empty on every spec — or never answered at all within the lineage's limits.
 PROCESSING_FAILED_REASON = "processing_failed"
 PROCESSING_TIMEOUT_REASON = "processing_timeout"
+
+# Watcher's own reason for a check that issued no command at all (#457): the
+# item's announced fetch-header policy is a set ``ContentFetchCommandEmit``
+# would refuse, or one Watcher cannot merge without dropping a value. Fetching
+# without it could send no credential, or a stale one, so nothing is sent.
+FETCH_POLICY_UNSENDABLE_REASON = "fetch_policy_unsendable"
 
 # The statuses that make a command "open": they gate scheduling (no new issue
 # while one is open) and are what the reaper scans.
@@ -173,6 +180,17 @@ class FetchCommand(Base, TimestampMixin):
     # validators so the sweep republishes exactly what was minted. A re-issue is
     # a new occasion and takes the item's current mode. NULL means "http".
     render: Mapped[str | None] = mapped_column(String(16), nullable=True, default=None)
+    # The item's fetch-header policy at the occasion (#457), snapshotted like
+    # ``render``, verbatim as announced: the publish merges them, so the sweep
+    # republishes byte-identical whatever the item says by then. Checked
+    # sendable before the row exists (``create_fetch_command``). NULL is no
+    # policy; none_as_null keeps it SQL NULL (#198).
+    fetch_headers: Mapped[dict | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True, default=None
+    )
+    fetch_credential_headers: Mapped[dict | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True, default=None
+    )
 
     # --- fact fields (upserted by the content.blobs consumer) ---
     fact_at: Mapped[datetime | None] = mapped_column(

@@ -36,6 +36,16 @@ this module:
   ``user-agent`` alone: ``replayable_validators`` resolves no pair, because the
   Emit refuses one and would raise on every republish. NULL sends ``None``,
   which Replicator reads as ``http`` — the pre-#414 frame, byte for byte.
+* **#457** — the command carries Archiver's fetch-header policy for the source
+  (``RegistryAnnouncementState.fetch_headers`` / ``fetch_credential_headers``,
+  cannobserv#780), snapshotted onto the row at issue like ``render``. The merge
+  is Archiver's D3 (archiver#376), Watcher's half: the pinned UA, then the
+  announced plain map (an announced ``user-agent`` in any case **replaces** the
+  pin), then the replayed validators; the credential map is copied as
+  ``credential_headers``. Names go lower-cased; values verbatim. **A set Watcher
+  cannot send blocks the fetch** (``fetch_policy_refusal``): no command, a
+  recorded ``fetch_policy_unsendable`` check failure instead. Fetching without
+  it could send no credential, or a stale one.
 """
 
 import os
@@ -47,6 +57,7 @@ from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.envelope import to_wire
 from co_core.pure.models.changes import ContentFetchCommandEmit
 from co_core_aio.bus import AsyncBusPublisher
+from pydantic import ValidationError
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,7 +70,9 @@ from src.core.validators import replayable_validators
 
 logger = get_logger(__name__)
 
-# Watcher's User-Agent, sent on every command's ``headers`` (replicator#11).
+# Watcher's User-Agent, sent on every command's ``headers`` (replicator#11)
+# unless the item's announced fetch-header policy names one, which replaces it
+# (#457, Archiver's D3; a discontinuity Archiver flags on its side).
 # **Load-bearing for change detection:** fingerprints are UA-sensitive, so this
 # value must keep matching what the pre-cutover inline fetcher sent, or every
 # watched item reports a spurious change on its next check. Do not "tidy" it.
@@ -71,21 +84,137 @@ FETCH_MAX_REISSUES_ENV = "WATCHER_FETCH_MAX_REISSUES"
 DEFAULT_FETCH_MAX_REISSUES = 3
 
 
-def _command_headers(row: FetchCommand) -> dict[str, str]:
-    """The command's ``headers`` map: the pinned UA, plus any snapshotted validators.
+# The names Watcher replays itself (#269): policy never names one
+# (``RegistryAnnouncementEmit`` refuses it), so one in a decoded map is refused
+# here rather than sent on every occasion that has no pair to replay.
+_VALIDATOR_NAMES = frozenset({"if-none-match", "if-modified-since"})
+
+# What the refusal probe builds the Emit around: only the policy and the mode
+# are under test, so the rest is a fixed, valid stand-in.
+_PROBE_AT = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+class UnsendableFetchPolicy(ValueError):
+    """The item's fetch-header policy cannot go on a command (#457).
+
+    The message names headers, never a value: it reaches the log, the audit
+    row and nothing else.
+    """
+
+
+def command_headers(
+    *,
+    fetch_headers: dict | None,
+    request_etag: str | None,
+    request_last_modified: str | None,
+) -> dict[str, str]:
+    """The command's ``headers``: pinned UA < announced policy < validators (#457 D3).
 
     Lower-cased names, one line each. Replicator folds case before merging, but
-    "issuer wins" is only a rule if exactly one field line goes on the wire.
-    Values are replayed **verbatim and unparsed** — ``W/`` prefix, quotes, and
-    the origin's own date spelling included; the send-side guard at snapshot
-    time already refused anything Replicator would not send.
+    "issuer wins" is only a rule if exactly one field line goes on the wire —
+    which is also why an announced ``User-Agent`` replaces the pin rather than
+    riding beside it. Values are sent **verbatim and unparsed**: the validators'
+    ``W/`` prefix, quotes and date spelling included (the send-side guard at
+    snapshot time already refused anything Replicator would not send), and the
+    policy's as Archiver announced them.
     """
     headers = {"user-agent": WATCHER_USER_AGENT}
-    if row.request_etag:
-        headers["if-none-match"] = row.request_etag
-    if row.request_last_modified:
-        headers["if-modified-since"] = row.request_last_modified
+    for name, value in (fetch_headers or {}).items():
+        headers[name.lower()] = value
+    if request_etag:
+        headers["if-none-match"] = request_etag
+    if request_last_modified:
+        headers["if-modified-since"] = request_last_modified
     return headers
+
+
+def command_credential_headers(fetch_credential_headers: dict | None) -> dict[str, str] | None:
+    """The command's ``credential_headers``: the announced map, names lower-cased.
+
+    The references are copied byte for byte; Replicator resolves them on its own
+    host (cannobserv#577). ``None`` and ``{}`` both send ``None``, no credential.
+    """
+    if not fetch_credential_headers:
+        return None
+    return {name.lower(): reference for name, reference in fetch_credential_headers.items()}
+
+
+def _policy_shape_refusal(label: str, policy: dict) -> str | None:
+    """What Watcher refuses before the Emit sees the map (#457 C3).
+
+    A non-string value (the decode is untyped by design), a name twice by case
+    (lower-casing would keep one value silently), and a validator.
+    """
+    not_strings = sorted(name for name, value in policy.items() if not isinstance(value, str))
+    if not_strings:
+        return f"{label} has a value that is not a string: {', '.join(not_strings)}"
+    folded: dict[str, list[str]] = {}
+    for name in policy:
+        folded.setdefault(name.lower(), []).append(name)
+    twice = sorted(spelling for group in folded.values() if len(group) > 1 for spelling in group)
+    if twice:
+        return f"{label} names one header twice: {', '.join(twice)}"
+    validators = sorted(name for name in policy if name.lower() in _VALIDATOR_NAMES)
+    if validators:
+        return (
+            f"{label} names a conditional validator, which Watcher replays itself: "
+            f"{', '.join(validators)}"
+        )
+    return None
+
+
+def fetch_policy_refusal(
+    *,
+    fetch_headers: dict | None,
+    fetch_credential_headers: dict | None,
+    render: str | None,
+) -> str | None:
+    """Why this policy cannot go on a command under ``render``, or ``None``.
+
+    Watcher's own checks first (``_policy_shape_refusal``), then
+    ``ContentFetchCommandEmit`` over the merged set — the same rules the publish
+    meets, so a row minted after this passes cannot raise there. The validators
+    are left out of the probe: under ``browser`` none is replayed, under ``http``
+    the Emit refuses none, and policy may name none (above), so they cannot
+    change the verdict.
+
+    Names only, never a value: the Emit is built with ``hide_input_in_errors``
+    (cannobserv#577), and its messages name headers and the reference rule.
+    """
+    plain = fetch_headers or {}
+    credentials = fetch_credential_headers or {}
+    if not plain and not credentials:
+        return None
+    for label, policy in (("fetch_headers", plain), ("fetch_credential_headers", credentials)):
+        refusal = _policy_shape_refusal(label, policy)
+        if refusal is not None:
+            return refusal
+    try:
+        ContentFetchCommandEmit(
+            occurred_at=_PROBE_AT,
+            command_id="probe",
+            url="https://probe.invalid/",
+            info_source_id="probe",
+            headers=command_headers(
+                fetch_headers=plain, request_etag=None, request_last_modified=None
+            ),
+            credential_headers=credentials,
+            render=render,
+        )
+    except ValidationError as exc:
+        return "; ".join(
+            error["msg"] for error in exc.errors(include_url=False, include_input=False)
+        )
+    return None
+
+
+def _command_headers(row: FetchCommand) -> dict[str, str]:
+    """The row's ``headers``: its snapshotted policy and validators, merged."""
+    return command_headers(
+        fetch_headers=row.fetch_headers,
+        request_etag=row.request_etag,
+        request_last_modified=row.request_last_modified,
+    )
 
 
 async def create_fetch_command(
@@ -109,7 +238,19 @@ async def create_fetch_command(
     was minted to ask. ``force_full_fetch`` is the operator's "check now" — an
     unconditional re-read, whatever is stored. ``check_command_id`` names the
     ``watch_check`` command the occasion answers (#371).
+
+    Raises ``UnsendableFetchPolicy`` **before** any row exists when the item's
+    fetch-header policy cannot go on a command (#457). A row minted with it
+    would raise at every publish and sit ``pending_publish`` for ever, holding
+    the open-command gate shut; the caller records a check failure instead.
     """
+    refusal = fetch_policy_refusal(
+        fetch_headers=watched_item.fetch_headers,
+        fetch_credential_headers=watched_item.fetch_credential_headers,
+        render=watched_item.render,
+    )
+    if refusal is not None:
+        raise UnsendableFetchPolicy(refusal)
     request_etag, request_last_modified = replayable_validators(
         watched_item, now=now, force_full_fetch=force_full_fetch
     )
@@ -131,6 +272,14 @@ async def create_fetch_command(
         # Snapshotted like the validators (#414): the sweep republishes the mode
         # this occasion was minted under, whatever the item says by then.
         render=watched_item.render,
+        # Snapshotted like ``render`` (#457), and copied so a later change to
+        # the item's dict can never reach the row through a shared object.
+        fetch_headers=dict(watched_item.fetch_headers) if watched_item.fetch_headers else None,
+        fetch_credential_headers=(
+            dict(watched_item.fetch_credential_headers)
+            if watched_item.fetch_credential_headers
+            else None
+        ),
     )
     session.add(row)
     return row
@@ -145,7 +294,8 @@ async def publish_fetch_command(
     fields (a hand-built frame dead-letters silently on the consumer side). The
     pinned User-Agent is the replicator#11 byte-continuity guarantee; the
     validators, when present, come off the row (#269) so the sweep's republish
-    is byte-identical to the original command.
+    is byte-identical to the original command. So does the fetch-header policy
+    (#457): the row's snapshot, merged here.
     """
     command = ContentFetchCommandEmit(
         occurred_at=row.issued_at,
@@ -154,6 +304,7 @@ async def publish_fetch_command(
         info_source_id=row.info_source_id,
         headers=_command_headers(row),
         render=row.render,
+        credential_headers=command_credential_headers(row.fetch_credential_headers),
     )
     await AsyncBusPublisher(client).execute(BusPublish(streams.CONTENT_FETCH, to_wire(command)))
     row.status = FetchCommandStatus.IN_FLIGHT

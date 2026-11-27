@@ -206,6 +206,17 @@ class WatchedItem(Base, TimestampMixin):
     # command is byte-identical to one sent before the column existed. Under
     # "browser" no validator is replayed (src/core/validators.py).
     render: Mapped[str | None] = mapped_column(String(16), nullable=True, default=None)
+    # The registry's fetch-header policy for the source (#457, cannobserv#780),
+    # mirrored verbatim by the reconcile: header name -> plain value, and header
+    # name -> ``fetch-<role>`` reference (never a secret). NULL is no policy,
+    # today's command; ``{}`` is stored as NULL. A set Watcher cannot send is
+    # stored too, and the issue path refuses to fetch with it.
+    fetch_headers: Mapped[dict | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True, default=None
+    )
+    fetch_credential_headers: Mapped[dict | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True, default=None
+    )
 
     # Plain unique index since #251 — the column is NOT NULL, so the partial
     # predicate that used to exempt bare rows has nothing left to exempt.

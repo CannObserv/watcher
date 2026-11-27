@@ -38,8 +38,10 @@ implementation detail):
 2. The caller forced a full fetch — the operator's "check now".
 3. Nothing stored, or nothing sendable once guarded.
 4. ``validator_source_key`` disagrees with the item's current key: the URL
-   moved, the ``source_specs`` were re-announced, or the extraction generation
-   changed (the processor's reported version — ``item_generation``).
+   moved, the ``source_specs`` were re-announced, the extraction generation
+   changed (the processor's reported version — ``item_generation``), or the
+   announced fetch-header policy changed (#457: an ``Accept``, cookie or key
+   change changes what a 304 vouches for).
    One key rather than a clear scattered across every writer of those fields —
    a path that forgets to call a clear is the failure mode that ends in a
    silently stale fingerprint.
@@ -150,11 +152,38 @@ def canonical_specs(source_specs: list | None) -> str:
     return json.dumps(source_specs or [], sort_keys=True, separators=(",", ":"), default=str)
 
 
+def canonical_fetch_policy(
+    fetch_headers: dict | None, fetch_credential_headers: dict | None
+) -> str | None:
+    """The fetch-header policy's spelling in the key, or ``None`` with no policy (#457).
+
+    Names folded to lower case, as the wire folds them (``command_headers``), so
+    a case-only rename is the same request and does not move the key. The two
+    maps stay apart: a header moving from plain to credential is a different
+    request. ``None`` and ``{}`` are both no policy.
+    """
+    if not fetch_headers and not fetch_credential_headers:
+        return None
+    return json.dumps(
+        {
+            "plain": {name.lower(): value for name, value in (fetch_headers or {}).items()},
+            "credential": {
+                name.lower(): value for name, value in (fetch_credential_headers or {}).items()
+            },
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
 def validator_source_key(
     *,
     effective_url: str,
     source_specs: list | None,
     generation: str | None,
+    fetch_headers: dict | None = None,
+    fetch_credential_headers: dict | None = None,
 ) -> str:
     """Identity of "what these bytes were going to mean" when a pair was stored.
 
@@ -168,18 +197,37 @@ def validator_source_key(
     not free to change: #274 moved it, which invalidated every stored validator
     pair once (one full fetch per item, which this module already treats as free
     at this fleet size). Moving it back would cost the same again.
+
+    **The fetch-header policy joins only when one is set** (#457). An item with
+    none keeps the exact key it had before, so the deploy that added the term
+    forced no full fetch; ``tests/core/test_validators.py`` pins both spellings.
     """
-    payload = json.dumps(
-        {
-            "url": effective_url,
-            "specs": canonical_specs(source_specs),
-            "generation": generation,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
+    fields = {
+        "url": effective_url,
+        "specs": canonical_specs(source_specs),
+        "generation": generation,
+    }
+    policy = canonical_fetch_policy(fetch_headers, fetch_credential_headers)
+    if policy is not None:
+        fields["headers"] = policy
+    payload = json.dumps(fields, sort_keys=True, separators=(",", ":"), default=str)
     return "sha256:" + hashlib.sha256(payload.encode()).hexdigest()
+
+
+def item_source_key(watched_item) -> str:
+    """The item's current ``validator_source_key``, every term from its columns.
+
+    The one place an item's key is assembled, so the read half
+    (``replayable_validators``) and the write half (``record_validators``)
+    cannot disagree about which columns it covers.
+    """
+    return validator_source_key(
+        effective_url=watched_item.effective_url,
+        source_specs=watched_item.source_specs,
+        generation=item_generation(watched_item),
+        fetch_headers=watched_item.fetch_headers,
+        fetch_credential_headers=watched_item.fetch_credential_headers,
+    )
 
 
 def conditional_get_enabled(watched_item_id: str) -> bool:
@@ -253,12 +301,7 @@ def replayable_validators(
     if etag is None and last_modified is None:
         return (None, None)
 
-    current_key = validator_source_key(
-        effective_url=watched_item.effective_url,
-        source_specs=watched_item.source_specs,
-        generation=item_generation(watched_item),
-    )
-    if watched_item.validator_source_key != current_key:
+    if watched_item.validator_source_key != item_source_key(watched_item):
         return (None, None)
 
     last_full_fetch_at = watched_item.last_full_fetch_at
@@ -296,11 +339,7 @@ def record_validators(
     """
     watched_item.etag = etag
     watched_item.last_modified = last_modified
-    watched_item.validator_source_key = validator_source_key(
-        effective_url=watched_item.effective_url,
-        source_specs=watched_item.source_specs,
-        generation=item_generation(watched_item),
-    )
+    watched_item.validator_source_key = item_source_key(watched_item)
 
 
 def stamp_full_fetch(watched_item, *, now: datetime, blob_expires_at: datetime | None) -> None:

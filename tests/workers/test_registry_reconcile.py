@@ -33,7 +33,7 @@ import pytest
 from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.envelope import from_wire, to_wire
 from co_core.pure.models.changes import RegistryAnnouncementEmit
-from sqlalchemy import select
+from sqlalchemy import select, text
 from ulid import ULID
 
 from src.core.domains import set_domain_active
@@ -64,6 +64,8 @@ def _announcement(
     watch_spec=None,
     occurred_at=NOW,
     render=None,
+    fetch_headers=None,
+    fetch_credential_headers=None,
 ):
     """A decoded ``info.registry`` message.
 
@@ -89,6 +91,8 @@ def _announcement(
             active=active,
             watch_spec=watch_spec if watch_spec is not None else {"schema_version": 1},
             render=render,
+            fetch_headers=fetch_headers,
+            fetch_credential_headers=fetch_credential_headers,
         )
     return from_wire(to_wire(event), topic=streams.INFO_REGISTRY, message_id="1-1").payload
 
@@ -114,6 +118,31 @@ def _announcement_with_raw_render(info_item_id, raw_render, **kwargs):
     frame = to_wire(event)
     payload = json.loads(frame["payload"])
     payload["render"] = raw_render
+    frame["payload"] = json.dumps(payload)
+    return from_wire(frame, topic=streams.INFO_REGISTRY, message_id="1-1").payload
+
+
+def _announcement_with_raw_policy(info_item_id, *, generation=1, info_source_id=None, **raw):
+    """A live announcement carrying fetch-header maps the producer would refuse.
+
+    ``RegistryAnnouncementEmit`` refuses an unsendable set; the decode takes any
+    map (cannobserv#780). As with ``_announcement_with_raw_render``, the frame
+    is built valid, its payload edited, and decoded through the real path.
+    """
+    event = RegistryAnnouncementEmit(
+        occurred_at=NOW,
+        info_item_id=str(info_item_id),
+        generation=generation,
+        info_source_id=info_source_id or str(ULID()),
+        url="https://lcb.wa.gov/notices",
+        source_specs=LIVE_SPECS,
+        active=True,
+        watch_spec={"schema_version": 1},
+        render=raw.pop("render", None),
+    )
+    frame = to_wire(event)
+    payload = json.loads(frame["payload"])
+    payload.update(raw)
     frame["payload"] = json.dumps(payload)
     return from_wire(frame, topic=streams.INFO_REGISTRY, message_id="1-1").payload
 
@@ -1479,3 +1508,144 @@ class TestAnnouncementAudit:
             "old": first,
             "new": second,
         }
+
+
+class TestFetchHeaderPolicy:
+    """#457: the seventh and eighth announced columns (decisions 1 and 2).
+
+    Stored verbatim as announced; ``None`` and ``{}`` both store NULL. A set
+    Watcher cannot send is stored anyway, since the issue path refuses to fetch
+    with it, and it is named at reconcile by its header names alone.
+    """
+
+    SOURCE_ID = str(ULID())
+    PLAIN = {"Accept": "application/json", "User-Agent": "co-archiver/1"}
+    CREDENTIALS = {"X-Api-Key": "fetch-wa-leg-api"}
+
+    def _ann(self, info_item_id, **kwargs):
+        kwargs.setdefault("info_source_id", self.SOURCE_ID)
+        return _announcement(info_item_id, **kwargs)
+
+    async def test_a_create_stores_both_maps_verbatim(self, db_session):
+        info_item_id = ULID()
+        await reconcile_announcement(
+            db_session,
+            self._ann(
+                info_item_id, fetch_headers=self.PLAIN, fetch_credential_headers=self.CREDENTIALS
+            ),
+        )
+        wi = await _get(db_session, info_item_id)
+        assert wi.fetch_headers == self.PLAIN
+        assert wi.fetch_credential_headers == self.CREDENTIALS
+
+    @pytest.mark.parametrize("empty", [None, {}])
+    async def test_no_policy_stores_null(self, db_session, empty):
+        info_item_id = ULID()
+        await reconcile_announcement(
+            db_session,
+            self._ann(info_item_id, fetch_headers=empty, fetch_credential_headers=empty),
+        )
+        await db_session.commit()
+        stored = (
+            await db_session.execute(
+                text(
+                    "SELECT fetch_headers IS NULL, fetch_credential_headers IS NULL "
+                    "FROM watched_items WHERE archiver_info_item_id = :id"
+                ),
+                {"id": str(info_item_id)},
+            )
+        ).one()
+        assert tuple(stored) == (True, True)
+
+    async def test_an_update_clears_a_policy(self, db_session):
+        info_item_id = ULID()
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=1, fetch_headers=self.PLAIN)
+        )
+        await reconcile_announcement(db_session, self._ann(info_item_id, generation=2))
+        assert (await _get(db_session, info_item_id)).fetch_headers is None
+
+    async def test_a_stale_generation_leaves_the_maps_alone(self, db_session):
+        info_item_id = ULID()
+        await reconcile_announcement(
+            db_session,
+            self._ann(
+                info_item_id,
+                generation=2,
+                fetch_headers=self.PLAIN,
+                fetch_credential_headers=self.CREDENTIALS,
+            ),
+        )
+        outcome = await reconcile_announcement(db_session, self._ann(info_item_id, generation=1))
+
+        wi = await _get(db_session, info_item_id)
+        assert outcome == "stale"
+        assert wi.fetch_headers == self.PLAIN
+        assert wi.fetch_credential_headers == self.CREDENTIALS
+
+    async def test_a_policy_change_is_one_recorded_change(self, db_session):
+        info_item_id = ULID()
+        await reconcile_announcement(db_session, self._ann(info_item_id, generation=1))
+        await reconcile_announcement(
+            db_session,
+            self._ann(info_item_id, generation=2, fetch_credential_headers=self.CREDENTIALS),
+        )
+
+        (row,) = await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED)
+        assert row.payload["changes"] == {
+            "fetch_credential_headers": {"old": None, "new": self.CREDENTIALS}
+        }
+
+    async def test_a_reannounced_policy_records_nothing(self, db_session):
+        info_item_id = ULID()
+        for generation in (1, 2):
+            await reconcile_announcement(
+                db_session,
+                self._ann(info_item_id, generation=generation, fetch_headers=self.PLAIN),
+            )
+        assert await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED) == []
+
+    async def test_an_unsendable_set_is_stored_and_named_without_values(self, db_session, caplog):
+        secret = "sk-live-0123456789abcdef"
+        info_item_id = ULID()
+        with caplog.at_level(logging.WARNING, logger="src.workers.registry_reconcile"):
+            outcome = await reconcile_announcement(
+                db_session,
+                _announcement_with_raw_policy(
+                    info_item_id, fetch_credential_headers={"X-Api-Key": secret}
+                ),
+            )
+
+        wi = await _get(db_session, info_item_id)
+        assert outcome == "created"
+        assert wi.fetch_credential_headers == {"X-Api-Key": secret}
+        (record,) = [r for r in caplog.records if "fetch-header policy" in r.getMessage()]
+        assert record.levelno == logging.WARNING
+        assert record.info_item_id == str(info_item_id)
+        assert "X-Api-Key" in record.detail
+        assert all(secret not in str(value) for value in vars(record).values())
+
+    async def test_a_browser_item_with_a_plain_header_is_named(self, db_session, caplog):
+        info_item_id = ULID()
+        with caplog.at_level(logging.WARNING, logger="src.workers.registry_reconcile"):
+            await reconcile_announcement(
+                db_session,
+                _announcement_with_raw_policy(
+                    info_item_id, render="browser", fetch_headers={"Accept": "text/html"}
+                ),
+            )
+        assert [r for r in caplog.records if "fetch-header policy" in r.getMessage()]
+
+    async def test_a_sendable_set_logs_no_warning(self, db_session, caplog):
+        with caplog.at_level(logging.WARNING, logger="src.workers.registry_reconcile"):
+            await reconcile_announcement(
+                db_session,
+                self._ann(
+                    ULID(), fetch_headers=self.PLAIN, fetch_credential_headers=self.CREDENTIALS
+                ),
+            )
+        assert not [
+            r
+            for r in caplog.records
+            if r.name == "src.workers.registry_reconcile" and r.levelno >= logging.WARNING
+        ]

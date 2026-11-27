@@ -172,8 +172,9 @@ def fetch_policy_refusal(
     """Why this policy cannot go on a command under ``render``, or ``None``.
 
     Watcher's own checks first (``_policy_shape_refusal``), then
-    ``ContentFetchCommandEmit`` over the merged set — the same rules the publish
-    meets, so a row minted after this passes cannot raise there. The validators
+    ``ContentFetchCommandEmit`` over the merged set, built by the same two
+    functions the publish uses — so a row minted after this passes cannot raise
+    there. The validators
     are left out of the probe: under ``browser`` none is replayed, under ``http``
     the Emit refuses none, and policy may name none (above), so they cannot
     change the verdict.
@@ -198,7 +199,7 @@ def fetch_policy_refusal(
             headers=command_headers(
                 fetch_headers=plain, request_etag=None, request_last_modified=None
             ),
-            credential_headers=credentials,
+            credential_headers=command_credential_headers(credentials),
             render=render,
         )
     except ValidationError as exc:

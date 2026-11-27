@@ -62,6 +62,8 @@ def _item(**kwargs):
         "blob_expires_at": NOW - timedelta(hours=1) + HORIZON,
         "processor_version": VERSION,
         "render": None,
+        "fetch_headers": None,
+        "fetch_credential_headers": None,
     }
     base.update(kwargs)
     return SimpleNamespace(**base)
@@ -199,6 +201,67 @@ class TestValidatorSourceKey:
         assert _key(generation=None) == (
             "sha256:96acaf40039e62c13181bb083f9cdaf0f2c305d79c2d664f4f8bccefbd7ac4fc"
         )
+
+
+class TestFetchPolicyInTheKey:
+    """#457 decision 4: a header-policy change invalidates the stored pair.
+
+    An ``Accept``, cookie or key change changes what a 304 vouches for. The
+    key gains a ``headers`` entry only when a map is set, so every item
+    without a policy keeps the key ``test_the_spelling_is_pinned`` holds, and
+    the deploy forces no full fetch.
+    """
+
+    def _policy_key(self, plain=None, credentials=None):
+        return validator_source_key(
+            effective_url=URL,
+            source_specs=SPECS,
+            generation=VERSION,
+            fetch_headers=plain,
+            fetch_credential_headers=credentials,
+        )
+
+    @pytest.mark.parametrize("empty", [None, {}])
+    def test_no_policy_is_the_pre_457_key(self, empty):
+        assert self._policy_key(empty, empty) == _key()
+        assert _key() == ("sha256:5d558dd861a6172c18b212972454d1677cfb486200b32d8258d7e417cb679232")
+
+    def test_a_plain_policy_moves_the_key(self):
+        assert self._policy_key({"Accept": "application/json"}) != _key()
+
+    def test_a_credential_policy_moves_the_key(self):
+        assert self._policy_key(None, {"X-Api-Key": "fetch-a"}) != _key()
+
+    def test_a_changed_value_moves_the_key(self):
+        assert self._policy_key({"Accept": "a"}) != self._policy_key({"Accept": "b"})
+
+    def test_a_changed_reference_moves_the_key(self):
+        assert self._policy_key(None, {"X-Api-Key": "fetch-a"}) != self._policy_key(
+            None, {"X-Api-Key": "fetch-b"}
+        )
+
+    def test_the_same_name_in_the_other_map_moves_the_key(self):
+        assert self._policy_key({"X-Api-Key": "fetch-a"}) != self._policy_key(
+            None, {"X-Api-Key": "fetch-a"}
+        )
+
+    def test_a_case_only_rename_does_not_move_the_key(self):
+        """The wire folds names, so the request is the same request."""
+        assert self._policy_key({"Accept": "a"}) == self._policy_key({"accept": "a"})
+
+    def test_map_order_does_not_move_the_key(self):
+        assert self._policy_key({"A": "1", "B": "2"}) == self._policy_key({"B": "2", "A": "1"})
+
+    def test_a_pair_stored_before_a_policy_is_not_replayed(self, monkeypatch):
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        item = _item(fetch_headers={"Accept": "application/json"})
+        assert replayable_validators(item, now=NOW) == (None, None)
+
+    def test_a_pair_recorded_under_the_policy_replays(self, monkeypatch):
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        item = _item(fetch_credential_headers={"X-Api-Key": "fetch-a"})
+        record_validators(item, etag='"x"', last_modified=None, now=NOW)
+        assert replayable_validators(item, now=NOW) == ('"x"', None)
 
 
 class TestItemGeneration:

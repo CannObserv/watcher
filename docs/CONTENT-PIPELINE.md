@@ -34,7 +34,8 @@ What that leaves in the code:
   `command_id` ([`src/core/fetch_commands.py`](../src/core/fetch_commands.py)).
 - **The issue path** — the whole of `check_watched_item` now: fresh ULID per
   occasion, persist-before-publish plus an every-minute sweep, pinned watcher
-  User-Agent, `info_source_id`, one-open-command gate.
+  User-Agent, `info_source_id`, one-open-command gate, the announced fetch-header
+  policy (#457, below).
 - **The `content.blobs` consumer** —
   [`src/workers/fetch_facts.py`](../src/workers/fetch_facts.py), consumer group
   `watcher.blobs` with a single member — derived by `group_name`, never
@@ -291,6 +292,40 @@ sites and the `DomainResponse` fields; the API itself went at #378.
 
 #245 was the cutover's ordering blocker — politeness must not lapse when the
 fetch path becomes a publish path — and shipped first.
+
+### Fetch-header policy on the command (#457)
+
+Archiver announces each source's fetch-header policy on `info.registry`
+(`fetch_headers`, `fetch_credential_headers`, co-core 0.53.2,
+[REGISTRY.md](REGISTRY.md)). `create_fetch_command` snapshots both maps onto the
+row, verbatim, like `render`; `publish_fetch_command` merges them, so the sweep
+republishes byte-identical.
+
+- **`headers`** is Archiver's D3 order, Watcher's half: the pinned
+  `user-agent` < the announced plain map < the replayed validators. An announced
+  `User-Agent`, in any case, **replaces** the pin — a fingerprint discontinuity
+  Archiver flags on its side. Every name goes lower-cased, one line each.
+- **`credential_headers`** is the announced credential map, names lower-cased,
+  references byte for byte. Replicator resolves them on its own host
+  (cannobserv#577); no secret is ever on the frame or in Watcher.
+- **A set Watcher cannot send blocks the fetch** (`fetch_policy_refusal`):
+  a non-string value, a name twice by case, a conditional validator, or
+  anything `ContentFetchCommandEmit` refuses under the item's `render` — any
+  credential or non-UA header under `browser`, a reference off `fetch-<role>`,
+  `user-agent` as a credential, a name in both maps. `create_fetch_command`
+  raises before any row exists, on the issue and every re-issue path; the
+  caller records `fetch_policy_unsendable` (ERROR health, a
+  `check.fetch_failed` audit naming the headers, one `watch_error` on the edge,
+  `last_checked_at` stamped, so the retry waits for the cadence). A re-issue
+  fails its prior row with the same reason. A `watch_check` is answered as a
+  failed check, not a rejection: `CheckRejectionReason` is closed.
+- **Replicator's closes** — `credential_unknown`, `credential_refused`, and
+  `invalid_request_options` for a resolved set over its bounds — are terminal
+  `fetch_failed` reasons and take the ordinary apply path; the last also clears
+  the stored validators.
+
+With no policy the frame is the pre-#457 one plus `"credential_headers":null`,
+which every co-core decodes.
 
 ## Registry linkage (#251) — every WatchedItem is an InfoItem being watched
 

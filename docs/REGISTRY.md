@@ -14,7 +14,7 @@ mechanics (groupless tail, replay from `0-0`, no DLQ, `generation` ordering) are
 
 **What an announcement owns**, and nothing else: `archiver_info_source_id`,
 `effective_url`, `source_specs`, `announced_schedule_config`, `is_active`,
-`render` (#414) — plus
+`render` (#414), `fetch_headers`, `fetch_credential_headers` (#457) — plus
 `domain_name` and its two denormalized facts, and **only when the host actually
 moves**. Re-deriving the domain on every announcement would clear a
 `domain_suspended` an operator set, which is host-level mechanism the registry has
@@ -24,7 +24,7 @@ no opinion on — the `src.ops.suspend_domain` break-glass (#372) relies on it.
 audit row. A create emits `watched_item.created` with `source: "registry"` —
 parity with the API create path (deleted at #378), so a registry-born item does not read as having
 appeared from nowhere. An update emits `watched_item.announcement_applied`
-carrying `changes: {column: {old, new}}` over the six owned columns above,
+carrying `changes: {column: {old, new}}` over the eight owned columns above,
 **only when that diff is non-empty**: the hourly snapshot re-announces every item
 unchanged, and an event per item per hour would bury the one that matters. The
 generation guard returns before any write, so the groupless replay from `0-0` at
@@ -50,7 +50,7 @@ acknowledgement (#274) went with the dashboard (#377), and #380 dropped its
 `last_observed_at`, `last_changed_at`, `last_full_fetch_at`,
 `domain_suspended`, `content_media_type`, the validator state (`etag`,
 `last_modified`, `validator_source_key`), audit rows, fetch-command history —
-including each command's own `render` snapshot.
+including each command's own `render` and fetch-header snapshots.
 Pinned by `TestLocalColumnsSurvive` — "we did not write it" is a weaker
 guarantee than "a test fails if someone does". #380 dropped the rest of the old
 list: `last_reviewed_at`, `archived_at`, `throttle_floor_interval`,
@@ -80,6 +80,19 @@ freeze its specs and cadence. A flip is one `changes.render` entry and no
 re-baseline: the rendered bytes really differ, so the next fetch reads as a
 change, and Archiver records the flip on its side (CannObserv/archiver#379). A
 CHECK on the column admits only those two modes or NULL.
+
+**`fetch_headers` / `fetch_credential_headers` are the source's fetch-header
+policy (#457, cannobserv#780)**: header name → plain value, and header name →
+`fetch-<role>` reference, already resolved Domain < InfoSource by Archiver
+(archiver#376). Stored **verbatim**; `null` and `{}` both store NULL, no policy.
+Unlike `render`, a set Watcher cannot send is **stored anyway**: keeping the old
+set could fetch with a stale credential, or none. The issue path refuses to
+fetch with it (`fetch_policy_unsendable`,
+[CONTENT-PIPELINE.md](CONTENT-PIPELINE.md)), and the reconcile logs a WARNING
+naming the headers, never a value. Archiver's producer refuses every such set,
+so the branch is for a buggy or older one. A change is a `changes` entry with
+the maps in it (plain values and references; by contract, never a secret) and moves the
+validator key ([CONDITIONAL-GET.md](CONDITIONAL-GET.md)).
 
 **A local pause is not offered.** `active` applies unconditionally, and
 item-level pause lives in Archiver's control plane alone. A control that

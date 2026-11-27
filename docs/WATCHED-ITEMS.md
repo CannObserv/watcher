@@ -49,7 +49,11 @@ Replicator fetches the item: `http`, `browser`, or NULL for "no opinion yet",
 which fetches over `http`; mirrored from the announcement, snapshotted onto each
 command and sent as `ContentFetchCommand.render`, CHECK-limited to those modes;
 no validator replays under `browser` —
-[REGISTRY.md](REGISTRY.md), [CONDITIONAL-GET.md](CONDITIONAL-GET.md)). **Schedule resolution is announced, else the system default (#375, F2).**
+[REGISTRY.md](REGISTRY.md), [CONDITIONAL-GET.md](CONDITIONAL-GET.md));
+`fetch_headers` / `fetch_credential_headers` (#457 — the source's announced
+fetch-header policy, verbatim, NULL for none; snapshotted onto each command and
+merged into its `headers` / `credential_headers` —
+[CONTENT-PIPELINE.md](CONTENT-PIPELINE.md)). **Schedule resolution is announced, else the system default (#375, F2).**
 `resolved_schedule_config` (`src/core/scheduling/resolution.py`) returns
 `announced_schedule_config` when set (an explicit `{}` passes through as "no
 interval"), otherwise `SYSTEM_DEFAULT_SCHEDULE_CONFIG` (`1d`). Archiver resolves

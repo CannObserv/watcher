@@ -175,6 +175,16 @@ async def process_watch_check_message(
     result = await issue_fetch_command(
         session, item, bus_client, force_full_fetch=True, check_command_id=command.command_id
     )
+    if result.get("refused"):
+        # #457: the item's fetch-header policy cannot be sent, so nothing was
+        # fetched. Not a rejection — no token for it, and the item is not
+        # paused or busy — but a failed check, recorded with this command's id,
+        # which republishes the outcome as any commanded fetch failure does.
+        logger.info(
+            "watch_check answered by a failed check: the fetch-header policy cannot be sent",
+            extra={"check_command_id": command.command_id, "watched_item_id": str(item.id)},
+        )
+        return "refused_fetch_policy"
     if result.get("skipped"):
         # CR 1: the issue path re-reads the gate, and a scheduled check that
         # committed after pre-flight shuts it. Nothing was issued, so the audit

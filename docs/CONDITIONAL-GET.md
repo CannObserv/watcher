@@ -53,10 +53,16 @@ one pure predicate. Listed by subject; evaluation order is not a contract:
 | The gate (`WATCHER_CONDITIONAL_GET_ENABLED`) is off for this item | Off by default; a ULID list is the canary position, `true` the fleet |
 | The caller forced a full fetch | Check-now is a real re-read; so is the re-fetch after `input_unreadable` (#361) |
 | Nothing stored, or nothing **sendable** | The send-side guard mirrors Replicator's refusal list (printable US-ASCII, ≤1024, non-blank). A command it would refuse costs an ERROR health transition before any request goes out |
-| `validator_source_key` disagrees with the item's current key | The URL moved, `source_specs` were re-announced, or the extraction generation changed. One key rather than a clear scattered across every writer of those fields |
+| `validator_source_key` disagrees with the item's current key | The URL moved, `source_specs` were re-announced, the extraction generation changed, or the announced fetch-header policy changed (#457). One key rather than a clear scattered across every writer of those fields |
 | No `last_full_fetch_at` | Unknown provenance is not replayable |
 | The pair is older than `WATCHER_VALIDATOR_MAX_AGE_HOURS` (default 168) | The residual net below |
 | No `blob_expires_at`, or half of it has elapsed since `last_full_fetch_at` | A 304 renews no blob — see below (#339) |
+
+**The fetch-header policy joins the key only when one is set (#457).** An
+`Accept`, cookie or key change changes what a 304 vouches for. Names are folded
+as on the wire, so a case-only rename moves nothing; the two maps stay apart.
+An item with no policy keeps its pre-#457 key, so that deploy forced no full
+fetch (`TestFetchPolicyInTheKey`).
 
 **The fingerprint-continuity question, answered.** A 304 produces no bytes, so
 nothing is extracted and no fingerprint is recomputed — the item's fingerprint is

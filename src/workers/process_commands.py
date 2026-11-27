@@ -32,6 +32,7 @@ from src.core.fetch_commands import fetch_max_reissues
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType
 from src.core.models.fetch_command import (
+    FETCH_POLICY_UNSENDABLE_REASON,
     PROCESSING_FAILED_REASON,
     PROCESSING_TIMEOUT_REASON,
     FetchCommand,
@@ -292,6 +293,10 @@ async def _decide(
         new_id = await reissue_fetch_command(
             session, watched_item, fetch, bus_client, lineage_count=lineage, force_full_fetch=True
         )
+        if new_id is None:
+            # The fetch-header policy turned unsendable (#457): the lineage was
+            # failed and the check recorded, so there is nothing to re-fetch.
+            return {"refused": FETCH_POLICY_UNSENDABLE_REASON}
         return {"reissued": new_id}
 
     if row.failure_reason == DEAD_LETTERED_REASON:

@@ -19,17 +19,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.bus import BUS_REDIS_URL_ENV, get_shared_bus_client
 from src.core.database import get_session_factory
 from src.core.fetch_commands import (
+    UnsendableFetchPolicy,
     create_fetch_command,
     has_open_command,
     publish_fetch_command,
 )
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
+from src.core.models.fetch_command import FETCH_POLICY_UNSENDABLE_REASON
 from src.core.models.watched_item import WatchedItem
 from src.core.scheduling.cadence import compute_next_check
 from src.core.scheduling.resolution import resolved_schedule_config
 from src.core.ulids import parse_canonical_ulid
 from src.workers import bp
+from src.workers.fetch_commands import fail_unsendable_policy
 
 logger = get_logger(__name__)
 
@@ -57,6 +60,11 @@ async def issue_fetch_command(
     Shared with the ``info.watch-check`` consumer (#371), which passes the
     command's id as ``check_command_id``. Anything the caller staged on
     ``session`` commits with the row.
+
+    An item whose fetch-header policy cannot be sent issues nothing (#457): the
+    check is recorded as failed (``fail_unsendable_policy``) and the result is
+    ``{"refused": "fetch_policy_unsendable"}`` — deliberately not ``skipped``,
+    which the watch-check consumer reads as ``fetch_open``.
     """
     if await has_open_command(session, watched_item.id):
         logger.info(
@@ -66,13 +74,19 @@ async def issue_fetch_command(
         return {"skipped": True, "reason": "command_in_flight"}
 
     now = datetime.now(UTC)
-    row = await create_fetch_command(
-        session,
-        watched_item,
-        now=now,
-        force_full_fetch=force_full_fetch,
-        check_command_id=check_command_id,
-    )
+    try:
+        row = await create_fetch_command(
+            session,
+            watched_item,
+            now=now,
+            force_full_fetch=force_full_fetch,
+            check_command_id=check_command_id,
+        )
+    except UnsendableFetchPolicy as exc:
+        await fail_unsendable_policy(
+            session, watched_item, now=now, detail=str(exc), check_command_id=check_command_id
+        )
+        return {"refused": FETCH_POLICY_UNSENDABLE_REASON}
     # Operator breadcrumb on the item's Recent Activity: the check is now a
     # command in flight; the apply-side events pick the story up (#241 CR-8).
     audit(

@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.bus import BUS_REDIS_URL_ENV, get_shared_bus_client
 from src.core.database import get_session_factory
 from src.core.fetch_commands import (
+    UnsendableFetchPolicy,
     create_fetch_command,
     fetch_command_timeout_seconds,
     fetch_max_reissues,
@@ -36,6 +37,7 @@ from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.fetch_command import (
     BLOB_UNREADABLE_REASON,
+    FETCH_POLICY_UNSENDABLE_REASON,
     INVALID_REQUEST_OPTIONS_REASON,
     PROCESSING_FAILED_REASON,
     FetchCommand,
@@ -269,6 +271,38 @@ async def publish_pending_fetch_commands(
             await ctx.__aexit__(None, None, None)
 
 
+async def fail_unsendable_policy(
+    session: AsyncSession,
+    watched_item: WatchedItem,
+    *,
+    now: datetime,
+    detail: str,
+    check_command_id: str | None = None,
+) -> None:
+    """Record a check that issued no command: the policy cannot be sent (#457).
+
+    Draft B's safe default, decision 2: never fetch without the credential, or
+    with a stale one. ``record_check_failure`` gives ERROR health with
+    ``fetch_policy_unsendable``, an audit row, one ``watch_error`` on the edge,
+    and a stamped ``last_checked_at`` — so the next try waits for the item's
+    cadence, and a corrected announcement heals it then. ``detail`` names
+    headers, never a value (``fetch_policy_refusal``).
+    """
+    logger.warning(
+        "fetch-header policy cannot be sent — failing the check without a fetch",
+        extra={"watched_item_id": str(watched_item.id), "detail": detail},
+    )
+    await record_check_failure(
+        session,
+        watched_item,
+        now=now,
+        audit_event=EventType.CHECK_FETCH_FAILED,
+        audit_kwargs={"reason": FETCH_POLICY_UNSENDABLE_REASON, "detail": detail},
+        health_reason=FETCH_POLICY_UNSENDABLE_REASON,
+        check_command_id=check_command_id,
+    )
+
+
 async def reissue_fetch_command(
     session,
     watched_item,
@@ -277,7 +311,7 @@ async def reissue_fetch_command(
     *,
     lineage_count: int | None = None,
     force_full_fetch: bool = False,
-) -> str:
+) -> str | None:
     """Re-issue an intent under a fresh ``command_id`` (MUST-6: a timeout or a
     lost blob is grounds to re-issue, never to conclude failure).
 
@@ -289,24 +323,41 @@ async def reissue_fetch_command(
     (#361).
     Persist-commit-publish, like the original issue; a failed publish leaves
     ``pending_publish`` for the sweep.
-    Returns the new ``command_id``.
+    Returns the new ``command_id``, or ``None`` when the item's fetch-header
+    policy has become unsendable since the issue (#457 C1): the lineage ends
+    there, ``prior`` failed with ``fetch_policy_unsendable`` and the check
+    recorded as failed, rather than a row whose Emit raises at every sweep.
     """
     now = datetime.now(UTC)
     count = prior.reissue_count if lineage_count is None else lineage_count
-    row = await create_fetch_command(
-        session,
-        watched_item,
-        now=now,
-        intent_id=prior.intent_id,
-        reissue_count=count + 1,
-        # The forced intent is lineage too (CR-1): a check-now that stalled and
-        # was reaped must not come back as a conditional GET the origin can
-        # answer 304, leaving the operator with no bytes and no signal.
-        force_full_fetch=force_full_fetch or prior.forced_full_fetch,
-        # The commanding watch_check is lineage too (#371): its completion
-        # republishes, whichever command in the lineage completes it.
-        check_command_id=prior.check_command_id,
-    )
+    try:
+        row = await create_fetch_command(
+            session,
+            watched_item,
+            now=now,
+            intent_id=prior.intent_id,
+            reissue_count=count + 1,
+            # The forced intent is lineage too (CR-1): a check-now that stalled and
+            # was reaped must not come back as a conditional GET the origin can
+            # answer 304, leaving the operator with no bytes and no signal.
+            force_full_fetch=force_full_fetch or prior.forced_full_fetch,
+            # The commanding watch_check is lineage too (#371): its completion
+            # republishes, whichever command in the lineage completes it.
+            check_command_id=prior.check_command_id,
+        )
+    except UnsendableFetchPolicy as exc:
+        prior.status = FetchCommandStatus.FAILED
+        prior.failure_reason = FETCH_POLICY_UNSENDABLE_REASON
+        prior.failure_detail = str(exc)
+        prior.applied_at = now
+        await fail_unsendable_policy(
+            session,
+            watched_item,
+            now=now,
+            detail=str(exc),
+            check_command_id=prior.check_command_id,
+        )
+        return None
     await session.commit()
     # Shared, lifespan-owned client (CR-4) — never closed here.
     publish_client = client if client is not None else get_shared_bus_client()
@@ -772,8 +823,10 @@ async def reap_fetch_commands(
                 capped += 1
                 continue
             row.status = FetchCommandStatus.EXPIRED
-            await reissue_fetch_command(db, watched_item, row, bus_client)
-            reissued += 1
+            # None: the policy turned unsendable, and the lineage was failed
+            # instead (#457) — logged there, and no re-issue to count.
+            if await reissue_fetch_command(db, watched_item, row, bus_client) is not None:
+                reissued += 1
         if reissued or capped or reapplied:
             logger.info(
                 "reaped stalled fetch commands",

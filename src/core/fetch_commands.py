@@ -70,7 +70,9 @@ from src.core.validators import replayable_validators
 
 logger = get_logger(__name__)
 
-# Watcher's User-Agent, sent on every command's ``headers`` (replicator#11).
+# Watcher's User-Agent, sent on every command's ``headers`` (replicator#11)
+# unless the item's announced fetch-header policy names one, which replaces it
+# (#457, Archiver's D3; a discontinuity Archiver flags on its side).
 # **Load-bearing for change detection:** fingerprints are UA-sensitive, so this
 # value must keep matching what the pre-cutover inline fetcher sent, or every
 # watched item reports a spurious change on its next check. Do not "tidy" it.
